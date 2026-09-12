@@ -1,0 +1,11 @@
+node_modules/
+inventree-data/
+backups/
+.build/
+*.config.json
+416MES_台账_*.xlsx
+nec-wip-export.json
+package.json
+package-lock.json
+*.ps1
+*.md

@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0E1A55">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<title>场务 SIG 招募令 · 常州工NEC 智能仓库MES</title>
+<style>
+:root{
+  --navy0:#0E1A55;--navy1:#172A88;--cyan:#00B0F0;--ink:#eaf0ff;--dim:#8ea2d8;
+  --blue:#1f6fd6;--green:#2d9d4f;--amber:#e8a020;--teal:#0891b2;--pink:#be185d;--red:#d33a2c;--purple:#7c4dbd;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;color:var(--ink);min-height:100vh;
+  background:radial-gradient(1200px 600px at 85% -5%,#1d2f7a 0%,transparent 55%),
+             radial-gradient(900px 500px at -10% 30%,#14226b 0%,transparent 50%),
+             linear-gradient(160deg,#0a133d 0%,#0E1A55 55%,#0a1030 100%);}
+a{color:var(--cyan);text-decoration:none;}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px;}
+/* ===== 顶栏 ===== */
+header{padding:26px 0 0;}
+.topline{display:flex;align-items:center;gap:12px;}
+.topline img{height:34px;width:auto;}
+.topline .brand{letter-spacing:4px;font-size:13px;color:var(--dim);}
+.topline .chip{margin-left:auto;font-size:12px;padding:5px 14px;border-radius:20px;background:rgba(0,176,240,.12);border:1px solid rgba(0,176,240,.35);color:var(--cyan);}
+.hero{padding:44px 0 30px;}
+.hero .cmd{color:#3ddc84;font-size:15px;letter-spacing:1px;margin-bottom:14px;font-family:Consolas,monospace;}
+.hero .cmd::after{content:"▓";margin-left:8px;animation:blink 1s steps(1) infinite;}
+@keyframes blink{50%{opacity:0;}}
+.hero h1{font-size:52px;letter-spacing:2px;line-height:1.15;}
+.hero h1 em{font-style:normal;color:var(--cyan);text-shadow:0 0 24px rgba(0,176,240,.45);}
+.hero .sub{margin-top:14px;color:var(--dim);font-size:15px;letter-spacing:1px;}
+.hero .sub b{color:var(--ink);}
+/* ===== 招募码（标签风） ===== */
+.recruit{display:grid;grid-template-columns:1.2fr .8fr;gap:26px;align-items:stretch;margin-bottom:34px;}
+.label-card{background:#fff;color:#101528;border-radius:10px;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.45);display:flex;flex-direction:column;}
+.label-card .bar{height:46px;background:linear-gradient(100deg,#0E1A55 0%,#172A88 80%);border-bottom:4px solid var(--cyan);
+  color:#fff;display:flex;align-items:center;gap:10px;padding:0 16px;font-weight:bold;font-size:17px;}
+.label-card .bar img{height:26px;width:auto;}
+.label-card .bar .chipdot{width:12px;height:12px;border-radius:3px;background:var(--purple);box-shadow:0 0 0 2px rgba(255,255,255,.5);}
+.label-card .bar .tag{margin-left:auto;letter-spacing:2px;}
+.label-card .lbody{display:flex;gap:18px;padding:18px 18px 14px;flex:1;}
+.label-card .lbody .qr{flex:none;width:190px;height:190px;border:1px solid #e3e7f0;border-radius:6px;padding:6px;}
+.label-card .lbody .qr img{width:100%;height:100%;display:block;}
+.label-card .code{font-size:34px;font-weight:bold;letter-spacing:1px;margin-bottom:10px;}
+.label-card .attr{font-size:14.5px;line-height:2;color:#2a3350;}
+.label-card .attr b{color:#101528;}
+.label-card .meta{margin-top:8px;font-size:12.5px;color:#7a84a0;text-align:right;}
+.label-card .foot{height:30px;background:#0E1A55;color:#fff;font-size:12.5px;font-weight:bold;letter-spacing:1px;
+  display:flex;justify-content:space-between;align-items:center;padding:0 16px;}
+.label-card .foot .url{color:var(--cyan);font-weight:normal;}
+/* 右侧信息 */
+.side{display:flex;flex-direction:column;gap:14px;}
+.panel{background:rgba(255,255,255,.05);border:1px solid rgba(142,162,216,.25);border-radius:10px;padding:16px 18px;}
+.panel h3{font-size:15px;color:var(--cyan);letter-spacing:2px;margin-bottom:8px;}
+.panel p,.panel li{font-size:13.5px;color:#c6d2f2;line-height:1.9;}
+.panel ul{padding-left:18px;}
+.cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:auto;}
+.btn{display:inline-block;padding:10px 22px;border-radius:8px;font-size:14px;font-weight:bold;letter-spacing:1px;}
+.btn.primary{background:var(--cyan);color:#06203a;box-shadow:0 6px 20px rgba(0,176,240,.35);}
+.btn.ghost{border:1px solid rgba(142,162,216,.45);color:var(--ink);}
+/* ===== 色板 ===== */
+.section-title{font-size:13px;letter-spacing:3px;color:var(--dim);margin:8px 0 12px;display:flex;align-items:center;gap:10px;}
+.section-title::after{content:"";flex:1;height:1px;background:rgba(142,162,216,.25);}
+.swatches{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:30px;}
+.sw{border-radius:8px;padding:12px 14px;font-size:13px;font-weight:bold;color:#fff;display:flex;justify-content:space-between;align-items:center;}
+.sw small{font-weight:normal;opacity:.85;letter-spacing:1px;}
+/* ===== 海报 ===== */
+.poster{display:grid;grid-template-columns:280px 1fr;gap:22px;align-items:center;margin-bottom:36px;}
+.poster img{width:100%;border-radius:10px;border:1px solid rgba(142,162,216,.3);box-shadow:0 14px 40px rgba(0,0,0,.4);}
+footer{border-top:1px solid rgba(142,162,216,.2);padding:18px 0 26px;text-align:center;font-size:12px;color:var(--dim);letter-spacing:1px;}
+@media(max-width:860px){.recruit{grid-template-columns:1fr;}.poster{grid-template-columns:1fr;}.hero h1{font-size:34px;}.label-card .lbody{flex-direction:column;}}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap topline">
+    <img src="nec-logo-white.png" alt="NEC">
+    <span class="brand">CHANGZHOU · NEC WORKSHOP</span>
+    <span class="chip">416MES 前端在线</span>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="hero">
+    <div class="cmd">&gt; 玉衡A416&nbsp;&nbsp;DD有没有空选手？</div>
+    <h1>场务 <em>SIG</em> 招募令</h1>
+    <div class="sub">NEC 仓库 MES 仓储管理系统 · <b>招队友，不招观众</b></div>
+  </div>
+
+  <div class="recruit">
+    <!-- 招募码：416MES 标签风 -->
+    <div class="label-card">
+      <div class="bar"><img src="nec-logo-white.png" alt="NEC"><span class="chipdot"></span>416MES · 招募码<span class="tag">SIG</span></div>
+      <div class="lbody">
+        <div class="qr"><img src="recruit-qr.png" alt="场务SIG招募群二维码"></div>
+        <div>
+          <div class="code">SIG-A416-001</div>
+          <div class="attr">
+            <div><b>类型：</b>场务 Sig · 招队友</div>
+            <div><b>对象：</b>极致审美的主美 / 设计师<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;对仓储管理 MES 感兴趣的 N 个人</div>
+            <div><b>集结：</b>玉衡 A416 · 半小时线下 Workshop</div>
+          </div>
+          <div class="meta">打印 2026-09-12 · 群码有效至 09-19</div>
+        </div>
+      </div>
+      <div class="foot"><span>BUILT TO DAWN · KEEP BUILDING&#9608;</span><span class="url">newenergycoder.club</span></div>
+    </div>
+
+    <!-- 招募信息 -->
+    <div class="side">
+      <div class="panel">
+        <h3>// 我们要谁</h3>
+        <ul>
+          <li>极致审美的<b>主美 / 设计师</b>：标签、海报、主视觉，一套色板打天下</li>
+          <li>对<b>仓储管理 MES</b> 感兴趣的同学：前端 / 数据 / 流程，真仓库给你练手</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3>// 怎么加入</h3>
+        <p>① 微信扫左侧招募码进群（有效至 09-19）<br>② 玉衡 A416 半小时线下 Workshop 集结<br>③ 先逛系统：<a href="index.html">mes.newenergycoder.club</a>，SHOW, DON'T TELL</p>
+      </div>
+      <div class="cta">
+        <a class="btn primary" href="home.html">进入系统 →</a>
+        <a class="btn ghost" href="recruit-poster.jpg" target="_blank" rel="noopener">查看原版海报</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-title">七类标签 · 一套色板 · LABEL COLOR SYSTEM</div>
+  <div class="swatches">
+    <div class="sw" style="background:#1f6fd6">库位码<small>LOC</small></div>
+    <div class="sw" style="background:#2d9d4f">容器码<small>CTN</small></div>
+    <div class="sw" style="background:#e8a020">物料码<small>MAT</small></div>
+    <div class="sw" style="background:#0891b2">物品码<small>ITM</small></div>
+    <div class="sw" style="background:#be185d">手册码<small>MAN</small></div>
+    <div class="sw" style="background:#d33a2c">工单码<small>WIP</small></div>
+    <div class="sw" style="background:#7c4dbd">NEC工单<small>SIG</small></div>
+  </div>
+
+  <div class="section-title">系统已上线，真仓库在跑 · SHOW, DON'T TELL</div>
+  <div class="poster">
+    <a href="recruit-poster.jpg" target="_blank" rel="noopener"><img src="recruit-poster.jpg" alt="场务SIG招募海报"></a>
+    <div class="panel">
+      <h3>// 已经在跑的能力</h3>
+      <ul>
+        <li>七类标签打印：60×40 热敏满版 / A4 整版 3×7 密排，高对比 / 彩色双模式</li>
+        <li>物料台账 + 人员台账：Excel 导入导出、JSON 全量备份合并、库存流水可审计</li>
+        <li>扫码出入库闭环：没有扫码动作，库存数不变</li>
+        <li>NEC 小工单：RW 任务 / CG 采购 / WX 维修，可推送飞书多维表格 + 群通知</li>
+        <li>InvenTree 集成镜像：物料 / 库位 / 库存网页后台</li>
+      </ul>
+      <p style="margin-top:10px">入口：<a href="home.html">mes.newenergycoder.club</a> · 扫码入位 →</p>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <div class="wrap">NEC WORKSHOP · 416MES RECRUITING · LABEL SIG-A416-001 · BUILT TO DAWN · KEEP BUILDING&#9608;</div>
+</footer>
+</body>
+</html>

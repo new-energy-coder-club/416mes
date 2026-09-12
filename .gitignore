@@ -1,0 +1,11 @@
+node_modules/
+inventree-data/
+inventree-sync.config.json
+nec-sync.config.json
+416MES_台账_*.xlsx
+
+.vercel
+feishu-backend.config.json
+.build/
+backups/
+nec-wip-export.json

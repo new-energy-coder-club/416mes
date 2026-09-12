@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#16233a">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="apple-touch-icon" href="icon.svg">
+<title>常州工NEC · 智能仓库MES</title>
+<style>
+:root{
+  --blue:#1f6fd6;--green:#2d9d4f;--amber:#e8a020;--red:#d33a2c;--purple:#7c4dbd;
+  --ink:#1c2534;--line:#dfe4ec;--bg:#eef1f6;--navy:#16233a;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;display:flex;flex-direction:column;}
+/* ===== 顶栏 ===== */
+header{background:linear-gradient(115deg,#0E1A55 0%,#172A88 55%,#1f6fd6 120%);color:#fff;padding:34px 24px 30px;position:relative;overflow:hidden;}
+header::after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:#00B0F0;}
+header .wrap{max-width:1080px;margin:0 auto;}
+header .eyebrow{font-size:13px;letter-spacing:4px;color:#00B0F0;margin-bottom:8px;font-weight:bold;}
+header h1{font-size:30px;letter-spacing:2px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+header h1 .logo{width:44px;height:44px;border-radius:10px;background:rgba(255,255,255,.12);display:inline-flex;align-items:center;justify-content:center;}
+header h1 .logo img{height:30px;width:auto;}
+header .sub{margin-top:10px;font-size:13px;color:#b9c7dd;line-height:1.8;}
+.status-row{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;}
+.chip{display:inline-flex;align-items:flex-start;gap:6px;font-size:12px;padding:4px 12px;border-radius:20px;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.18);max-width:100%;}
+.chip .dot{width:8px;height:8px;border-radius:50%;background:#8a94a6;flex:none;margin-top:4px;}
+.chip .t{min-width:0;overflow-wrap:anywhere;}
+.chip.ok .dot{background:#3ddc84;box-shadow:0 0 6px #3ddc84;}
+.chip.bad .dot{background:#ff6b5e;box-shadow:0 0 6px #ff6b5e;}
+/* ===== 主体 ===== */
+main{flex:1;max-width:1080px;margin:0 auto;padding:26px 24px 40px;width:100%;}
+.section-title{font-size:14px;color:#5a6b84;margin:22px 0 12px;letter-spacing:2px;display:flex;align-items:center;gap:8px;}
+.section-title::after{content:"";flex:1;height:1px;background:var(--line);}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:8px;transition:transform .15s,box-shadow .15s,border-color .15s;position:relative;overflow:hidden;}
+.card:hover{transform:translateY(-3px);box-shadow:0 8px 24px rgba(22,35,58,.12);border-color:#b9c8dd;}
+.card .icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;color:#fff;}
+.card h3{font-size:16px;}
+.card p{font-size:12.5px;color:#6b7a90;line-height:1.7;}
+.card .go{margin-top:auto;font-size:12px;color:var(--blue);font-weight:bold;}
+.c-blue .icon{background:var(--blue);}   .c-blue{border-top:3px solid var(--blue);}
+.c-green .icon{background:var(--green);} .c-green{border-top:3px solid var(--green);}
+.c-amber .icon{background:var(--amber);} .c-amber{border-top:3px solid var(--amber);}
+.c-red .icon{background:var(--red);}     .c-red{border-top:3px solid var(--red);}
+.c-purple .icon{background:var(--purple);}.c-purple{border-top:3px solid var(--purple);}
+.c-navy .icon{background:var(--navy);}   .c-navy{border-top:3px solid var(--navy);}
+/* 宽卡：InvenTree */
+.card.wide{grid-column:1/-1;flex-direction:row;align-items:center;gap:18px;background:linear-gradient(120deg,#fff 60%,#f2f7ff);}
+.card.wide .icon{width:56px;height:56px;font-size:28px;flex:none;}
+.card.wide .meta{flex:1;min-width:0;}
+.card.wide .tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;}
+.tag{font-size:11px;background:#eef2f7;border:1px solid var(--line);border-radius:4px;padding:2px 8px;color:#556;}
+/* 运维面板 */
+.ops{background:#16233a;border-radius:12px;padding:18px 20px;color:#c8d4e6;font-size:13px;line-height:2;}
+.ops h3{color:#fff;font-size:15px;margin-bottom:6px;}
+.ops code{background:#0e1727;border:1px solid #2b3b57;border-radius:5px;padding:2px 8px;font-family:Consolas,monospace;font-size:12px;color:#8fd3a8;user-select:all;}
+.ops .step{display:flex;gap:10px;align-items:baseline;}
+.ops .num{flex:none;width:20px;height:20px;border-radius:50%;background:var(--blue);color:#fff;font-size:11px;display:inline-flex;align-items:center;justify-content:center;transform:translateY(3px);}
+footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1px solid var(--line);}
+/* 运营看板 */
+#dash{display:none;}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px;}
+.tile{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;text-align:center;}
+.tile .num{font-size:26px;font-weight:bold;color:var(--navy);line-height:1.2;}
+.tile .lbl{font-size:12px;color:#6b7a90;margin-top:2px;}
+.tile.warn .num{color:var(--red);}
+.tile.warn{border-color:#f2b8b0;background:#fffafa;}
+.lowlist{background:#fff;border:1px solid #f2d8a0;border-radius:12px;padding:12px 16px;}
+.lowlist h4{font-size:13px;color:#8a6a1a;margin-bottom:8px;}
+.lowlist .item{display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:6px 0;border-top:1px dashed var(--line);}
+.lowlist .item:first-of-type{border-top:none;}
+.lowlist .q{font-weight:bold;color:var(--red);}
+.lowlist a{font-size:12px;color:var(--blue);text-decoration:none;white-space:nowrap;margin-left:10px;}
+@media(max-width:560px){header h1{font-size:22px;} .card.wide{flex-direction:column;align-items:flex-start;} header{padding:24px 16px;} main{padding:18px 14px 30px;} .ops{font-size:12px;} .ops code{font-size:11px;word-break:break-all;}}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="eyebrow">BUILT TO DAWN · KEEP BUILDING&#9608;</div>
+    <h1><span class="logo"><img src="nec-logo-white.png" alt="NEC"></span>常州工NEC · 智能仓库MES</h1>
+    <div class="sub">七类标签（库位 / 容器 / 物料 / 物品 / 手册 / 工单 / NEC工单）· 扫码出入库闭环 · Excel 台账 · InvenTree 集成镜像<br>Design by 常州工 NEC · newenergycoder.club</div>
+    <div class="status-row">
+      <span class="chip" id="chip-mes"><span class="dot"></span>416MES 前端检测中…</span>
+      <span class="chip" id="chip-inv"><span class="dot"></span>InvenTree 后端检测中…</span>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- ========== 运营看板（读本设备 localStorage，无数据时隐藏） ========== -->
+  <div id="dash">
+    <div class="section-title">📊 运营看板（本设备实时数据）</div>
+    <div class="tiles" id="dashTiles"></div>
+    <div class="lowlist" id="lowList" style="display:none"></div>
+  </div>
+
+  <div class="section-title">📦 416MES 单机作业端</div>
+  <div class="grid">
+    <a class="card c-blue" href="index.html#ledger">
+      <div class="icon">📋</div><h3>物料台账</h3>
+      <p>主数据维护：编码不变、属性可变。支持 Excel 导入导出、闲鱼 XY 编号登记。</p>
+      <span class="go">进入 →</span>
+    </a>
+    <a class="card c-green" href="index.html#label">
+      <div class="icon">🏷️</div><h3>标签打印</h3>
+      <p>60×40mm 三防标签，适配汉印 N41，支持 A4 整版。库位蓝 / 容器绿 / 物料黄 / 物品青 / 手册玫红 / 工单红 / NEC紫。</p>
+      <span class="go">进入 →</span>
+    </a>
+    <a class="card c-navy" href="index.html#member">
+      <div class="icon">👥</div><h3>人员台账</h3>
+      <p>社团成员名录：编号 / 姓名 / 学号 / 部门SIG / 职务，姓名直通操作人与工单负责人。</p>
+      <span class="go">进入 →</span>
+    </a>
+    <a class="card c-amber" href="index.html#gen">
+      <div class="icon">🔢</div><h3>编码生成</h3>
+      <p>按货架/层/位参数批量补齐空位码，容器码、物料流水码一键生成。</p>
+      <span class="go">进入 →</span>
+    </a>
+    <a class="card c-purple" href="index.html#nec">
+      <div class="icon">🧾</div><h3>NEC 小工单</h3>
+      <p>RW 任务 / CG 采购 / WX 维修等轻量工单，可导出 JSON 推送飞书多维表格+群通知。</p>
+      <span class="go">进入 →</span>
+    </a>
+    <a class="card c-navy" href="join.html">
+      <div class="icon">📣</div><h3>加入协作</h3>
+      <p>场务 SIG 招募令：主美 / 设计师 / MES 感兴趣的队友，扫码入群，A416 线下集结。</p>
+      <span class="go">查看 →</span>
+    </a>
+    <a class="card c-red" href="index.html#scan">
+      <div class="icon">🔫</div><h3>扫码出入库</h3>
+      <p>扫 MAT:/LOC:/CTN:/WIP: 码即查即扣，库存闭环：没有扫码动作，库存数不变。</p>
+      <span class="go">进入 →</span>
+    </a>
+  </div>
+
+  <div class="section-title">🔗 集成平台</div>
+  <div class="grid">
+    <a class="card wide c-navy" id="card-inv" href="http://localhost:8001" target="_blank" rel="noopener">
+      <div class="icon">🗄️</div>
+      <div class="meta">
+        <h3>InvenTree 库存平台 <span class="tag" id="inv-ver">检测中…</span></h3>
+        <p>物料 / 库位 / 库存的网页后台与报表中心，台账经 <b>inventree-sync.mjs</b> 单向镜像。原生支持扫码出入库、标签模板、BOM 与采购管理。<b>凭据见团队内部文档</b>（勿贴在公网页面）。</p>
+        <div class="tags"><span class="tag">Part 物料</span><span class="tag">StockLocation 库位树</span><span class="tag">REST API</span><span class="tag">条码 MAT:/LOC:/CTN:</span></div>
+      </div>
+      <span class="go">打开 →</span>
+    </a>
+    <a class="card wide c-blue" href="https://trinacli.feishu.cn/base/NpWBb0RXYayqfosYqnScWdlDnMb" target="_blank" rel="noopener">
+      <div class="icon">📊</div>
+      <div class="meta">
+        <h3>飞书多维表后端 <span class="tag">数据收集</span></h3>
+        <p>仓储管理系统云端后端：物料台账 / 库位 / 容器 / 人员 / 物品 / 手册 / 工单记录 / 库存流水 8 张数据表，列结构与 Excel 双向模板一致，表 ID 见 <b>feishu-backend.config.json</b>。</p>
+        <div class="tags"><span class="tag">8 张数据表</span><span class="tag">lark-cli base</span><span class="tag">库存流水审计</span></div>
+      </div>
+      <span class="go">打开 →</span>
+    </a>
+  </div>
+
+  <div class="section-title">🛠️ 日常运维（数据同步闭环）</div>
+  <div class="ops">
+    <h3>416MES → InvenTree 台账同步</h3>
+    <div class="step"><span class="num">1</span><span>416MES「物料台账」页 → <code>导出 Excel 台账</code>，文件放入本项目目录</span></div>
+    <div class="step"><span class="num">2</span><span><code>node inventree-sync.mjs push --dry-run</code> 预演确认，再去掉 <code>--dry-run</code> 正式同步</span></div>
+    <div class="step"><span class="num">3</span><span>NEC 工单另行同步飞书：<code>node nec-sync.mjs push</code></span></div>
+    <div class="step"><span class="num">4</span><span>详细方案见项目目录 <code>INVENTREE-INTEGRATION.md</code>（仅本地，不公网发布）；库存真源 = 416MES 扫码闭环，InvenTree 只做镜像</span></div>
+  </div>
+</main>
+
+<footer>常州工NEC · 智能仓库MES ｜ 数据存于浏览器 localStorage，请定期导出 Excel 备份</footer>
+
+<script>
+(function(){
+  var host = location.hostname || 'localhost';
+  var isHttps = location.protocol === 'https:';
+  // 反代场景（自托管 nginx：/inventree/ → :8001）走同源路径，避开 HTTPS 混合内容拦截；
+  // 本地/局域网 HTTP 场景直连 :8001；公网 HTTPS 且无反代时优雅降级为「本地服务」
+  var invUrl = isHttps ? (location.origin + '/inventree') : ('http://' + host + ':8001');
+  document.getElementById('card-inv').href = isHttps ? (invUrl + '/') : invUrl;
+
+  // 416MES 芯片：读出 localStorage 里的真实运营数据（同源有效，跨设备各自独立）
+  var chipMes = document.getElementById('chip-mes');
+  try {
+    var s = JSON.parse(localStorage.getItem('mes416_state_v1') || '{}');
+    if (s.materials) {
+      var mats = s.materials;
+      var wips = (s.workorders || []).filter(function(w){ return w.status !== '已执行'; });
+      var totalVal = mats.reduce(function(a, m){ return a + (m.qty || 0) * (m.cost || 0); }, 0);
+      var lastBackup = +(localStorage.getItem('mes416_last_backup') || 0);
+      var days = lastBackup ? Math.floor((Date.now() - lastBackup) / 864e5) : 99;
+      var lows = mats.filter(function(m){ return (m.minQty || 0) > 0 && m.qty < m.minQty; });
+      var negs = mats.filter(function(m){ return m.qty < 0; });
+      chipMes.className = 'chip ' + (days > 7 ? 'bad' : 'ok');
+      chipMes.innerHTML = '<span class="dot"></span><span class="t">在管物料 ' + mats.length +
+        ' 项 · 库存总值 ¥' + totalVal.toFixed(0) + ' · 待执行工单 ' + wips.length +
+        (days > 7 ? ' · ⚠已 ' + days + ' 天未备份' : ' · 备份 ' + (lastBackup ? days + ' 天前' : '从未')) + '</span>';
+      // 运营看板
+      document.getElementById('dash').style.display = 'block';
+      var tiles = [
+        { n: mats.length, l: '在管物料', w: false },
+        { n: '¥' + totalVal.toFixed(0), l: '库存总值', w: false },
+        { n: wips.length, l: '待执行工单', w: wips.length > 0 },
+        { n: (s.transactions || []).length, l: '库存流水', w: false },
+        { n: lows.length + negs.length, l: '库存预警', w: (lows.length + negs.length) > 0 },
+        { n: lastBackup ? days + ' 天前' : '从未', l: '上次备份', w: days > 7 }
+      ];
+      document.getElementById('dashTiles').innerHTML = tiles.map(function(t){
+        return '<div class="tile' + (t.w ? ' warn' : '') + '"><div class="num">' + t.n + '</div><div class="lbl">' + t.l + '</div></div>';
+      }).join('');
+      if (lows.length || negs.length) {
+        var ll = document.getElementById('lowList');
+        ll.style.display = 'block';
+        ll.innerHTML = '<h4>⚠️ 库存预警（' + (lows.length + negs.length) + ' 项，需补货）</h4>' +
+          lows.map(function(m){ return '<div class="item"><span>' + m.code + ' ' + (m.name || '') + '</span><span><span class="q">' + m.qty + '</span> / 安全 ' + m.minQty + '<a href="index.html#ledger">去补货 →</a></span></div>'; }).join('') +
+          negs.map(function(m){ return '<div class="item"><span>' + m.code + ' ' + (m.name || '') + '（负库存）</span><span><span class="q">' + m.qty + '</span><a href="index.html#ledger">去核查 →</a></span></div>'; }).join('');
+      }
+    } else {
+      chipMes.className = 'chip ok';
+      chipMes.innerHTML = '<span class="dot"></span><span class="t">416MES 前端在线（本设备暂无台账数据）</span>';
+    }
+  } catch (e) {
+    chipMes.className = 'chip ok';
+    chipMes.innerHTML = '<span class="dot"></span><span class="t">416MES 前端在线</span>';
+  }
+
+  // InvenTree 在线检测：3 秒超时兜底，不永远卡「检测中」
+  var chip = document.getElementById('chip-inv');
+  var tag = document.getElementById('inv-ver');
+  var ctl = new AbortController();
+  var timer = setTimeout(function(){ ctl.abort(); }, 3000);
+  fetch(invUrl + '/api/', { signal: ctl.signal }).then(function(r){ return r.json(); }).then(function(d){
+    clearTimeout(timer);
+    chip.className = 'chip ok';
+    chip.innerHTML = '<span class="dot"></span><span class="t">InvenTree 在线 · ' + (d.version || '') + '</span>';
+    if (tag) tag.textContent = 'v' + (d.version || '?') + ' 在线';
+  }).catch(function(){
+    clearTimeout(timer);
+    chip.className = 'chip bad';
+    chip.innerHTML = '<span class="dot"></span><span class="t">' + (isHttps
+      ? 'InvenTree 为本地服务（公网不可达；自托管可配 /inventree 反代）'
+      : 'InvenTree 未响应（docker start inventree）') + '</span>';
+    if (tag) tag.textContent = '离线';
+  });
+})();
+</script>
+</body>
+</html>
