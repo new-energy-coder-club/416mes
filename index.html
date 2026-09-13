@@ -149,6 +149,7 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
   <button data-tab="label">标签打印</button>
   <button data-tab="gen">编码生成</button>
   <button data-tab="nec">NEC小工单</button>
+  <button data-tab="design">排版工具</button>
   <button data-tab="scan">扫码出入库</button>
 </nav>
 <main>
@@ -364,6 +365,27 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         <tbody></tbody>
       </table>
       <p class="hint" style="margin-top:8px">同步到飞书：① 点「导出同步文件」得到 nec-wip-export.json → ② 终端运行 <b>node nec-sync.mjs push</b>（首次先 node nec-sync.mjs init 建表选群）。状态改为「已完成/已取消」会写入完成时间并触发群通知。</p>
+    </div>
+  </section>
+  <!-- ========== 排版工具 ========== -->
+  <section class="tab" id="tab-design">
+    <div class="panel">
+      <h2>台账数据 → 排版素材（Zonlin 自动排版工具已内嵌）</h2>
+      <div class="toolbar">
+        类型 <select id="dsType">
+          <option value="mat">物料码</option><option value="loc">库位码</option><option value="ctn">容器码</option>
+          <option value="wip">工单码</option><option value="nec">NEC工单</option>
+        </select>
+        记录 <select id="dsRec" style="min-width:220px"></select>
+        <button class="btn small" id="btnDsCopy">📋 复制排版文本</button>
+        <button class="btn small ghost" id="btnDsQr">⬇ 下载二维码 PNG</button>
+        <span class="spacer"></span>
+        <button class="btn small ghost" id="btnDsOpen">↗ 新标签页打开排版工具</button>
+      </div>
+      <p class="hint">用法：选记录 → 「复制排版文本」（名称/规格/编码已按行排好）→ 在下方画板 Text 文本框 Ctrl+V 粘贴；「下载二维码 PNG」后在排版工具里点「添加图片」导入。海报/看板/贴纸排版完成后由排版工具导出 PNG/JPEG/SVG。</p>
+    </div>
+    <div class="panel" style="padding:0;overflow:hidden">
+      <iframe id="dsFrame" src="typesetting/Auto-Typesetting tools1.5.html" style="width:100%;height:calc(100vh - 320px);min-height:480px;border:0;display:block"></iframe>
     </div>
   </section>
   <!-- ========== 扫码出入库 ========== -->
@@ -776,8 +798,57 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('cl
   document.querySelectorAll('section.tab').forEach(s => s.classList.toggle('on', s.id === 'tab-' + b.dataset.tab));
   if (b.dataset.tab === 'label') renderLabelTab();
   if (b.dataset.tab === 'nec') renderNec();
+  if (b.dataset.tab === 'design') renderDesign();
   if (b.dataset.tab === 'member') renderMembers();
 }));
+
+/* ================= 排版工具（数据桥） ================= */
+function dsTextOf(t, r) {
+  if (!r) return '';
+  if (t === 'mat') return [r.name, r.spec, r.code, '库位 ' + (r.loc || '—')].filter(Boolean).join('\n');
+  if (t === 'loc') return [r.desc, r.code].filter(Boolean).join('\n');
+  if (t === 'ctn') return [r.type + ' ' + r.spec, r.code].filter(Boolean).join('\n');
+  if (t === 'wip') return [(WIP_NAMES[r.type] || r.type) + ' ' + r.date, r.items.map(i => i.matCode + '×' + i.qty).join(' '), r.code].filter(Boolean).join('\n');
+  return [r.title, (NEC_TYPE_NAMES[r.type] || r.type) + ' · ' + (r.owner || '—'), r.code].filter(Boolean).join('\n');
+}
+function dsRecLabel(t, r) {
+  if (t === 'mat') return r.code + ' ' + r.name;
+  if (t === 'nec') return r.code + ' ' + r.title;
+  if (t === 'wip') return r.code + ' ' + (WIP_NAMES[r.type] || r.type);
+  return r.code + ' ' + (r.desc || r.type || '');
+}
+function renderDesign() {
+  const t = document.getElementById('dsType').value;
+  const recs = recordsOf(t);
+  document.getElementById('dsRec').innerHTML = recs.length
+    ? recs.map((r, i) => '<option value="' + i + '">' + esc(dsRecLabel(t, r)) + '</option>').join('')
+    : '<option value="">（无记录）</option>';
+}
+document.getElementById('dsType').addEventListener('change', renderDesign);
+document.getElementById('btnDsCopy').addEventListener('click', async () => {
+  const t = document.getElementById('dsType').value, i = +document.getElementById('dsRec').value;
+  const text = dsTextOf(t, recordsOf(t)[i]);
+  if (!text) { alert('请先选择一条记录'); return; }
+  try { await navigator.clipboard.writeText(text); }
+  catch (e) { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+  alert('已复制，到下方画板 Text 文本框粘贴：\n\n' + text);
+});
+document.getElementById('btnDsQr').addEventListener('click', () => {
+  const t = document.getElementById('dsType').value, i = +document.getElementById('dsRec').value;
+  const r = recordsOf(t)[i];
+  if (!r) { alert('请先选择一条记录'); return; }
+  const q = qrcode(0, 'M'); q.addData(TYPES[t].prefix + r.code); q.make();
+  const img = new Image();
+  img.onload = () => {  // qrcode-generator 输出 GIF dataURL，转 PNG 再下载
+    const cv = document.createElement('canvas'); cv.width = img.width; cv.height = img.height;
+    cv.getContext('2d').drawImage(img, 0, 0);
+    const a = document.createElement('a');
+    a.href = cv.toDataURL('image/png'); a.download = 'QR_' + r.code + '.png'; a.click();
+  };
+  img.src = q.createDataURL(10, 4);
+});
+document.getElementById('btnDsOpen').addEventListener('click', () =>
+  window.open('typesetting/Auto-Typesetting tools1.5.html', '_blank'));
 
 /* ================= ① 物料台账 ================= */
 const MAT_COLS = [['code', '物料码'], ['name', '名称'], ['spec', '规格型号'], ['xy', '闲鱼XY编号'], ['loc', '当前库位码'], ['container', '容器码'], ['qty', '库存数量'], ['minQty', '安全库存'], ['cost', '成本']];

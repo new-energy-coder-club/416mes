@@ -2,6 +2,8 @@
 
 单文件网页应用：`index.html` 双击即用，无需安装、无需联网。适配汉印 N41 热敏打印机 + 60×40mm 三防标签纸。
 
+> 注意：「排版工具」页签依赖 `typesetting/` 文件夹，拷贝本系统时请整个文件夹一起复制。
+
 ## 快速开始
 
 1. 门户首页 `home.html`（双击或访问 http://localhost:8000/home.html ）：五个模块入口 + InvenTree 集成入口 + 在线状态自检
@@ -153,6 +155,15 @@ node nec-sync.mjs status            # 查看配置与连通性
 - 群通知：markdown 卡片，含工单号/标题/类型/负责人/状态；`--idempotency-key` 防重发
 - 配置文件不含密钥；lark-cli 凭证由 `lark-cli config` 统一管理
 
+## 排版工具（海报/看板/贴纸设计）
+
+「排版工具」页签内嵌 Zonlin 自动排版工具 1.5（`typesetting/` 目录），适合做仓库看板、货架区域海报、贴纸等。
+
+- **数据桥**：顶部选类型+记录 → 「📋 复制排版文本」（名称/规格/编码已按行排好）→ 到画板 Text 框粘贴；「⬇ 下载二维码 PNG」生成带前缀机读串的二维码（218×218），在排版工具里「添加图片」导入
+- 「↗ 新标签页打开」可获得完整大屏体验；排版结果由排版工具导出 PNG/JPEG/SVG（A4/A3 已按 300 PPI 预设）
+- ⚠️ 分发本系统时必须连同 `typesetting/` 文件夹一起拷贝（内含字体），不能只发 index.html
+- 详细用法见 `typesetting/使用教程1.5.txt`
+
 ## 成本参考
 
 汉印 N41 ¥500 左右 + 三防标签纸四色各一卷约 ¥80，首批 200 张标签以内，**总投入 ¥600 内**。
@@ -161,7 +172,4 @@ node nec-sync.mjs status            # 查看配置与连通性
 
 - 单文件离线：内嵌 [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator)（MIT）与 [SheetJS](https://sheetjs.com/)，无网络依赖
 - 数据：浏览器 localStorage（键 `mes416_state_v1`）+ Excel 导入导出
-- 修改源码：编辑 `.build/part1.html`（页面/CSS）或 `.build/app.js`（逻辑）后，在 `.build` 目录执行拼装命令重新生成 `index.html`：
-  ```bash
-  cat .build/part1.html .build/qrcode.js .build/sep.html .build/xlsx.mini.min.js .build/sep.html .build/app.js .build/tail.html > index.html
-  ```
+- 修改源码：**直接编辑 `index.html`**（本项目已由多个功能迭代直接在 index.html 上演进，以 git 历史为准）。`.build/` 下的 part1.html/app.js 为初始版本的历史源码快照，⚠️ 不要再用 cat 重拼生成 index.html，否则会覆盖后续功能（人员台账、C区布局、排版工具等）。排版工具源码在 `typesetting/` 目录单独维护。
