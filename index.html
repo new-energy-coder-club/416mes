@@ -175,14 +175,15 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         <button class="btn ghost" id="btnMergeJson">导入合并</button>
         <input type="file" id="fileMerge" accept=".json" style="display:none">
         <button class="btn ghost" id="btnCloudSync">☁️ 云端同步</button>
+        <button class="btn ghost" id="btnAutoCode">⚡ 空白编码自动编号</button>
         <span class="spacer"></span>
         <button class="btn warn small" id="btnDelMat">删除勾选行</button>
       </div>
       <table class="grid" id="matTable">
         <thead><tr>
           <th style="width:28px"><input type="checkbox" id="matCheckAll"></th>
-          <th>物料码</th><th>名称</th><th>规格型号</th><th>闲鱼XY编号</th>
-          <th>当前库位码</th><th>容器码</th><th style="width:76px">库存数量</th><th style="width:70px">安全库存</th><th style="width:76px">成本(元)</th>
+          <th>物料码</th><th style="width:86px">分类</th><th>名称</th><th>规格型号</th><th>闲鱼XY编号</th>
+          <th>当前库位码</th><th>容器码</th><th style="width:76px">库存数量</th><th style="width:70px">安全库存</th><th style="width:76px">成本(元)</th><th>图片链接</th>
         </tr></thead>
         <tbody></tbody>
       </table>
@@ -255,7 +256,13 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
     <div class="panel">
       <h2>① 库位码批量生成（空位提前全打，贴上即启用）</h2>
       <div class="form-row"><label>货架库位</label>
-        区域码 <input type="text" id="gLocRegion" value="B" style="width:50px">
+        场地码 <input type="text" id="gLocRegion" value="YH" list="siteList" style="width:64px">
+        <datalist id="siteList">
+          <option value="TQ">天权楼（机构类零件）</option>
+          <option value="YH">玉衡A416（贵重零件）</option>
+          <option value="K401">401开放空地（机构整机/调试设备）</option>
+          <option value="B">B区（默认货架区）</option>
+        </datalist>
         货架数 <input type="number" id="gLocShelf" value="2" min="1">
         层数 <input type="number" id="gLocLayer" value="4" min="1">
         每层货位 <input type="number" id="gLocPos" value="8" min="1">
@@ -267,6 +274,14 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         每工位格数 <input type="number" id="gWsGrid" value="3" min="1">
         <button class="btn small" id="btnGenWs">生成工位库位</button>
         <span class="hint">例：W01-G02 = 1号工位第2格</span>
+      </div>
+      <div class="form-row"><label>开放区块位</label>
+        场地码 <input type="text" id="gOpenSite" value="K401" style="width:64px">
+        通道起 <input type="text" id="gOpenAisleFrom" value="A" maxlength="1" style="width:44px">
+        通道止 <input type="text" id="gOpenAisleTo" value="C" maxlength="1" style="width:44px">
+        每通道块位 <input type="number" id="gOpenPos" value="6" min="1" style="width:70px">
+        <button class="btn small" id="btnGenOpen">生成块位码</button>
+        <span class="hint">例：K401-A03 = 401开放空地 A通道 3号块位（地贴/立柱贴码）</span>
       </div>
       <div class="form-row"><label>模块区</label>
         名称 <input type="text" id="gZoneName" placeholder="如：传感器、结构件" style="width:170px">
@@ -483,8 +498,8 @@ function seedState() {
   push('XK', '斜口零件盒', '斜口中号', 20);
   return {
     materials: [
-      { code: 'GJ-SD-001', name: '螺丝刀', spec: '十字 PH2×100mm', xy: '', loc: 'B-01-01-01', container: 'XK-001', qty: 5, minQty: 2, cost: 8.5 },
-      { code: 'HC-BG-001', name: '打印纸', spec: 'A4 70g 500张/包', xy: '', loc: 'B-02-04-08', container: '', qty: 10, minQty: 3, cost: 22 }
+      { code: 'GJ-SD-001', cat: 'GJ', name: '螺丝刀', spec: '十字 PH2×100mm', xy: '', loc: 'B-01-01-01', container: 'XK-001', qty: 5, minQty: 2, cost: 8.5, img: '' },
+      { code: 'HC-BG-001', cat: 'HC', name: '打印纸', spec: 'A4 70g 500张/包', xy: '', loc: 'B-02-04-08', container: '', qty: 10, minQty: 3, cost: 22, img: '' }
     ],
     locations, containers,
     members: [
@@ -728,7 +743,7 @@ function load() {
   state.operators = (state.operators && state.operators.length) ? state.operators : ['管理员'];
   state.operator = state.operator || state.operators[0];
   state.deviceId = state.deviceId || ('dev-' + Math.random().toString(36).slice(2, 8));
-  state.materials.forEach(m => { if (m.minQty == null) m.minQty = 0; });
+  state.materials.forEach(m => { if (m.minQty == null) m.minQty = 0; if (!m.cat) m.cat = 'QT'; if (m.img == null) m.img = ''; });
   state.txnSeq = Math.max(state.txnSeq || 0, ...state.transactions.map(t => t.seq || 0), 0);   // 审计日志序号迁移
   // C区布局内置（缺则补，已有记录不覆盖）
   C_LAYOUT.locations.forEach(l => { if (!state.locations.find(x => x.code === l.code)) state.locations.push(Object.assign({}, l)); });
@@ -913,7 +928,9 @@ document.getElementById('galAlbum').addEventListener('change', () => { galShown 
 document.getElementById('btnGalMore').addEventListener('click', () => { galShown += GAL_PAGE; renderGalGrid(); });
 
 /* ================= ① 物料台账 ================= */
-const MAT_COLS = [['code', '物料码'], ['name', '名称'], ['spec', '规格型号'], ['xy', '闲鱼XY编号'], ['loc', '当前库位码'], ['container', '容器码'], ['qty', '库存数量'], ['minQty', '安全库存'], ['cost', '成本']];
+const MAT_COLS = [['code', '物料码'], ['cat', '分类'], ['name', '名称'], ['spec', '规格型号'], ['xy', '闲鱼XY编号'], ['loc', '当前库位码'], ['container', '容器码'], ['qty', '库存数量'], ['minQty', '安全库存'], ['cost', '成本'], ['img', '图片链接']];
+/* 分类码：JG机构件 DJ电机驱动 DZ电子件 GZ贵重件 TS调试设备 GJ工具 HC耗材 QT其他 */
+const MAT_CATS = { JG: '机构件', DJ: '电机驱动', DZ: '电子件', GZ: '贵重件', TS: '调试设备', GJ: '工具', HC: '耗材', QT: '其他' };
 let ledgerFilter = '';
 function renderLedger() {
   const tb = document.querySelector('#matTable tbody');
@@ -925,11 +942,13 @@ function renderLedger() {
       return '<tr' + (neg ? ' class="row-neg"' : low ? ' class="row-low"' : '') + '>' +
         '<td><input type="checkbox" class="matSel" data-i="' + i + '"></td>' +
         MAT_COLS.map(([k]) => {
+          if (k === 'cat') return '<td><select data-i="' + i + '" data-k="cat">' +
+            Object.entries(MAT_CATS).map(([c, n]) => '<option value="' + c + '"' + ((m.cat || 'QT') === c ? ' selected' : '') + '>' + c + ' ' + n + '</option>').join('') + '</select></td>';
           const num = (k === 'qty' || k === 'cost' || k === 'minQty');
           return '<td><input type="' + (num ? 'number' : 'text') + '" data-i="' + i + '" data-k="' + k + '" value="' + esc(m[k]) + '"' + (k === 'cost' ? ' step="0.01"' : '') + '></td>';
         }).join('') + '</tr>';
     }).join('');
-  tb.querySelectorAll('input[data-k]').forEach(inp => inp.addEventListener('change', () => {
+  tb.querySelectorAll('[data-k]').forEach(inp => inp.addEventListener('change', () => {
     const i = +inp.dataset.i, k = inp.dataset.k, m = state.materials[i];
     if (k === 'qty') {
       const v = parseFloat(inp.value) || 0;
@@ -951,9 +970,26 @@ function renderLedger() {
 }
 document.getElementById('matSearch').addEventListener('input', e => { ledgerFilter = e.target.value; renderLedger(); });
 document.getElementById('btnAddMat').addEventListener('click', () => {
-  state.materials.push({ code: '', name: '', spec: '', xy: '', loc: '', container: '', qty: 0, minQty: 0, cost: 0 });
+  state.materials.push({ code: '', cat: 'QT', name: '', spec: '', xy: '', loc: '', container: '', qty: 0, minQty: 0, cost: 0, img: '' });
   save(); renderLedger();
   const tb = document.querySelector('#matTable tbody'); tb.lastElementChild && tb.lastElementChild.scrollIntoView();
+});
+/* 空白编码自动编号：分类码 + 3位流水（例 JG-001） */
+document.getElementById('btnAutoCode').addEventListener('click', () => {
+  const blanks = state.materials.filter(m => !String(m.code || '').trim());
+  if (!blanks.length) { alert('没有空白物料码的行'); return; }
+  if (!confirm('为 ' + blanks.length + ' 行空白物料自动编号（分类-流水，如 JG-001）？')) return;
+  const next = {};
+  const maxOf = cat => {
+    if (next[cat] == null) {
+      let mx = 0;
+      state.materials.forEach(m => { const r = String(m.code || '').match(new RegExp('^' + cat + '-(\\d+)$')); if (r) mx = Math.max(mx, +r[1]); });
+      next[cat] = mx + 1;
+    }
+    return next[cat]++;
+  };
+  blanks.forEach(m => { m.code = (m.cat && MAT_CATS[m.cat] ? m.cat : 'QT') + '-' + String(maxOf(m.cat && MAT_CATS[m.cat] ? m.cat : 'QT')).padStart(3, '0'); });
+  save(); renderLedger();
 });
 document.getElementById('btnDelMat').addEventListener('click', () => {
   const idx = [...document.querySelectorAll('.matSel:checked')].map(c => +c.dataset.i).sort((a, b) => b - a);
@@ -1007,8 +1043,8 @@ document.getElementById('memberCheckAll').addEventListener('change', e =>
 document.getElementById('btnExport').addEventListener('click', () => {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-    ['物料码', '名称', '规格型号', '闲鱼XY编号', '当前库位码', '容器码', '库存数量', '安全库存', '成本'],
-    ...state.materials.map(m => [m.code, m.name, m.spec, m.xy, m.loc, m.container, m.qty, m.minQty || 0, m.cost])]), '物料台账');
+    ['物料码', '分类', '名称', '规格型号', '闲鱼XY编号', '当前库位码', '容器码', '库存数量', '安全库存', '成本', '图片链接'],
+    ...state.materials.map(m => [m.code, m.cat || 'QT', m.name, m.spec, m.xy, m.loc, m.container, m.qty, m.minQty || 0, m.cost, m.img || ''])]), '物料台账');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ['库位码', '类型', '说明'], ...state.locations.map(l => [l.code, l.kind, l.desc])]), '库位');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
@@ -1053,8 +1089,10 @@ document.getElementById('fileImport').addEventListener('change', e => {
       };
       const ms = sheet('物料台账');
       if (!ms) throw new Error('找不到「物料台账」sheet');
-      const hasMin = ms[0] && ms[0].includes('安全库存');   // 兼容旧版 8 列台账
-      state.materials = bodyRows(ms).map(r => ({ code: String(r[0]), name: r[1] || '', spec: r[2] || '', xy: r[3] || '', loc: r[4] || '', container: r[5] || '', qty: parseFloat(r[6]) || 0, minQty: hasMin ? (parseFloat(r[7]) || 0) : 0, cost: parseFloat(r[hasMin ? 8 : 7]) || 0 }));
+      const hIdx = {}; (ms[0] || []).forEach((h, i) => { hIdx[String(h).trim()] = i; });   // 表头驱动，兼容旧版列序
+      const col = (r, n) => (hIdx[n] != null && r[hIdx[n]] != null ? r[hIdx[n]] : '');
+      const normCat = v => { const c = String(v || '').trim().split(/[\s　]/)[0].toUpperCase(); return MAT_CATS[c] ? c : 'QT'; };
+      state.materials = bodyRows(ms).map(r => ({ code: String(col(r, '物料码')), cat: normCat(col(r, '分类')), name: col(r, '名称') || '', spec: col(r, '规格型号') || '', xy: col(r, '闲鱼XY编号') || '', loc: col(r, '当前库位码') || '', container: col(r, '容器码') || '', qty: parseFloat(col(r, '库存数量')) || 0, minQty: parseFloat(col(r, '安全库存')) || 0, cost: parseFloat(col(r, '成本')) || 0, img: col(r, '图片链接') || '' }));
       const ls = sheet('库位'); if (ls) state.locations = bodyRows(ls).map(r => ({ code: String(r[0]), kind: r[1] || '', desc: r[2] || '' }));
       const cs = sheet('容器'); if (cs) state.containers = bodyRows(cs).map(r => ({ code: String(r[0]), type: r[1] || '', spec: r[2] || '', loc: r[3] || '' }));
       const ws = sheet('工单记录'); if (ws) state.workorders = bodyRows(ws).map(r => ({
@@ -1093,8 +1131,8 @@ document.getElementById('btnTemplate').addEventListener('click', () => {
     ['6. 「库存流水」sheet 仅导出供查阅，导入时自动忽略（流水由系统追加写、只增不改）。'],
   ]), '填表说明');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-    ['物料码', '名称', '规格型号', '闲鱼XY编号', '当前库位码', '容器码', '库存数量', '安全库存', '成本'],
-    ['GJ-DEMO-001', '示例-内六角扳手', '2.5mm', '', 'B-01-01-01', 'XK-001', 3, 1, 6.5]]), '物料台账');
+    ['物料码', '分类', '名称', '规格型号', '闲鱼XY编号', '当前库位码', '容器码', '库存数量', '安全库存', '成本', '图片链接'],
+    ['GJ-DEMO-001', 'GJ', '示例-内六角扳手', '2.5mm', '', 'B-01-01-01', 'XK-001', 3, 1, 6.5, '']]), '物料台账');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ['库位码', '类型', '说明'], ['B-01-01-01', '货架', 'B区 1号货架 第1层 第1位']]), '库位');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
@@ -1402,11 +1440,25 @@ document.getElementById('btnPrint').addEventListener('click', () => {
 function addUnique(arr, items, key) { let n = 0; const has = new Set(arr.map(x => x[key])); items.forEach(it => { if (!has.has(it[key])) { arr.push(it); n++; } }); save(); return n; }
 document.getElementById('btnGenShelf').addEventListener('click', () => {
   const rg = document.getElementById('gLocRegion').value.trim().toUpperCase() || 'B';
+  const SITE_NAMES = { TQ: '天权楼', YH: '玉衡A416', K401: '401开放空地', B: 'B区' };
   const ns = +document.getElementById('gLocShelf').value, nl = +document.getElementById('gLocLayer').value, np = +document.getElementById('gLocPos').value;
   const items = [];
   for (let s = 1; s <= ns; s++) for (let l = 1; l <= nl; l++) for (let p = 1; p <= np; p++)
-    items.push({ code: rg + '-' + pad(s, 2) + '-' + pad(l, 2) + '-' + pad(p, 2), kind: '货架', desc: rg + '区 ' + s + '号货架 第' + l + '层 第' + p + '位' });
+    items.push({ code: rg + '-' + pad(s, 2) + '-' + pad(l, 2) + '-' + pad(p, 2), kind: '货架', desc: (SITE_NAMES[rg] || rg + '区') + ' ' + s + '号货架 第' + l + '层 第' + p + '位' });
   alert('新增 ' + addUnique(state.locations, items, 'code') + ' 个货架库位（重复自动跳过）');
+});
+document.getElementById('btnGenOpen').addEventListener('click', () => {
+  const SITE_NAMES = { TQ: '天权楼', YH: '玉衡A416', K401: '401开放空地', B: 'B区' };
+  const site = document.getElementById('gOpenSite').value.trim().toUpperCase() || 'K401';
+  const a1 = (document.getElementById('gOpenAisleFrom').value.trim().toUpperCase() || 'A').charCodeAt(0);
+  const a2 = (document.getElementById('gOpenAisleTo').value.trim().toUpperCase() || 'C').charCodeAt(0);
+  const np = +document.getElementById('gOpenPos').value;
+  const items = [];
+  for (let a = a1; a <= a2; a++) for (let p = 1; p <= np; p++) {
+    const ch = String.fromCharCode(a);
+    items.push({ code: site + '-' + ch + pad(p, 2), kind: '空地', desc: (SITE_NAMES[site] || site) + ' ' + ch + '通道 ' + p + '号块位' });
+  }
+  alert('新增 ' + addUnique(state.locations, items, 'code') + ' 个开放区块位码（重复自动跳过）');
 });
 document.getElementById('btnGenWs').addEventListener('click', () => {
   const a = +document.getElementById('gWsFrom').value, b = +document.getElementById('gWsTo').value, g = +document.getElementById('gWsGrid').value;

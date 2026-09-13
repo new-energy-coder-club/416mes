@@ -9,3 +9,8 @@ package.json
 package-lock.json
 *.ps1
 *.md
+*.pptx
+nec-wip-import.json
+人员导入-*.json
+人员导入*
+*-feishu.json
