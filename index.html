@@ -174,6 +174,7 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         <button class="btn ghost" id="btnBackupJson">导出备份 JSON</button>
         <button class="btn ghost" id="btnMergeJson">导入合并</button>
         <input type="file" id="fileMerge" accept=".json" style="display:none">
+        <button class="btn ghost" id="btnCloudSync">☁️ 云端同步</button>
         <span class="spacer"></span>
         <button class="btn warn small" id="btnDelMat">删除勾选行</button>
       </div>
@@ -1124,6 +1125,77 @@ document.getElementById('btnBackupJson').addEventListener('click', () => {
   localStorage.setItem('mes416_last_backup', Date.now());   // 门户页备份提醒数据源
   log('导出全量备份 JSON');
 });
+/* ---------- 通用合并：备份 JSON 导入 / 云端同步共用 ---------- */
+function mergePackage(pkg, { from = '备份文件', upsertMembers = false } = {}) {
+  const inc = pkg.state || pkg;                     // 兼容裸 state
+  if (!inc || !Array.isArray(inc.materials)) throw new Error('不是有效的 416MES 备份/云端数据');
+  const stat = { mat: 0, loc: 0, ctn: 0, itm: 0, man: 0, mbr: 0, mbrUpd: 0, wip: 0, nec: 0, necUpd: 0, txn: 0 };
+  const byCode = (arr, code) => arr.find(x => x.code === code);
+  (inc.materials || []).forEach(m => {
+    const old = byCode(state.materials, m.code);
+    if (old) {
+      const oq = old.qty;
+      Object.assign(old, { minQty: 0 }, m);
+      if (m.qty != null && m.qty !== oq) recordTxn('导入合并', old.code, m.qty - oq, '', '来自 ' + from);
+    } else { state.materials.push(Object.assign({ minQty: 0 }, m)); stat.mat++; }
+  });
+  (inc.locations || []).forEach(l => { if (!byCode(state.locations, l.code)) { state.locations.push(l); stat.loc++; } });
+  (inc.containers || []).forEach(c => { if (!byCode(state.containers, c.code)) { state.containers.push(c); stat.ctn++; } });
+  (inc.items || []).forEach(i => { if (!byCode(state.items, i.code)) { state.items.push(i); stat.itm++; } });
+  (inc.members || []).forEach(m => {
+    const old = byCode(state.members, m.code);
+    if (!old) { state.members.push(m); stat.mbr++; }
+    else if (upsertMembers) { Object.assign(old, m); stat.mbrUpd++; }   // 云端同步：人员主数据以云为准，同编号覆盖
+  });
+  (inc.manuals || []).forEach(m => { if (!byCode(state.manuals, m.code)) { state.manuals.push(m); stat.man++; } });
+  (inc.workorders || []).forEach(w => { if (!byCode(state.workorders, w.code)) { state.workorders.push(w); stat.wip++; } });
+  (inc.necOrders || []).forEach(o => {
+    const old = byCode(state.necOrders, o.code);
+    if (!old) { state.necOrders.push(o); stat.nec++; }
+    else {   // 同编码更新（双向同步：飞书拉回的状态/负责人等覆盖本地）
+      const keys = ['title', 'type', 'owner', 'priority', 'due', 'status', 'materials', 'note', 'createdAt', 'doneAt'];
+      if (keys.some(k => (old[k] ?? '') !== (o[k] ?? ''))) { keys.forEach(k => { if (o[k] !== undefined) old[k] = o[k]; }); stat.necUpd++; }
+    }
+  });
+  const txnKey = t => [t.time, t.matCode, t.delta, t.ref].join('|');
+  const have = new Set(state.transactions.map(txnKey));
+  (inc.transactions || []).forEach(t => { if (!have.has(txnKey(t))) { state.transactions.push(t); stat.txn++; } });
+  state.txnSeq = Math.max(state.txnSeq || 0, ...state.transactions.map(t => t.seq || 0), 0);   // 合并后序号取最大防撞号
+  ['serials', 'necSerials'].forEach(key => Object.entries(inc[key] || {}).forEach(([k, v]) => {
+    state[key][k] = Math.max(state[key][k] || 0, v);   // 流水号取最大，防换浏览器撞号
+  }));
+  (inc.operators || []).forEach(o => { if (!state.operators.includes(o)) state.operators.push(o); });
+  save(); renderLedger(); renderTxns(); renderNec(); renderMembers(); renderOperators(); refreshMemberDatalist();
+  return stat;
+}
+function mergeStatText(stat) {
+  return '新增物料 ' + stat.mat + '、库位 ' + stat.loc + '、容器 ' + stat.ctn + '、物品 ' + stat.itm + '、手册 ' + stat.man +
+    '、人员 ' + stat.mbr + (stat.mbrUpd ? '（同号更新 ' + stat.mbrUpd + '）' : '') +
+    '、工单 ' + stat.wip + '、NEC工单 ' + stat.nec + (stat.necUpd ? '（另更新 ' + stat.necUpd + ' 张）' : '') + '、流水 ' + stat.txn + ' 条';
+}
+
+/* ---------- 云端实时同步（飞书后端 → 本机，经 /api/feishu-sync） ---------- */
+const CLOUD_SYNC_API = location.protocol.startsWith('http') ? 'api/feishu-sync' : 'https://mes.newenergycoder.club/api/feishu-sync';
+async function cloudSync({ silent = false } = {}) {
+  const btn = document.getElementById('btnCloudSync');
+  if (btn) { btn.disabled = true; btn.textContent = '☁️ 同步中…'; }
+  try {
+    const r = await fetch(CLOUD_SYNC_API, { cache: 'no-store' });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ('HTTP ' + r.status)); }
+    const stat = mergePackage(await r.json(), { from: '飞书云端', upsertMembers: true });
+    log('云端同步完成：' + mergeStatText(stat));
+    if (!silent) alert('云端同步完成：' + mergeStatText(stat));
+    return stat;
+  } catch (err) {
+    if (!silent) alert('云端同步失败：' + err.message + '\n（离线/无后端环境请改用「导入合并」）');
+    return null;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '☁️ 云端同步'; }
+  }
+}
+document.getElementById('btnCloudSync').addEventListener('click', () => cloudSync());
+if (location.protocol.startsWith('http')) cloudSync({ silent: true });   // 打开页面自动同步一次，失败静默
+
 document.getElementById('btnMergeJson').addEventListener('click', () => document.getElementById('fileMerge').click());
 document.getElementById('fileMerge').addEventListener('change', e => {
   const f = e.target.files[0]; if (!f) return;
@@ -1135,41 +1207,9 @@ document.getElementById('fileMerge').addEventListener('change', e => {
       if (!inc || !Array.isArray(inc.materials)) throw new Error('不是有效的 416MES 备份文件');
       if (!confirm('将备份数据【合并】进当前台账（同编码取备份值，流水并集去重，流水号取最大）？\n建议先「导出备份 JSON」留存当前状态。')) { e.target.value = ''; return; }
       const from = pkg.deviceId || '备份文件';
-      const stat = { mat: 0, loc: 0, ctn: 0, itm: 0, man: 0, mbr: 0, wip: 0, nec: 0, txn: 0 };
-      const byCode = (arr, code) => arr.find(x => x.code === code);
-      (inc.materials || []).forEach(m => {
-        const old = byCode(state.materials, m.code);
-        if (old) {
-          const oq = old.qty;
-          Object.assign(old, { minQty: 0 }, m);
-          if (m.qty != null && m.qty !== oq) recordTxn('导入合并', old.code, m.qty - oq, '', '来自 ' + from);
-        } else { state.materials.push(Object.assign({ minQty: 0 }, m)); stat.mat++; }
-      });
-      (inc.locations || []).forEach(l => { if (!byCode(state.locations, l.code)) { state.locations.push(l); stat.loc++; } });
-      (inc.containers || []).forEach(c => { if (!byCode(state.containers, c.code)) { state.containers.push(c); stat.ctn++; } });
-      (inc.items || []).forEach(i => { if (!byCode(state.items, i.code)) { state.items.push(i); stat.itm++; } });
-      (inc.members || []).forEach(m => { if (!byCode(state.members, m.code)) { state.members.push(m); stat.mbr++; } });
-      (inc.manuals || []).forEach(m => { if (!byCode(state.manuals, m.code)) { state.manuals.push(m); stat.man++; } });
-      (inc.workorders || []).forEach(w => { if (!byCode(state.workorders, w.code)) { state.workorders.push(w); stat.wip++; } });
-      (inc.necOrders || []).forEach(o => {
-        const old = byCode(state.necOrders, o.code);
-        if (!old) { state.necOrders.push(o); stat.nec++; }
-        else {   // 同编码更新（双向同步：飞书拉回的状态/负责人等覆盖本地）
-          const keys = ['title', 'type', 'owner', 'priority', 'due', 'status', 'materials', 'note', 'createdAt', 'doneAt'];
-          if (keys.some(k => (old[k] ?? '') !== (o[k] ?? ''))) { keys.forEach(k => { if (o[k] !== undefined) old[k] = o[k]; }); stat.necUpd = (stat.necUpd || 0) + 1; }
-        }
-      });
-      const txnKey = t => [t.time, t.matCode, t.delta, t.ref].join('|');
-      const have = new Set(state.transactions.map(txnKey));
-      (inc.transactions || []).forEach(t => { if (!have.has(txnKey(t))) { state.transactions.push(t); stat.txn++; } });
-      state.txnSeq = Math.max(state.txnSeq || 0, ...state.transactions.map(t => t.seq || 0), 0);   // 合并后序号取最大防撞号
-      ['serials', 'necSerials'].forEach(key => Object.entries(inc[key] || {}).forEach(([k, v]) => {
-        state[key][k] = Math.max(state[key][k] || 0, v);   // 流水号取最大，防换浏览器撞号
-      }));
-      (inc.operators || []).forEach(o => { if (!state.operators.includes(o)) state.operators.push(o); });
-      save(); renderLedger(); renderTxns(); renderNec(); renderOperators(); refreshMemberDatalist();
+      const stat = mergePackage(pkg, { from });
       log('导入合并完成（来自 ' + from + '）');
-      alert('合并完成：新增物料 ' + stat.mat + '、库位 ' + stat.loc + '、容器 ' + stat.ctn + '、物品 ' + stat.itm + '、手册 ' + stat.man + '、人员 ' + stat.mbr + '、工单 ' + stat.wip + '、NEC工单 ' + stat.nec + (stat.necUpd ? '（另更新 ' + stat.necUpd + ' 张）' : '') + '、流水 ' + stat.txn + ' 条');
+      alert('合并完成：' + mergeStatText(stat));
     } catch (err) { alert('合并失败：' + err.message); }
     e.target.value = '';
   };
