@@ -68,6 +68,12 @@ node feishu-sync.mjs pull [输出.json]              # 飞书 → 本地备份 J
 - 库存流水只增不改：无 seq 的旧数据跳过不推，云端流水号 `#000123` 幂等
 - 已验证完整往返：导出 → push → pull → 导入合并，日期/时间戳/余量逐字节一致
 
+### 网页端云端实时同步（/api/feishu-sync）
+
+- 网页工具栏「☁️ 云端同步」：直接从飞书后端拉全量数据并合并（人员主数据以云为准、同编号覆盖）；线上环境打开页面时也会自动静默同步一次
+- 实现：Vercel Serverless Function `api/feishu-sync.js`，tenant_access_token 读取 8 张表，输出与「导出备份 JSON」同构数据，与「导入合并」共用同一套合并逻辑
+- 配置：Vercel 环境变量 `FEISHU_APP_ID` / `FEISHU_APP_SECRET`（应用需 base:record:read 权限且已加入 Base）；本地双击 file:// 使用时自动改走线上接口 https://mes.newenergycoder.club/api/feishu-sync（CORS 已放行）
+
 ## 可选：同步到 InvenTree（路线 B）
 
 已部署本地 InvenTree（http://localhost:8001，admin / inventree416）。导出台账 Excel 后执行：
