@@ -82,6 +82,7 @@ table.grid tr:hover td{background:#f7fafd;}
 .nec-gallery .g-item img{width:100%;height:100%;object-fit:cover;display:block;}
 .nec-gallery .g-item .g-dl{position:absolute;right:4px;bottom:4px;background:rgba(22,35,58,.85);color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;opacity:0;transition:opacity .15s;}
 .nec-gallery .g-item:hover .g-dl{opacity:1;}
+#tab-design.dropping{outline:3px dashed var(--blue);outline-offset:-6px;border-radius:8px;}
 /* 打印：只输出标签，60×40 纸张，零边距 */
 @page{size:60mm 40mm;margin:0;}
 @media print{
@@ -205,19 +206,20 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
     <div class="panel">
       <h2>人员台账（实验室成员名录：编号自动生成，姓名同步「操作人」与工单负责人）</h2>
       <div class="toolbar">
-        <input type="text" id="memberSearch" placeholder="🔍 搜索：编号/姓名/学号/部门/职务/电话" style="border:1px solid var(--line);border-radius:5px;padding:6px 10px;font-size:13px;width:260px;">
+        <input type="text" id="memberSearch" placeholder="🔍 搜索：编号/姓名/学号/部门/职务/标签/电话" style="border:1px solid var(--line);border-radius:5px;padding:6px 10px;font-size:13px;width:260px;">
         <button class="btn" id="btnAddMember">+ 新增人员</button>
         <span class="spacer"></span>
         <button class="btn warn small" id="btnDelMember">删除勾选行</button>
       </div>
+      <div class="toolbar" id="memberTagBar" style="margin-top:6px"></div>
       <table class="grid" id="memberTable">
         <thead><tr>
           <th style="width:28px"><input type="checkbox" id="memberCheckAll"></th>
-          <th style="width:80px">编号</th><th>姓名</th><th>学号</th><th>部门/SIG</th><th>职务</th><th>电话</th><th>备注</th>
+          <th style="width:80px">编号</th><th>姓名</th><th>学号</th><th>部门/SIG</th><th>职务</th><th style="width:120px">标签</th><th>电话</th><th>备注</th>
         </tr></thead>
         <tbody></tbody>
       </table>
-      <p class="hint" style="margin-top:8px">姓名会自动出现在右上角「操作人」下拉和 NEC 工单「负责人」候选中；编号（MB-xxx）生成后不变，人员退出请删除整行。所有修改自动保存到浏览器本地。</p>
+      <p class="hint" style="margin-top:8px">姓名会自动出现在右上角「操作人」下拉和 NEC 工单「负责人」候选中；编号（MB-xxx）生成后不变，人员退出请删除整行。「标签」用于分组（如 天权1楼实验台 / 416整理），上方标签条可一键筛选。所有修改自动保存到浏览器本地。</p>
     </div>
   </section>
   <!-- ========== 标签打印 ========== -->
@@ -405,10 +407,10 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         <span class="spacer"></span>
         <button class="btn small ghost" id="btnDsOpen">↗ 新标签页打开排版工具</button>
       </div>
-      <p class="hint">用法：选记录 → 「复制排版文本」（名称/规格/编码已按行排好）→ 在下方画板 Text 文本框 Ctrl+V 粘贴；「下载二维码 PNG」后在排版工具里点「添加图片」导入。海报/看板/贴纸排版完成后由排版工具导出 PNG/JPEG/SVG。</p>
+      <p class="hint">用法：选记录 → 「📋 复制排版文本」会<b>同时直接填入</b>下方画板 Text 文本框；「⬇ 二维码 PNG」下载的同时<b>自动加入画板图层</b>。也可直接把图片文件<b>拖拽到本页任意空白处</b>加入画板（拖到画板上则设为背景）。排版完成后由排版工具导出 PNG/JPEG/SVG。</p>
     </div>
     <div class="panel">
-      <h2>NEC 图库（官网 gallery · 点击下载后「添加图片」导入画板）</h2>
+      <h2>NEC 图库（官网 gallery · 点击直接加入画板）</h2>
       <div class="toolbar">
         专辑 <select id="galAlbum" style="min-width:240px"></select>
         <span class="hint" id="galCount"></span>
@@ -417,7 +419,7 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
       </div>
       <div class="nec-gallery" id="galGrid"></div>
       <div class="toolbar" style="margin-top:8px"><button class="btn small ghost" id="btnGalMore">加载更多</button>
-        <span class="hint">图片来源于 cdn.newenergycoder.club（需联网加载缩略图）；下载失败时会改为新标签页打开原图。</span></div>
+        <span class="hint">图片来源于 cdn.newenergycoder.club（需联网加载缩略图）；加入画板失败时会降级为下载/新标签页打开原图。</span></div>
     </div>
     <div class="panel" style="padding:0;overflow:hidden">
       <iframe id="dsFrame" src="typesetting/Auto-Typesetting tools1.5.html" style="width:100%;height:calc(100vh - 320px);min-height:480px;border:0;display:block"></iframe>
@@ -737,6 +739,7 @@ function load() {
   state.necOrders = state.necOrders || [];      // 旧版本数据迁移
   state.items = state.items || [];
   state.members = state.members || [];
+  state.members.forEach(m => { if (m.group == null) m.group = ''; });   // 标签字段迁移
   state.manuals = state.manuals || [];
   state.necSerials = state.necSerials || {};
   state.transactions = state.transactions || [];
@@ -835,10 +838,33 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('cl
   if (b.dataset.tab === 'label') renderLabelTab();
   if (b.dataset.tab === 'nec') renderNec();
   if (b.dataset.tab === 'design') { renderDesign(); renderGalAlbums(); }
-  if (b.dataset.tab === 'member') renderMembers();
+  if (b.dataset.tab === 'member') { renderMemberTagBar(); renderMembers(); }
 }));
 
 /* ================= 排版工具（数据桥） ================= */
+/* 同域 iframe 桥接：直接调用排版工具全局函数，失败时自动降级为剪贴板/下载手动流程 */
+function dsWin() {
+  try { const w = document.getElementById('dsFrame').contentWindow; return (w && w.document) ? w : null; }
+  catch (e) { return null; }  // file:// 下 Chrome 拦截 iframe 同源访问
+}
+function dsFillText(text) {  // 写入画板 Text 框并触发重排，返回是否成功
+  const w = dsWin();
+  const ta = w && w.document.getElementById('textInput');
+  if (!ta) return false;
+  ta.value = text;
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  return true;
+}
+async function dsAddImages(files) {  // 图片加入画板图层（排版工具 addImageLayerFiles），返回是否成功
+  const w = dsWin();
+  if (w && typeof w.addImageLayerFiles === 'function') {
+    if (await w.addImageLayerFiles(files)) {
+      document.getElementById('dsFrame').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return true;
+    }
+  }
+  return false;
+}
 function dsTextOf(t, r) {
   if (!r) return '';
   if (t === 'mat') return [r.name, r.spec, r.code, '库位 ' + (r.loc || '—')].filter(Boolean).join('\n');
@@ -867,7 +893,8 @@ document.getElementById('btnDsCopy').addEventListener('click', async () => {
   if (!text) { alert('请先选择一条记录'); return; }
   try { await navigator.clipboard.writeText(text); }
   catch (e) { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
-  alert('已复制，到下方画板 Text 文本框粘贴：\n\n' + text);
+  const bridged = dsFillText(text);
+  alert(bridged ? '已复制并填入下方画板 Text 文本框：\n\n' + text : '已复制，到下方画板 Text 文本框粘贴：\n\n' + text);
 });
 document.getElementById('btnDsQr').addEventListener('click', () => {
   const t = document.getElementById('dsType').value, i = +document.getElementById('dsRec').value;
@@ -880,11 +907,28 @@ document.getElementById('btnDsQr').addEventListener('click', () => {
     cv.getContext('2d').drawImage(img, 0, 0);
     const a = document.createElement('a');
     a.href = cv.toDataURL('image/png'); a.download = 'QR_' + r.code + '.png'; a.click();
+    cv.toBlob(b => b && dsAddImages([new File([b], 'QR_' + r.code + '.png', { type: 'image/png' })]), 'image/png');
   };
   img.src = q.createDataURL(10, 4);
 });
 document.getElementById('btnDsOpen').addEventListener('click', () =>
   window.open('typesetting/Auto-Typesetting tools1.5.html', '_blank'));
+
+/* 拖拽图片到排版页任意空白处 → 加入画板图层（拖到画板内部由排版工具自身处理为背景） */
+(function designDnD() {
+  const tab = document.getElementById('tab-design');
+  const hasFiles = e => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+  tab.addEventListener('dragover', e => { if (hasFiles(e)) { e.preventDefault(); tab.classList.add('dropping'); } });
+  tab.addEventListener('dragleave', e => { if (!tab.contains(e.relatedTarget)) tab.classList.remove('dropping'); });
+  tab.addEventListener('drop', async e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    tab.classList.remove('dropping');
+    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+    if (!files.length) { alert('请拖入图片文件（PNG/JPG/SVG 等）'); return; }
+    if (!await dsAddImages(files)) alert('排版工具尚未加载完成，请稍候再拖，或直接在下方画板里拖放/添加图片。');
+  });
+})();
 
 /* ================= NEC 图库 ================= */
 const GAL_PAGE = 48;
@@ -908,10 +952,19 @@ function renderGalGrid() {
   grid.innerHTML = a.photos.slice(0, galShown).map(src =>
     '<div class="g-item" data-src="' + esc(src) + '" title="' + esc(galFileName(src)) + '">' +
     '<img loading="lazy" src="' + esc(galThumb(src)) + '" onerror="if(!this.dataset.fb){this.dataset.fb=1;this.src=this.closest(\'.g-item\').dataset.src;}">' +
-    '<span class="g-dl">⬇ 下载</span></div>').join('');
+    '<span class="g-dl">➕ 加入画板</span></div>').join('');
   document.getElementById('galCount').textContent = '显示 ' + Math.min(galShown, a.photos.length) + ' / ' + a.photos.length + ' 张';
   document.getElementById('btnGalMore').style.display = galShown >= a.photos.length ? 'none' : '';
-  grid.querySelectorAll('.g-item').forEach(el => el.addEventListener('click', () => galDownload(el.dataset.src)));
+  grid.querySelectorAll('.g-item').forEach(el => el.addEventListener('click', () => galToCanvas(el.dataset.src)));
+}
+async function galToCanvas(src) {  // 点击图库图片直接送入画板图层，失败降级为下载/打开原图
+  const name = galFileName(src);
+  try {
+    const res = await fetch(src);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const blob = await res.blob();
+    if (!await dsAddImages([new File([blob], name, { type: blob.type || 'image/jpeg' })])) throw new Error('bridge');
+  } catch (e) { galDownload(src); }
 }
 async function galDownload(src) {
   const name = galFileName(src);
@@ -1000,8 +1053,22 @@ document.getElementById('matCheckAll').addEventListener('change', e =>
   document.querySelectorAll('.matSel').forEach(c => c.checked = e.target.checked));
 
 /* ================= ①b 人员台账 ================= */
-const MEMBER_COLS = [['code', '编号'], ['name', '姓名'], ['sid', '学号'], ['dept', '部门/SIG'], ['role', '职务'], ['phone', '电话'], ['note', '备注']];
+const MEMBER_COLS = [['code', '编号'], ['name', '姓名'], ['sid', '学号'], ['dept', '部门/SIG'], ['role', '职务'], ['group', '标签'], ['phone', '电话'], ['note', '备注']];
 let memberFilter = '';
+let memberTag = '';   // 标签筛选：'' = 全部
+function renderMemberTagBar() {
+  const bar = document.getElementById('memberTagBar');
+  if (!bar) return;
+  const tags = [...new Set(state.members.map(m => (m.group || '').trim()).filter(Boolean))];
+  const chip = (label, val, count) =>
+    '<button type="button" class="btn small ' + (memberTag === val ? '' : 'ghost') + '" data-tag="' + esc(val) + '"' +
+    (memberTag === val ? ' style="pointer-events:auto"' : '') + '>' + esc(label) + (count != null ? ' <b>' + count + '</b>' : '') + '</button>';
+  bar.innerHTML = tags.length
+    ? '<span class="hint" style="align-self:center">🏷 标签筛选：</span>' + chip('全部', '', state.members.length) +
+      tags.map(t => chip(t, t, state.members.filter(m => (m.group || '').trim() === t).length)).join('')
+    : '';
+  bar.querySelectorAll('button[data-tag]').forEach(b => b.addEventListener('click', () => { memberTag = b.dataset.tag; renderMemberTagBar(); renderMembers(); }));
+}
 function refreshMemberDatalist() {
   let dl = document.getElementById('memberList');
   if (!dl) { dl = document.createElement('datalist'); dl.id = 'memberList'; document.body.appendChild(dl); }
@@ -1011,7 +1078,8 @@ function renderMembers() {
   const tb = document.querySelector('#memberTable tbody');
   const f = memberFilter.trim().toLowerCase();
   tb.innerHTML = state.members.map((m, i) => ({ m, i })).filter(({ m }) =>
-    !f || [m.code, m.name, m.sid, m.dept, m.role, m.phone, m.note].some(v => String(v || '').toLowerCase().includes(f))
+    (!memberTag || (m.group || '').trim() === memberTag) &&
+    (!f || [m.code, m.name, m.sid, m.dept, m.role, m.group, m.phone, m.note].some(v => String(v || '').toLowerCase().includes(f)))
   ).map(({ m, i }) =>
     '<tr><td><input type="checkbox" class="memberSel" data-i="' + i + '"></td>' +
     MEMBER_COLS.map(([k]) => '<td><input type="text" data-i="' + i + '" data-k="' + k + '" value="' + esc(m[k]) + '"' + (k === 'code' ? ' readonly style="color:#667;background:#f5f7fa;"' : '') + '></td>').join('') + '</tr>'
@@ -1022,19 +1090,20 @@ function renderMembers() {
     m[k] = inp.value.trim();
     save();
     if (k === 'name') { renderOperators(); refreshMemberDatalist(); }
+    if (k === 'group') renderMemberTagBar();
   }));
 }
 document.getElementById('memberSearch').addEventListener('input', e => { memberFilter = e.target.value; renderMembers(); });
 document.getElementById('btnAddMember').addEventListener('click', () => {
-  state.members.push({ code: nextCode(state.members, 'MB'), name: '', sid: '', dept: '', role: '成员', phone: '', note: '' });
-  save(); renderMembers();
+  state.members.push({ code: nextCode(state.members, 'MB'), name: '', sid: '', dept: '', role: '成员', group: memberTag || '', phone: '', note: '' });
+  save(); renderMembers(); renderMemberTagBar();
   const tb = document.querySelector('#memberTable tbody'); tb.lastElementChild && tb.lastElementChild.scrollIntoView();
 });
 document.getElementById('btnDelMember').addEventListener('click', () => {
   const idx = [...document.querySelectorAll('.memberSel:checked')].map(c => +c.dataset.i).sort((a, b) => b - a);
   if (!idx.length || !confirm('删除勾选的 ' + idx.length + ' 行人员？')) return;
   idx.forEach(i => state.members.splice(i, 1));
-  save(); renderMembers(); renderOperators(); refreshMemberDatalist();
+  save(); renderMembers(); renderMemberTagBar(); renderOperators(); refreshMemberDatalist();
 });
 document.getElementById('memberCheckAll').addEventListener('change', e =>
   document.querySelectorAll('.memberSel').forEach(c => c.checked = e.target.checked));
@@ -1050,8 +1119,8 @@ document.getElementById('btnExport').addEventListener('click', () => {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ['容器码', '容器类型', '规格', '当前库位码'], ...state.containers.map(c => [c.code, c.type, c.spec, c.loc])]), '容器');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-    ['编号', '姓名', '学号', '部门/SIG', '职务', '电话', '备注'],
-    ...state.members.map(m => [m.code, m.name, m.sid, m.dept, m.role, m.phone, m.note])]), '人员');
+    ['编号', '姓名', '学号', '部门/SIG', '职务', '电话', '备注', '标签'],
+    ...state.members.map(m => [m.code, m.name, m.sid, m.dept, m.role, m.phone, m.note, m.group || ''])]), '人员');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ['物品码', '名称', '规格型号', '库位码'], ...state.items.map(i => [i.code, i.name, i.spec, i.loc])]), '物品');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
@@ -1099,14 +1168,14 @@ document.getElementById('fileImport').addEventListener('change', e => {
         code: String(r[0]), type: r[1] || 'LL', date: r[2] || '', status: r[4] || '未执行', execTime: r[5] || '',
         items: String(r[3] || '').split(';').map(s => s.trim()).filter(Boolean).map(s => { const m = s.match(/^(.+?)[x×](\d+(?:\.\d+)?)$/); return m ? { matCode: m[1], qty: +m[2] } : null; }).filter(Boolean)
       }));
-      const ppl = sheet('人员'); if (ppl) state.members = bodyRows(ppl).map(r => ({ code: String(r[0]), name: r[1] || '', sid: String(r[2] || ''), dept: r[3] || '', role: r[4] || '成员', phone: String(r[5] || ''), note: r[6] || '' }));
+      const ppl = sheet('人员'); if (ppl) state.members = bodyRows(ppl).map(r => ({ code: String(r[0]), name: r[1] || '', sid: String(r[2] || ''), dept: r[3] || '', role: r[4] || '成员', phone: String(r[5] || ''), note: r[6] || '', group: r[7] || '' }));
       const is2 = sheet('物品'); if (is2) state.items = bodyRows(is2).map(r => ({ code: String(r[0]), name: r[1] || '', spec: r[2] || '', loc: r[3] || '' }));
       const ms2 = sheet('手册'); if (ms2) state.manuals = bodyRows(ms2).map(r => ({ code: String(r[0]), name: r[1] || '', ver: r[2] || '', loc: r[3] || '' }));
       const ns = sheet('NEC工单'); if (ns) state.necOrders = bodyRows(ns).map(r => ({
         code: String(r[0]), title: r[1] || '', type: r[2] || 'RW', owner: r[3] || '', priority: r[4] || '中',
         due: r[5] || '', status: r[6] || '待处理', materials: r[7] || '', note: r[8] || '', createdAt: r[9] || '', doneAt: r[10] || ''
       }));
-      save(); renderLedger(); renderNec(); renderMembers();
+      save(); renderLedger(); renderNec(); renderMembers(); renderMemberTagBar();
       let msg = '导入成功：物料 ' + state.materials.length + ' 行';
       if (skippedRows) msg += '；跳过缺编码行 ' + skippedRows + ' 行';
       if (ignoredSheets.length) msg += '；忽略未知 sheet：' + ignoredSheets.join('、');
@@ -1138,8 +1207,8 @@ document.getElementById('btnTemplate').addEventListener('click', () => {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ['容器码', '容器类型', '规格', '当前库位码'], ['XK-DEMO-001', '斜口零件盒', '斜口中号', 'B-01-01-01']]), '容器');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-    ['编号', '姓名', '学号', '部门/SIG', '职务', '电话', '备注'],
-    ['MB-DEMO-001', '示例-张同学', '20240000', '场务SIG', '成员', '13800000000', '']]), '人员');
+    ['编号', '姓名', '学号', '部门/SIG', '职务', '电话', '备注', '标签'],
+    ['MB-DEMO-001', '示例-张同学', '20240000', '场务SIG', '成员', '13800000000', '', '天权1楼实验台']]), '人员');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ['物品码', '名称', '规格型号', '库位码'], ['WP-DEMO-001', '示例-电烙铁', '60W 可调温', 'W01-G01']]), '物品');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
@@ -1203,7 +1272,7 @@ function mergePackage(pkg, { from = '备份文件', upsertMembers = false } = {}
     state[key][k] = Math.max(state[key][k] || 0, v);   // 流水号取最大，防换浏览器撞号
   }));
   (inc.operators || []).forEach(o => { if (!state.operators.includes(o)) state.operators.push(o); });
-  save(); renderLedger(); renderTxns(); renderNec(); renderMembers(); renderOperators(); refreshMemberDatalist();
+  save(); renderLedger(); renderTxns(); renderNec(); renderMembers(); renderMemberTagBar(); renderOperators(); refreshMemberDatalist();
   return stat;
 }
 function mergeStatText(stat) {

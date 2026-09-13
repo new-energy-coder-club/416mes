@@ -62,8 +62,8 @@ const MAPS = {
   },
   members: {
     table: '人员', key: '编号',
-    up: m => ({ '编号': m.code, '姓名': m.name || '', '学号': m.sid || '', '部门/SIG': m.dept || '', '职务': m.role || '成员', '电话': m.phone || '', '备注': m.note || '' }),
-    down: f => ({ code: T(f['编号']), name: T(f['姓名']), sid: T(f['学号']), dept: T(f['部门/SIG']), role: T(f['职务']) || '成员', phone: T(f['电话']), note: T(f['备注']) })
+    up: m => ({ '编号': m.code, '姓名': m.name || '', '学号': m.sid || '', '部门/SIG': m.dept || '', '职务': m.role || '成员', '电话': m.phone || '', '备注': m.note || '', '标签': m.group || '' }),
+    down: f => ({ code: T(f['编号']), name: T(f['姓名']), sid: T(f['学号']), dept: T(f['部门/SIG']), role: T(f['职务']) || '成员', phone: T(f['电话']), note: T(f['备注']), group: T(f['标签']) })
   },
   items: {
     table: '物品', key: '物品码',
