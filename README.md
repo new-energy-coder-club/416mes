@@ -182,6 +182,31 @@ node nec-sync.mjs status            # 查看配置与连通性
   node -e "const fs=require('fs');const g=JSON.parse(fs.readFileSync('D:/Project_env/newenergycoder.club/src/data/gallery.json','utf8'));const slim=g.filter(a=>a.photos.length>0).map(a=>({id:a.id,title:a.title,photos:a.photos.map(p=>p.src)}));fs.writeFileSync('nec-gallery.js','window.NEC_GALLERY='+JSON.stringify(slim)+';\n')"
   ```
 
+## 场地与分类体系
+
+**场地码（一级，物理位置）**
+
+| 场地码 | 场地 | 存放定位 |
+|---|---|---|
+| `TQ` | 天权楼 | 全部机构类零件 |
+| `YH` | 玉衡 A416 实验室 | 贵重零件 |
+| `K401` | 401 开放空地 | 机构整机 + 调试设备 |
+| `B` | B 区 | 默认货架区 |
+
+**分类码（二级，物料类别，物料码前缀）**：`JG` 机构件 / `DJ` 电机驱动 / `DZ` 电子件 / `GZ` 贵重件 / `TS` 调试设备 / `GJ` 工具 / `HC` 耗材 / `QT` 其他。台账「分类」列下拉选择，「⚡ 空白编码自动编号」按 `分类-3位流水`（如 JG-001）生成物料码。
+
+**位置码（三级）**：货架场地 `YH-01-03-04`（场地-架-层-位）；开放空地 `K401-A03`（场地-通道-块位，地贴/立柱贴码）。「编码生成」页场地码下拉含 TQ/YH/K401/B，支持块位码批量生成。
+
+### 飞书表「A416零件位置明细」导入
+
+```bash
+node feishu-import.mjs --dry-run   # 预览映射（区域→YH-NN、名称→分类猜测、数量→库存）
+node feishu-import.mjs             # 生成 416MES_导入_A416零件_YYYYMMDD.xlsx
+```
+
+- 映射：飞书区域父记录（位置 N / N焊接区）→ `YH-NN` 库位；物品 → 分类猜测 + `分类-流水` 物料码 + 图片文件名入「图片链接」列
+- 导入为整表替换：先在 Excel 里审阅分类/库位、合并现有物料行，再「导入 Excel 台账」
+
 ## 成本参考
 
 汉印 N41 ¥500 左右 + 三防标签纸四色各一卷约 ¥80，首批 200 张标签以内，**总投入 ¥600 内**。
