@@ -52,8 +52,8 @@ const MAPS = {
   },
   locations: {
     table: '库位', key: '库位码',
-    up: l => ({ '库位码': l.code, '类型': l.kind || '货架', '说明': l.desc || '' }),
-    down: f => ({ code: T(f['库位码']), kind: T(f['类型']), desc: T(f['说明']) })
+    up: l => ({ '库位码': l.code, '类型': l.kind || '货架', '说明': l.desc || '', '授权人员': l.grants || '' }),
+    down: f => ({ code: T(f['库位码']), kind: T(f['类型']), desc: T(f['说明']), grants: T(f['授权人员']) })
   },
   containers: {
     table: '容器', key: '容器码',
