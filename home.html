@@ -164,7 +164,7 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
     <h3>416MES → InvenTree 台账同步</h3>
     <div class="step"><span class="num">1</span><span>416MES「物料台账」页 → <code>导出 Excel 台账</code>，文件放入本项目目录</span></div>
     <div class="step"><span class="num">2</span><span><code>node inventree-sync.mjs push --dry-run</code> 预演确认，再去掉 <code>--dry-run</code> 正式同步</span></div>
-    <div class="step"><span class="num">3</span><span>NEC 工单另行同步飞书：<code>node nec-sync.mjs push</code></span></div>
+    <div class="step"><span class="num">3</span><span>NEC 工单与飞书双向同步：<code>node nec-sync.mjs push</code>（推）/ <code>node nec-sync.mjs pull</code>（拉，生成文件后在台账页「导入合并」）</span></div>
     <div class="step"><span class="num">4</span><span>详细方案见项目目录 <code>INVENTREE-INTEGRATION.md</code>（仅本地，不公网发布）；库存真源 = 416MES 扫码闭环，InvenTree 只做镜像</span></div>
   </div>
 </main>

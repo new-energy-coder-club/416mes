@@ -9,3 +9,4 @@ feishu-backend.config.json
 .build/
 backups/
 nec-wip-export.json
+nec-wip-import.json

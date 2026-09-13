@@ -2,7 +2,7 @@
 
 单文件网页应用：`index.html` 双击即用，无需安装、无需联网。适配汉印 N41 热敏打印机 + 60×40mm 三防标签纸。
 
-> 注意：「排版工具」页签依赖 `typesetting/` 文件夹，拷贝本系统时请整个文件夹一起复制。
+> 注意：「排版工具」页签依赖 `typesetting/` 文件夹和 `nec-gallery.js`（NEC 图库清单），拷贝本系统时请一起复制。
 
 ## 快速开始
 
@@ -163,6 +163,18 @@ node nec-sync.mjs status            # 查看配置与连通性
 - 「↗ 新标签页打开」可获得完整大屏体验；排版结果由排版工具导出 PNG/JPEG/SVG（A4/A3 已按 300 PPI 预设）
 - ⚠️ 分发本系统时必须连同 `typesetting/` 文件夹一起拷贝（内含字体），不能只发 index.html
 - 详细用法见 `typesetting/使用教程1.5.txt`
+
+### NEC 图库（官网 gallery 图片直选）
+
+「排版工具」页签内置 NEC 官网图库面板（`nec-gallery.js` 清单，5 个专辑 / 752 张 ROBOCON 赛场图）：
+
+- 选专辑 → 缩略图网格浏览（每次 48 张，可「加载更多」）→ 点击图片下载 → 排版工具「添加图片」导入画板
+- 缩略图按官网规则走 `/images/gallery-thumbnails/`，不存在时自动回退原图；下载遇 CORS 限制时自动改为新标签页打开原图
+- 品牌 Logo 直接用项目根目录 `nec-logo.png` / `nec-logo-white.png`
+- 官网图库更新后重新生成清单：
+  ```bash
+  node -e "const fs=require('fs');const g=JSON.parse(fs.readFileSync('D:/Project_env/newenergycoder.club/src/data/gallery.json','utf8'));const slim=g.filter(a=>a.photos.length>0).map(a=>({id:a.id,title:a.title,photos:a.photos.map(p=>p.src)}));fs.writeFileSync('nec-gallery.js','window.NEC_GALLERY='+JSON.stringify(slim)+';\n')"
+  ```
 
 ## 成本参考
 

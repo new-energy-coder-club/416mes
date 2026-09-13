@@ -5,6 +5,7 @@
  * 用法：
  *   node nec-sync.mjs init                          # 初始化：建多维表格 + 选通知群 + 写配置
  *   node nec-sync.mjs push [nec-wip-export.json] [--dry-run]   # 推送工单到多维表格 + 群通知
+ *   node nec-sync.mjs pull [nec-wip-import.json]               # 从多维表格拉回工单（生成「导入合并」文件）
  *   node nec-sync.mjs status                        # 查看配置与连通性
  *
  * 配置文件：nec-sync.config.json（app_token / table_id / chat_id / chat_name，不含密钥）
@@ -21,14 +22,20 @@ const DEFAULT_EXPORT = path.join(DIR, 'nec-wip-export.json');
 const NEC_TYPE_NAMES = { RW: '任务', LL: '领料', CG: '采购', WX: '维修', HD: '活动', QT: '其他' };
 
 /* ---------- lark-cli 调用封装 ---------- */
-function lark(args, { dryRun = false } = {}) {
+// Windows cmd/shell 会丢失 JSON 中的引号或吃掉 @，复杂 JSON 一律落临时文件用 "@./file" 传
+function larkJsonFile(payload) {
+  const f = '.nec-json-' + Date.now() + '.tmp.json';
+  fs.writeFileSync(path.join(DIR, f), JSON.stringify(payload));
+  return { flag: '"@./' + f + '"', cleanup: () => { try { fs.unlinkSync(path.join(DIR, f)); } catch {} } };
+}
+function lark(args, { dryRun = false, input = null } = {}) {
   const cmd = 'lark-cli';
   if (dryRun) {
     console.log('  [dry-run] lark-cli ' + args.map(a => (a.length > 80 ? a.slice(0, 80) + '…' : a)).join(' '));
     return null;
   }
   try {
-    const out = execFileSync(cmd, args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, shell: process.platform === 'win32' });
+    const out = execFileSync(cmd, args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, shell: process.platform === 'win32', input: input || undefined });
     return JSON.parse(out);
   } catch (e) {
     const msg = (e.stdout || '') + (e.stderr || '') || e.message;
@@ -66,9 +73,14 @@ async function init() {
     { name: '完成时间', type: 'text' }
   ];
   console.log('① 创建多维表格「NEC小工单台账」…');
+  // Windows cmd 会吃参数首字符 @，写成文件并加双引号传 @相对路径
+  const fieldsFile = '.nec-fields.tmp.json';
+  fs.writeFileSync(path.join(DIR, fieldsFile), JSON.stringify(fields));
   const base = lark(['base', '+base-create', '--name', 'NEC小工单台账', '--table-name', '小工单',
-    '--time-zone', 'Asia/Shanghai', '--fields', JSON.stringify(fields)]);
-  const appToken = base?.app_token || base?.data?.app_token || base?.app?.app_token;
+    '--time-zone', 'Asia/Shanghai', '--fields', '"@./' + fieldsFile + '"']);
+  fs.unlinkSync(path.join(DIR, fieldsFile));
+  const appToken = base?.app_token || base?.data?.app_token || base?.app?.app_token
+    || base?.data?.base?.base_token || base?.base_token;   // lark-cli 新版返回 data.base.base_token
   const tableId = base?.default_table_id || base?.data?.default_table_id || base?.table_id;
   if (!appToken) { console.error('建表返回异常：' + JSON.stringify(base).slice(0, 500)); process.exit(1); }
   console.log('   ✅ app_token = ' + appToken + '，table_id = ' + (tableId || '（默认表）'));
@@ -123,28 +135,28 @@ async function push(file, dryRun) {
     const found = lark(['base', '+record-search', '--base-token', cfg.app_token,
       '--table-id', cfg.table_id || '小工单', '--keyword', o.code, '--search-field', '工单号',
       '--limit', '5', '--format', 'json'], { dryRun });
-    const recs = found?.records || found?.data?.records || found?.items || [];
-    const exact = recs.find(r => {
-      const f = r.fields || r;
-      const v = f['工单号'];
-      const text = Array.isArray(v) ? v.map(x => x.text || x).join('') : v;
-      return text === o.code;
-    });
+    const recs = rowsToRecords(found);
+    const exact = recs.find(r => fieldText((r.fields || r)['工单号']) === o.code);
     const fields = orderToFields(o);
     let action = null;
     if (!exact) {
-      lark(['base', '+record-batch-create', '--base-token', cfg.app_token, '--table-id', cfg.table_id || '小工单',
-        '--json', JSON.stringify({ create_records: [fields] })], { dryRun });
+      const jf = larkJsonFile({ create_records: [fields] });
+      try {
+        lark(['base', '+record-batch-create', '--base-token', cfg.app_token, '--table-id', cfg.table_id || '小工单',
+          '--json', jf.flag], { dryRun });
+      } finally { jf.cleanup(); }
       created++; action = '🆕 新建';
       console.log(`  🆕 ${o.code} ${o.title} [${o.status}]`);
     } else {
       const rid = exact.record_id || exact.id;
       const old = exact.fields || exact;
-      const norm = v => (Array.isArray(v) ? v.map(x => x.text || x).join('') : (v ?? '')) + '';
-      const changed = Object.entries(fields).some(([k, v]) => norm(old[k]) !== (v ?? '') + '');
+      const changed = Object.entries(fields).some(([k, v]) => fieldText(old[k]) !== (v ?? '') + '');
       if (changed) {
-        lark(['base', '+record-batch-update', '--base-token', cfg.app_token, '--table-id', cfg.table_id || '小工单',
-          '--json', JSON.stringify({ update_records: { [rid]: fields } })], { dryRun });
+        const jf = larkJsonFile({ update_records: { [rid]: fields } });
+        try {
+          lark(['base', '+record-batch-update', '--base-token', cfg.app_token, '--table-id', cfg.table_id || '小工单',
+            '--json', jf.flag], { dryRun });
+        } finally { jf.cleanup(); }
         updated++; action = '🔄 更新';
         console.log(`  🔄 ${o.code} ${o.title} [${o.status}]`);
       } else { skipped++; console.log(`  ⏭  ${o.code} 无变化`); }
@@ -157,6 +169,44 @@ async function push(file, dryRun) {
     }
   }
   console.log(`\n完成：新建 ${created}，更新 ${updated}，无变化 ${skipped}，群通知 ${notified}${dryRun ? '（均未实际执行）' : ''}`);
+}
+
+/* ---------- pull（飞书 → 416MES） ---------- */
+const TYPE_NAME_REV = Object.fromEntries(Object.entries(NEC_TYPE_NAMES).map(([k, v]) => [v, k]));
+function fieldText(v) { return Array.isArray(v) ? v.map(x => (x && typeof x === 'object' ? x.text : x) ?? '').join('') : (v ?? '') + ''; }
+// lark-cli 新版 record-list/search 返回 { data: { fields:[列名], data:[[位置数组]], record_id_list:[] } }，统一转成 { record_id, fields:{} }
+function rowsToRecords(res) {
+  const d = res?.data || res || {};
+  if (!Array.isArray(d.data)) return res?.records || res?.items || [];
+  const fields = d.fields || [], ids = d.record_id_list || [];
+  return d.data.map((row, i) => {
+    const f = {};
+    fields.forEach((name, ci) => { f[name] = Array.isArray(row) ? row[ci] : row?.[name]; });
+    return { record_id: ids[i], fields: f };
+  });
+}
+async function pull(outFile) {
+  const cfg = loadConfig();
+  if (!cfg) { console.error('未找到 nec-sync.config.json，请先运行：node nec-sync.mjs init'); process.exit(1); }
+  console.log('== 从「NEC小工单台账」拉回工单 ==\n');
+  const res = lark(['base', '+record-list', '--base-token', cfg.app_token, '--table-id', cfg.table_id || '小工单', '--format', 'json']);
+  const recs = rowsToRecords(res);
+  const orders = recs.map(r => {
+    const f = r.fields || r;
+    return {
+      code: fieldText(f['工单号']), title: fieldText(f['标题']),
+      type: TYPE_NAME_REV[fieldText(f['类型'])] || 'RW', owner: fieldText(f['负责人']),
+      priority: fieldText(f['优先级']) || '中', due: fieldText(f['截止日期']),
+      status: fieldText(f['状态']) || '待处理', materials: fieldText(f['关联物料']),
+      note: fieldText(f['备注']), createdAt: fieldText(f['创建时间']), doneAt: fieldText(f['完成时间'])
+    };
+  }).filter(o => o.code);
+  const out = { app: '416MES', version: 2, deviceId: 'feishu-pull', exportedAt: new Date().toLocaleString(),
+    state: { materials: [], locations: [], containers: [], workorders: [], necOrders: orders } };
+  fs.writeFileSync(outFile, JSON.stringify(out, null, 1));
+  console.log(`拉回 ${orders.length} 张工单 → ${path.basename(outFile)}`);
+  orders.forEach(o => console.log(`  ⬇  ${o.code} ${o.title} [${o.status}]`));
+  console.log('\n下一步：416MES「物料台账」页 → 导入合并 → 选择该文件（同编码自动更新状态/负责人等字段）');
 }
 
 /* ---------- status ---------- */
@@ -182,9 +232,10 @@ const fileArg = rest.find(a => !a.startsWith('--')) || DEFAULT_EXPORT;
 try {
   if (cmd === 'init') await init();
   else if (cmd === 'push') await push(path.resolve(fileArg), dryRun);
+  else if (cmd === 'pull') await pull(path.resolve(fileArg === DEFAULT_EXPORT ? path.join(DIR, 'nec-wip-import.json') : fileArg));
   else if (cmd === 'status') status();
   else {
-    console.log('用法：\n  node nec-sync.mjs init\n  node nec-sync.mjs push [nec-wip-export.json] [--dry-run]\n  node nec-sync.mjs status');
+    console.log('用法：\n  node nec-sync.mjs init\n  node nec-sync.mjs push [nec-wip-export.json] [--dry-run]\n  node nec-sync.mjs pull [nec-wip-import.json]\n  node nec-sync.mjs status');
     process.exit(cmd ? 1 : 0);
   }
 } catch (e) { console.error('❌ ' + e.message); process.exit(1); }
