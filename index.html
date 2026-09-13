@@ -102,6 +102,9 @@ table.grid tr:hover td{background:#f7fafd;}
   /* A4 整版模式：3列×7行=21张/页，无缝密排+浅灰裁切线 */
   body.a4paper #printSheet{position:static;width:auto;display:flex;flex-wrap:wrap;gap:0;align-content:flex-start;}
   body.a4paper #printSheet .label{page-break-after:auto;break-after:auto;break-inside:avoid;page-break-inside:avoid;outline:.2mm solid #999;}
+  body:not(.a4paper) #printSheet .zonecard{display:none;}   /* 区卡只能在 A4 模式打印 */
+  #printSheet .zonecard{page-break-after:always;break-after:page;max-width:none;width:196mm;height:283mm;aspect-ratio:auto;border:none;border-radius:0;box-shadow:none;}
+  #printSheet .zonecard:last-child{page-break-after:auto;break-after:auto;}
 }
 /* 生成页表单 */
 .form-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;}
@@ -117,6 +120,22 @@ table.grid tr:hover td{background:#f7fafd;}
 .flash-bad{background:#fdecea;border:1px solid #f2b8b0;}
 tr.row-neg td{background:#fdecea;}
 tr.row-low td{background:#fff8e1;}
+/* ===== A4 模块区大卡（NEC 主视觉） ===== */
+.zonecard{width:100%;max-width:190mm;aspect-ratio:196/283;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8mm 10mm 6mm;display:flex;flex-direction:column;font-family:Arial,"Microsoft YaHei",sans-serif;overflow:hidden;box-shadow:0 0 0 1px #c6ccd4;}
+.zc-top{display:flex;align-items:baseline;gap:3mm;border-bottom:2px solid #eee;padding-bottom:3mm;}
+.zc-nec{color:#22a9f0;font-weight:bold;font-size:24pt;}
+.zc-name{font-weight:bold;font-size:40pt;color:#000;letter-spacing:2px;line-height:1.1;}
+.zc-en{margin-left:auto;font-size:9pt;color:#98a2b3;letter-spacing:3px;font-weight:bold;}
+.zc-mid{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4mm;min-height:0;}
+.zc-qr{width:64mm;height:64mm;flex:none;}
+.zc-qr svg{width:100%;height:100%;display:block;}
+.zc-scan{color:#22a9f0;font-weight:bold;font-size:28pt;letter-spacing:1px;}
+.zc-code{font-family:Consolas,monospace;font-size:13pt;color:#333;letter-spacing:1px;background:#f2f7fc;border:1px dashed #22a9f0;border-radius:4px;padding:1mm 4mm;}
+.zc-slogan{display:flex;justify-content:space-between;align-items:center;color:#1b2a7b;font-weight:bold;font-size:15pt;}
+.zc-by{font-size:9.5pt;color:#222;font-weight:normal;display:inline-flex;align-items:center;gap:1.5mm;}
+.zc-by img{height:7mm;}
+.zc-url{font-size:8.5pt;color:#555;text-align:right;margin-top:1mm;}
+.zc-rule{height:2.5mm;background:#22a9f0;margin-top:2mm;border-radius:1px;}
 .log{font-family:Consolas,monospace;font-size:12px;max-height:220px;overflow:auto;background:#16233a;color:#bfe0c8;border-radius:6px;padding:8px 10px;margin-top:10px;white-space:pre-wrap;}
 footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
 @media(max-width:560px){header .slogan{display:none;}header h1{font-size:16px;}header .sub{display:none;}}
@@ -174,7 +193,7 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
   <!-- ========== 人员台账 ========== -->
   <section class="tab" id="tab-member">
     <div class="panel">
-      <h2>人员台账（社团成员名录：编号自动生成，姓名同步「操作人」与工单负责人）</h2>
+      <h2>人员台账（实验室成员名录：编号自动生成，姓名同步「操作人」与工单负责人）</h2>
       <div class="toolbar">
         <input type="text" id="memberSearch" placeholder="🔍 搜索：编号/姓名/学号/部门/职务/电话" style="border:1px solid var(--line);border-radius:5px;padding:6px 10px;font-size:13px;width:260px;">
         <button class="btn" id="btnAddMember">+ 新增人员</button>
@@ -197,7 +216,8 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
       <h2>标签打印（60×40mm 三防热敏纸，汉印 N41 / A4 整版）</h2>
       <div class="typebar" id="typeBar"></div>
       <div class="toolbar">
-        <button class="btn small ghost" id="btnSelAll">全选</button>
+        <input type="text" id="recFilter" placeholder="🔍 筛选（如 C- / SC4 / SLG-01）" style="border:1px solid var(--line);border-radius:5px;padding:5px 10px;font-size:13px;width:200px;">
+        <button class="btn small ghost" id="btnSelAll">全选(筛选结果)</button>
         <button class="btn small ghost" id="btnSelNone">全不选</button>
         <button class="btn small warn" id="btnDelRec">从台账删除勾选</button>
         <span class="spacer"></span>
@@ -239,15 +259,22 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         <button class="btn small" id="btnGenWs">生成工位库位</button>
         <span class="hint">例：W01-G02 = 1号工位第2格</span>
       </div>
+      <div class="form-row"><label>模块区</label>
+        名称 <input type="text" id="gZoneName" placeholder="如：传感器、结构件" style="width:170px">
+        <button class="btn small" id="btnGenZone">生成模块区</button>
+        <span class="hint">自动编 M-xx（内置 M-01~05），A4 大区卡到「标签打印 → 模块区卡」打印</span>
+      </div>
     </div>
     <div class="panel">
       <h2>② 容器码批量生成</h2>
       <div class="form-row"><label>容器类型</label>
         <select id="gCtnType">
           <option value="A4SH|A4四抽收纳盒|A4 四抽">A4四抽收纳盒</option>
-          <option value="SLG|三连格文件盒|三连格">三连格文件盒</option>
+          <option value="SLG|三连格文件盒|牛皮色 28×28×20cm 中距9cm">三连格文件盒</option>
           <option value="XK|斜口零件盒|斜口中号">斜口零件盒</option>
           <option value="ZZX|6040周转箱|600×400">6040周转箱</option>
+          <option value="SC4|四层四格牛皮纸收纳盒|32×25×34cm">四层四格牛皮纸收纳盒</option>
+          <option value="KF|开放式收纳格|32×25×6cm（含12×6×6小格×4）">开放式收纳格</option>
         </select>
         起始序号 <input type="number" id="gCtnFrom" value="1" min="1">
         数量 <input type="number" id="gCtnCount" value="10" min="1">
@@ -304,7 +331,7 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
   <!-- ========== NEC 小工单 ========== -->
   <section class="tab" id="tab-nec">
     <div class="panel">
-      <h2>新建 NEC 小工单（New Energy Coder 社团）</h2>
+      <h2>新建 NEC 小工单（New Energy Coder 实验室）</h2>
       <div class="form-row"><label>标题</label><input type="text" id="necTitle" placeholder="要做什么事" style="width:280px">
         类型 <select id="necType">
           <option value="RW">RW 任务</option><option value="LL">LL 领料</option><option value="CG">CG 采购</option>
@@ -380,7 +407,8 @@ const TYPES = {
   itm: { name: '物品标签', color: '#0891b2', prefix: 'ITM:' },
   man: { name: '手册标签', color: '#be185d', prefix: 'MAN:' },
   wip: { name: '工单码', color: '#d33a2c', prefix: 'WIP:' },
-  nec: { name: 'NEC工单', color: '#7c3aed', prefix: 'NEC:' }
+  nec: { name: 'NEC工单', color: '#7c3aed', prefix: 'NEC:' },
+  zone: { name: '模块区卡', color: '#22a9f0', prefix: 'LOC:' }
 };
 const WIP_NAMES = { LL: '领料工单', BH: '补货工单', JH: '拣货工单', TL: '退料工单' };
 const NEC_TYPE_NAMES = { RW: '任务', LL: '领料', CG: '采购', WX: '维修', HD: '活动', QT: '其他' };
@@ -390,7 +418,7 @@ const LS_KEY = 'mes416_state_v1';
 /* ---------- 状态 ---------- */
 let state = null;
 let curType = 'loc';
-const sel = { loc: new Set(), ctn: new Set(), mat: new Set(), itm: new Set(), man: new Set(), wip: new Set(), nec: new Set() };
+const sel = { loc: new Set(), ctn: new Set(), mat: new Set(), itm: new Set(), man: new Set(), wip: new Set(), nec: new Set(), zone: new Set() };
 
 function pad(n, w) { return String(n).padStart(w, '0'); }
 function today() { const d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1, 2) + '-' + pad(d.getDate(), 2); }
@@ -408,7 +436,7 @@ function seedState() {
   const containers = [];
   const push = (pre, type, spec, n) => { for (let i = 1; i <= n; i++) containers.push({ code: pre + '-' + pad(i, 3), type, spec, loc: '' }); };
   push('A4SH', 'A4四抽收纳盒', 'A4 四抽', 10);
-  push('SLG', '三连格文件盒', '三连格', 10);
+  push('SLG', '三连格文件盒', '牛皮色 28×28×20cm 中距9cm', 10);
   push('XK', '斜口零件盒', '斜口中号', 20);
   return {
     materials: [
@@ -440,6 +468,211 @@ function seedState() {
     deviceId: 'dev-' + Math.random().toString(36).slice(2, 8)
   };
 }
+/* ---------- C区角钢货架内置布局（6架x4层，层号从上往下，底层预留） ---------- */
+const C_LAYOUT = {
+  locations: [
+    { code: 'C-01-01-01', kind: '货架', desc: 'C区1号货架 第一层 第1位（32cm位·四层四格）' },
+    { code: 'C-01-01-02', kind: '货架', desc: 'C区1号货架 第一层 第2位（32cm位·四层四格）' },
+    { code: 'C-01-01-03', kind: '货架', desc: 'C区1号货架 第一层 第3位（32cm位·四层四格）' },
+    { code: 'C-01-01-04', kind: '货架', desc: 'C区1号货架 第一层 第4位（32cm位·四层四格）' },
+    { code: 'C-01-02-01', kind: '货架', desc: 'C区1号货架 第二层 第1位（32cm位·四层四格）' },
+    { code: 'C-01-02-02', kind: '货架', desc: 'C区1号货架 第二层 第2位（32cm位·四层四格）' },
+    { code: 'C-01-02-03', kind: '货架', desc: 'C区1号货架 第二层 第3位（32cm位·四层四格）' },
+    { code: 'C-01-02-04', kind: '货架', desc: 'C区1号货架 第二层 第4位（32cm位·四层四格）' },
+    { code: 'C-01-03-01', kind: '货架', desc: 'C区1号货架 第三层 第1位（32cm位·四层四格）' },
+    { code: 'C-01-03-02', kind: '货架', desc: 'C区1号货架 第三层 第2位（32cm位·四层四格）' },
+    { code: 'C-01-03-03', kind: '货架', desc: 'C区1号货架 第三层 第3位（32cm位·四层四格）' },
+    { code: 'C-01-03-04', kind: '货架', desc: 'C区1号货架 第三层 第4位（32cm位·四层四格）' },
+    { code: 'C-01-04-01', kind: '货架', desc: 'C区1号货架 第四层（最底层） 第1位（32cm 预留位）' },
+    { code: 'C-01-04-02', kind: '货架', desc: 'C区1号货架 第四层（最底层） 第2位（32cm 预留位）' },
+    { code: 'C-01-04-03', kind: '货架', desc: 'C区1号货架 第四层（最底层） 第3位（32cm 预留位）' },
+    { code: 'C-01-04-04', kind: '货架', desc: 'C区1号货架 第四层（最底层） 第4位（32cm 预留位）' },
+    { code: 'C-02-01-01', kind: '货架', desc: 'C区2号货架 第一层 第1位（32cm位·四层四格）' },
+    { code: 'C-02-01-02', kind: '货架', desc: 'C区2号货架 第一层 第2位（32cm位·四层四格）' },
+    { code: 'C-02-01-03', kind: '货架', desc: 'C区2号货架 第一层 第3位（32cm位·四层四格）' },
+    { code: 'C-02-01-04', kind: '货架', desc: 'C区2号货架 第一层 第4位（32cm位·四层四格）' },
+    { code: 'C-02-02-01', kind: '货架', desc: 'C区2号货架 第二层 第1位（32cm位·四层四格）' },
+    { code: 'C-02-02-02', kind: '货架', desc: 'C区2号货架 第二层 第2位（32cm位·四层四格）' },
+    { code: 'C-02-02-03', kind: '货架', desc: 'C区2号货架 第二层 第3位（32cm位·四层四格）' },
+    { code: 'C-02-02-04', kind: '货架', desc: 'C区2号货架 第二层 第4位（32cm位·四层四格）' },
+    { code: 'C-02-03-01', kind: '货架', desc: 'C区2号货架 第三层 第1位（32cm位·四层四格）' },
+    { code: 'C-02-03-02', kind: '货架', desc: 'C区2号货架 第三层 第2位（32cm位·四层四格）' },
+    { code: 'C-02-03-03', kind: '货架', desc: 'C区2号货架 第三层 第3位（32cm位·四层四格）' },
+    { code: 'C-02-03-04', kind: '货架', desc: 'C区2号货架 第三层 第4位（32cm位·四层四格）' },
+    { code: 'C-02-04-01', kind: '货架', desc: 'C区2号货架 第四层（最底层） 第1位（32cm 预留位）' },
+    { code: 'C-02-04-02', kind: '货架', desc: 'C区2号货架 第四层（最底层） 第2位（32cm 预留位）' },
+    { code: 'C-02-04-03', kind: '货架', desc: 'C区2号货架 第四层（最底层） 第3位（32cm 预留位）' },
+    { code: 'C-02-04-04', kind: '货架', desc: 'C区2号货架 第四层（最底层） 第4位（32cm 预留位）' },
+    { code: 'C-03-01-01', kind: '货架', desc: 'C区3号货架 第一层 第1位（28cm位·三连格）' },
+    { code: 'C-03-01-02', kind: '货架', desc: 'C区3号货架 第一层 第2位（28cm位·三连格）' },
+    { code: 'C-03-01-03', kind: '货架', desc: 'C区3号货架 第一层 第3位（28cm位·三连格）' },
+    { code: 'C-03-01-04', kind: '货架', desc: 'C区3号货架 第一层 第4位（28cm位·三连格）' },
+    { code: 'C-03-01-05', kind: '货架', desc: 'C区3号货架 第一层 第5位（28cm位·三连格）' },
+    { code: 'C-03-02-01', kind: '货架', desc: 'C区3号货架 第二层 第1位（32cm位·四层四格）' },
+    { code: 'C-03-02-02', kind: '货架', desc: 'C区3号货架 第二层 第2位（32cm位·四层四格）' },
+    { code: 'C-03-02-03', kind: '货架', desc: 'C区3号货架 第二层 第3位（32cm位·KF两摞）' },
+    { code: 'C-03-02-04', kind: '货架', desc: 'C区3号货架 第二层 第4位（32cm位·KF两摞）' },
+    { code: 'C-03-03-01', kind: '货架', desc: 'C区3号货架 第三层 第1位（32cm位·四层四格）' },
+    { code: 'C-03-03-02', kind: '货架', desc: 'C区3号货架 第三层 第2位（32cm位·四层四格）' },
+    { code: 'C-03-03-03', kind: '货架', desc: 'C区3号货架 第三层 第3位（32cm位·四层四格）' },
+    { code: 'C-03-03-04', kind: '货架', desc: 'C区3号货架 第三层 第4位（32cm位·四层四格）' },
+    { code: 'C-03-04-01', kind: '货架', desc: 'C区3号货架 第四层（最底层） 第1位（32cm 预留位）' },
+    { code: 'C-03-04-02', kind: '货架', desc: 'C区3号货架 第四层（最底层） 第2位（32cm 预留位）' },
+    { code: 'C-03-04-03', kind: '货架', desc: 'C区3号货架 第四层（最底层） 第3位（32cm 预留位）' },
+    { code: 'C-03-04-04', kind: '货架', desc: 'C区3号货架 第四层（最底层） 第4位（32cm 预留位）' },
+    { code: 'C-04-01-01', kind: '货架', desc: 'C区4号货架 第一层 第1位（28cm位·三连格）' },
+    { code: 'C-04-01-02', kind: '货架', desc: 'C区4号货架 第一层 第2位（28cm位·三连格）' },
+    { code: 'C-04-01-03', kind: '货架', desc: 'C区4号货架 第一层 第3位（28cm位·三连格）' },
+    { code: 'C-04-01-04', kind: '货架', desc: 'C区4号货架 第一层 第4位（28cm位·三连格）' },
+    { code: 'C-04-01-05', kind: '货架', desc: 'C区4号货架 第一层 第5位（28cm位·三连格）' },
+    { code: 'C-04-02-01', kind: '货架', desc: 'C区4号货架 第二层 第1位（28cm位·三连格）' },
+    { code: 'C-04-02-02', kind: '货架', desc: 'C区4号货架 第二层 第2位（28cm位·三连格）' },
+    { code: 'C-04-02-03', kind: '货架', desc: 'C区4号货架 第二层 第3位（28cm位·三连格）' },
+    { code: 'C-04-02-04', kind: '货架', desc: 'C区4号货架 第二层 第4位（28cm位·三连格）' },
+    { code: 'C-04-02-05', kind: '货架', desc: 'C区4号货架 第二层 第5位（28cm位·三连格）' },
+    { code: 'C-04-03-01', kind: '货架', desc: 'C区4号货架 第三层 第1位（28cm位·三连格）' },
+    { code: 'C-04-03-02', kind: '货架', desc: 'C区4号货架 第三层 第2位（28cm位·三连格）' },
+    { code: 'C-04-03-03', kind: '货架', desc: 'C区4号货架 第三层 第3位（28cm位·三连格）' },
+    { code: 'C-04-03-04', kind: '货架', desc: 'C区4号货架 第三层 第4位（28cm位·三连格）' },
+    { code: 'C-04-03-05', kind: '货架', desc: 'C区4号货架 第三层 第5位（28cm位·三连格）' },
+    { code: 'C-04-04-01', kind: '货架', desc: 'C区4号货架 第四层（最底层） 第1位（32cm 预留位）' },
+    { code: 'C-04-04-02', kind: '货架', desc: 'C区4号货架 第四层（最底层） 第2位（32cm 预留位）' },
+    { code: 'C-04-04-03', kind: '货架', desc: 'C区4号货架 第四层（最底层） 第3位（32cm 预留位）' },
+    { code: 'C-04-04-04', kind: '货架', desc: 'C区4号货架 第四层（最底层） 第4位（32cm 预留位）' },
+    { code: 'C-05-01-01', kind: '货架', desc: 'C区5号货架 第一层 第1位（28cm位·三连格）' },
+    { code: 'C-05-01-02', kind: '货架', desc: 'C区5号货架 第一层 第2位（28cm位·三连格）' },
+    { code: 'C-05-01-03', kind: '货架', desc: 'C区5号货架 第一层 第3位（28cm位·三连格）' },
+    { code: 'C-05-01-04', kind: '货架', desc: 'C区5号货架 第一层 第4位（28cm位·三连格）' },
+    { code: 'C-05-01-05', kind: '货架', desc: 'C区5号货架 第一层 第5位（28cm位·三连格）' },
+    { code: 'C-05-02-01', kind: '货架', desc: 'C区5号货架 第二层 第1位（28cm位·三连格）' },
+    { code: 'C-05-02-02', kind: '货架', desc: 'C区5号货架 第二层 第2位（28cm位·三连格）' },
+    { code: 'C-05-02-03', kind: '货架', desc: 'C区5号货架 第二层 第3位（28cm位·三连格）' },
+    { code: 'C-05-02-04', kind: '货架', desc: 'C区5号货架 第二层 第4位（28cm位·三连格）' },
+    { code: 'C-05-02-05', kind: '货架', desc: 'C区5号货架 第二层 第5位（28cm位·三连格）' },
+    { code: 'C-05-03-01', kind: '货架', desc: 'C区5号货架 第三层 第1位（28cm位·三连格）' },
+    { code: 'C-05-03-02', kind: '货架', desc: 'C区5号货架 第三层 第2位（28cm位·三连格）' },
+    { code: 'C-05-03-03', kind: '货架', desc: 'C区5号货架 第三层 第3位（28cm位·三连格）' },
+    { code: 'C-05-03-04', kind: '货架', desc: 'C区5号货架 第三层 第4位（28cm位·三连格）' },
+    { code: 'C-05-03-05', kind: '货架', desc: 'C区5号货架 第三层 第5位（28cm位·三连格）' },
+    { code: 'C-05-04-01', kind: '货架', desc: 'C区5号货架 第四层（最底层） 第1位（32cm 预留位）' },
+    { code: 'C-05-04-02', kind: '货架', desc: 'C区5号货架 第四层（最底层） 第2位（32cm 预留位）' },
+    { code: 'C-05-04-03', kind: '货架', desc: 'C区5号货架 第四层（最底层） 第3位（32cm 预留位）' },
+    { code: 'C-05-04-04', kind: '货架', desc: 'C区5号货架 第四层（最底层） 第4位（32cm 预留位）' },
+    { code: 'C-06-01-01', kind: '货架', desc: 'C区6号货架 第一层 第1位（28cm位·三连格）' },
+    { code: 'C-06-01-02', kind: '货架', desc: 'C区6号货架 第一层 第2位（28cm位·三连格）' },
+    { code: 'C-06-01-03', kind: '货架', desc: 'C区6号货架 第一层 第3位（28cm位·三连格）' },
+    { code: 'C-06-01-04', kind: '货架', desc: 'C区6号货架 第一层 第4位（28cm位·三连格）' },
+    { code: 'C-06-01-05', kind: '货架', desc: 'C区6号货架 第一层 第5位（28cm位·三连格）' },
+    { code: 'C-06-02-01', kind: '货架', desc: 'C区6号货架 第二层 第1位（28cm位·三连格）' },
+    { code: 'C-06-02-02', kind: '货架', desc: 'C区6号货架 第二层 第2位（28cm位·三连格）' },
+    { code: 'C-06-02-03', kind: '货架', desc: 'C区6号货架 第二层 第3位（28cm位·三连格）' },
+    { code: 'C-06-02-04', kind: '货架', desc: 'C区6号货架 第二层 第4位（28cm位·三连格）' },
+    { code: 'C-06-02-05', kind: '货架', desc: 'C区6号货架 第二层 第5位（28cm位·三连格）' },
+    { code: 'C-06-03-01', kind: '货架', desc: 'C区6号货架 第三层 第1位（28cm位·三连格）' },
+    { code: 'C-06-03-02', kind: '货架', desc: 'C区6号货架 第三层 第2位（28cm位·三连格）' },
+    { code: 'C-06-03-03', kind: '货架', desc: 'C区6号货架 第三层 第3位（28cm位·三连格）' },
+    { code: 'C-06-03-04', kind: '货架', desc: 'C区6号货架 第三层 第4位（28cm位·三连格）' },
+    { code: 'C-06-03-05', kind: '货架', desc: 'C区6号货架 第三层 第5位（28cm位·三连格）' },
+    { code: 'C-06-04-01', kind: '货架', desc: 'C区6号货架 第四层（最底层） 第1位（32cm 预留位）' },
+    { code: 'C-06-04-02', kind: '货架', desc: 'C区6号货架 第四层（最底层） 第2位（32cm 预留位）' },
+    { code: 'C-06-04-03', kind: '货架', desc: 'C区6号货架 第四层（最底层） 第3位（32cm 预留位）' },
+    { code: 'C-06-04-04', kind: '货架', desc: 'C区6号货架 第四层（最底层） 第4位（32cm 预留位）' }
+  ],
+  containers: [
+    { code: 'SC4-001', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-01-01-01' },
+    { code: 'SC4-002', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-01-01-02' },
+    { code: 'SC4-003', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-01-01-03' },
+    { code: 'SC4-004', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-01-01-04' },
+    { code: 'SC4-005', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-01-02-01' },
+    { code: 'SC4-006', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-01-02-02' },
+    { code: 'SC4-007', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-01-02-03' },
+    { code: 'SC4-008', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-01-02-04' },
+    { code: 'SC4-009', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-01-03-01' },
+    { code: 'SC4-010', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-01-03-02' },
+    { code: 'SC4-011', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-01-03-03' },
+    { code: 'SC4-012', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-01-03-04' },
+    { code: 'SC4-013', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-02-01-01' },
+    { code: 'SC4-014', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-02-01-02' },
+    { code: 'SC4-015', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-02-01-03' },
+    { code: 'SC4-016', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-02-01-04' },
+    { code: 'SC4-017', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-02-02-01' },
+    { code: 'SC4-018', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-02-02-02' },
+    { code: 'SC4-019', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-02-02-03' },
+    { code: 'SC4-020', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-02-02-04' },
+    { code: 'SC4-021', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-02-03-01' },
+    { code: 'SC4-022', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-02-03-02' },
+    { code: 'SC4-023', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-02-03-03' },
+    { code: 'SC4-024', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-02-03-04' },
+    { code: 'SLG-011', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-03-01-01' },
+    { code: 'SLG-012', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-03-01-02' },
+    { code: 'SLG-013', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-03-01-03' },
+    { code: 'SLG-014', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-03-01-04' },
+    { code: 'SLG-015', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-03-01-05' },
+    { code: 'SC4-025', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-03-02-01' },
+    { code: 'SC4-026', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-03-02-02' },
+    { code: 'KF-001', type: '开放式收纳格', spec: '32×25×6cm（含12×6×6小格×4）·与另一格上下叠放', loc: 'C-03-02-03' },
+    { code: 'KF-002', type: '开放式收纳格', spec: '32×25×6cm（含12×6×6小格×4）·与另一格上下叠放', loc: 'C-03-02-03' },
+    { code: 'KF-003', type: '开放式收纳格', spec: '32×25×6cm（含12×6×6小格×4）·与另一格上下叠放', loc: 'C-03-02-04' },
+    { code: 'KF-004', type: '开放式收纳格', spec: '32×25×6cm（含12×6×6小格×4）·与另一格上下叠放', loc: 'C-03-02-04' },
+    { code: 'SC4-027', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-03-03-01' },
+    { code: 'SC4-028', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-03-03-02' },
+    { code: 'SC4-029', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-03-03-03' },
+    { code: 'SC4-030', type: '四层四格牛皮纸收纳盒', spec: '32×25×34cm', loc: 'C-03-03-04' },
+    { code: 'SLG-016', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-04-01-01' },
+    { code: 'SLG-017', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-04-01-02' },
+    { code: 'SLG-018', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-04-01-03' },
+    { code: 'SLG-019', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-04-01-04' },
+    { code: 'SLG-020', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-04-01-05' },
+    { code: 'SLG-021', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-04-02-01' },
+    { code: 'SLG-022', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-04-02-02' },
+    { code: 'SLG-023', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-04-02-03' },
+    { code: 'SLG-024', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-04-02-04' },
+    { code: 'SLG-025', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-04-02-05' },
+    { code: 'SLG-026', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-04-03-01' },
+    { code: 'SLG-027', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-04-03-02' },
+    { code: 'SLG-028', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-04-03-03' },
+    { code: 'SLG-029', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-04-03-04' },
+    { code: 'SLG-030', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-04-03-05' },
+    { code: 'SLG-031', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-05-01-01' },
+    { code: 'SLG-032', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-05-01-02' },
+    { code: 'SLG-033', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-05-01-03' },
+    { code: 'SLG-034', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-05-01-04' },
+    { code: 'SLG-035', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-05-01-05' },
+    { code: 'SLG-036', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-05-02-01' },
+    { code: 'SLG-037', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-05-02-02' },
+    { code: 'SLG-038', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-05-02-03' },
+    { code: 'SLG-039', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-05-02-04' },
+    { code: 'SLG-040', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-05-02-05' },
+    { code: 'SLG-041', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-05-03-01' },
+    { code: 'SLG-042', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-05-03-02' },
+    { code: 'SLG-043', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-05-03-03' },
+    { code: 'SLG-044', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-05-03-04' },
+    { code: 'SLG-045', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-05-03-05' },
+    { code: 'SLG-046', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-06-01-01' },
+    { code: 'SLG-047', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-06-01-02' },
+    { code: 'SLG-048', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-06-01-03' },
+    { code: 'SLG-049', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-06-01-04' },
+    { code: 'SLG-050', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-06-01-05' },
+    { code: 'SLG-051', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-06-02-01' },
+    { code: 'SLG-052', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-06-02-02' },
+    { code: 'SLG-053', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-06-02-03' },
+    { code: 'SLG-054', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-06-02-04' },
+    { code: 'SLG-055', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-06-02-05' },
+    { code: 'SLG-056', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-06-03-01' },
+    { code: 'SLG-057', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-06-03-02' },
+    { code: 'SLG-058', type: '三连格文件盒', spec: '牛皮色 28×28×20cm 中距9cm', loc: 'C-06-03-03' }
+  ]
+};
+
+/* ---------- 模块区（A4 大卡）内置 ---------- */
+const MODULE_ZONES = [
+  { code: 'M-01', kind: '模块区', desc: '连接器' },
+  { code: 'M-02', kind: '模块区', desc: '电机' },
+  { code: 'M-03', kind: '模块区', desc: '电池' },
+  { code: 'M-04', kind: '模块区', desc: '防护设备' },
+  { code: 'M-05', kind: '模块区', desc: '端子线材' }
+];
+
 function load() {
   try { const raw = localStorage.getItem(LS_KEY); if (raw) { state = JSON.parse(raw); } } catch (e) { }
   if (!state) state = seedState();
@@ -454,6 +687,11 @@ function load() {
   state.deviceId = state.deviceId || ('dev-' + Math.random().toString(36).slice(2, 8));
   state.materials.forEach(m => { if (m.minQty == null) m.minQty = 0; });
   state.txnSeq = Math.max(state.txnSeq || 0, ...state.transactions.map(t => t.seq || 0), 0);   // 审计日志序号迁移
+  // C区布局内置（缺则补，已有记录不覆盖）
+  C_LAYOUT.locations.forEach(l => { if (!state.locations.find(x => x.code === l.code)) state.locations.push(Object.assign({}, l)); });
+  C_LAYOUT.containers.forEach(c => { if (!state.containers.find(x => x.code === c.code)) state.containers.push(Object.assign({}, c)); });
+  // 模块区卡内置（连接器/电机/电池/防护设备/端子线材）
+  MODULE_ZONES.forEach(z => { if (!state.locations.find(x => x.code === z.code)) state.locations.push(Object.assign({}, z)); });
   save();
 }
 function save() { localStorage.setItem(LS_KEY, JSON.stringify(state)); }
@@ -802,6 +1040,7 @@ document.getElementById('fileMerge').addEventListener('change', e => {
 /* ================= ② 标签打印 ================= */
 function recordsOf(t) {
   if (t === 'loc') return state.locations;
+  if (t === 'zone') return state.locations.filter(l => l.kind === '模块区');
   if (t === 'ctn') return state.containers;
   if (t === 'mat') return state.materials;
   if (t === 'itm') return state.items;
@@ -823,6 +1062,7 @@ function labelAttrs(t, r) {
 const NEC_LOGO_W = 'data:image/png;base64,' + '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';
 document.getElementById('hdrLogo').src = NEC_LOGO_W;
 function labelHtml(t, r) {
+  if (t === 'zone') return zoneCardHtml(r);
   const cfg = TYPES[t], code = recCode(t, r);
   const attrs = labelAttrs(t, r).map(([k, v]) => '<div class="attr"><b>' + esc(k) + '：</b>' + esc(v) + '</div>').join('');
   const tag = code.indexOf('-') >= 0 ? code.split('-')[0] : (r.type || '');
@@ -835,21 +1075,40 @@ function labelHtml(t, r) {
     '<div class="right">' + attrs + '<div class="pdate">打印 ' + today() + '</div></div></div>' +
     '<div class="foot"><span>BUILT TO DAWN · KEEP BUILDING&#9608;</span><span class="url">newenergycoder.club</span></div></div>';
 }
+/* A4 模块区大卡：NEC 主视觉风（Just Scan QR!），整页一张 */
+function zoneCardHtml(r) {
+  return '<div class="zonecard">' +
+    '<div class="zc-top"><span class="zc-nec">NEC：</span><span class="zc-name">' + esc(r.desc || r.code) + '</span><span class="zc-en">MODULE ZONE</span></div>' +
+    '<div class="zc-mid"><div class="zc-qr">' + qrSvg('LOC:' + r.code) + '</div>' +
+    '<div class="zc-scan">Just Scan QR!</div><div class="zc-code">LOC:' + esc(r.code) + '</div></div>' +
+    '<div class="zc-bot"><div class="zc-slogan"><span>KEEP BUILDING▮</span>' +
+    '<span class="zc-by">Design by <img src="' + NEC_LOGO_W + '" alt="NEC"> 常州工NEC in CIT</span></div>' +
+    '<div class="zc-url">newenergycoder.club</div><div class="zc-rule"></div></div></div>';
+}
+/* 标签列表筛选：只影响显示与「全选」范围，sel 索引始终对应 recordsOf 全量 */
+let labelFilter = '';
+function recShown(recs) {
+  const kw = labelFilter.trim().toLowerCase();
+  const cells = { loc: r => [r.code, r.kind, r.desc], ctn: r => [r.code, r.type, r.spec, r.loc], mat: r => [r.code, r.name, r.spec, r.loc], itm: r => [r.code, r.name, r.spec, r.loc], man: r => [r.code, r.name, r.ver, r.loc], wip: r => [r.code, r.type, r.date, r.status], nec: r => [r.code, r.title, r.owner, r.status], zone: r => [r.code, r.desc, 'LOC:' + r.code] };
+  return recs.map((r, i) => ({ r, i })).filter(({ r }) => !kw || (cells[curType] ? cells[curType](r) : [r.code]).join(' ').toLowerCase().includes(kw));
+}
 function renderLabelTab() {
   const bar = document.getElementById('typeBar');
   bar.innerHTML = Object.entries(TYPES).map(([k, v]) =>
     '<button data-t="' + k + '" class="' + (k === curType ? 'on' : '') + '" style="' + (k === curType ? 'background:' + v.color + ';border-color:' + v.color : '') + '">' + v.name + '（' + recordsOf(k).length + '）</button>').join('');
-  bar.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { curType = b.dataset.t; renderLabelTab(); }));
-  const heads = { loc: ['库位码', '类型', '说明'], ctn: ['容器码', '类型', '规格', '库位'], mat: ['物料码', '名称', '规格', '库位'], itm: ['物品码', '名称', '规格', '库位'], man: ['手册码', '名称', '版本', '库位'], wip: ['工单号', '类型', '日期', '状态'], nec: ['工单号', '标题', '负责人', '状态'] };
+  bar.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { curType = b.dataset.t; if (curType === 'zone') setPaper('a4'); renderLabelTab(); }));
+  const heads = { loc: ['库位码', '类型', '说明'], ctn: ['容器码', '类型', '规格', '库位'], mat: ['物料码', '名称', '规格', '库位'], itm: ['物品码', '名称', '规格', '库位'], man: ['手册码', '名称', '版本', '库位'], wip: ['工单号', '类型', '日期', '状态'], nec: ['工单号', '标题', '负责人', '状态'], zone: ['区域码', '名称', '机读串'] };
   const cells = {
     loc: r => [r.code, r.kind, r.desc], ctn: r => [r.code, r.type, r.spec, r.loc],
     mat: r => [r.code, r.name, r.spec, r.loc], itm: r => [r.code, r.name, r.spec, r.loc], man: r => [r.code, r.name, r.ver, r.loc],
     wip: r => [r.code, WIP_NAMES[r.type] || r.type, r.date, r.status],
-    nec: r => [r.code, r.title, r.owner, r.status]
+    nec: r => [r.code, r.title, r.owner, r.status],
+    zone: r => [r.code, r.desc, 'LOC:' + r.code]
   };
   const recs = recordsOf(curType);
+  const shown = recShown(recs);
   document.querySelector('#recTable thead').innerHTML = '<tr><th style="width:26px"></th>' + heads[curType].map(h => '<th>' + h + '</th>').join('') + '</tr>';
-  document.querySelector('#recTable tbody').innerHTML = recs.map((r, i) =>
+  document.querySelector('#recTable tbody').innerHTML = shown.map(({ r, i }) =>
     '<tr><td><input type="checkbox" class="recSel" data-i="' + i + '"' + (sel[curType].has(i) ? ' checked' : '') + '></td>' +
     cells[curType](r).map(c => '<td>' + esc(c) + '</td>').join('') + '</tr>').join('');
   document.querySelectorAll('.recSel').forEach(c => c.addEventListener('change', () => {
@@ -939,9 +1198,17 @@ function setFontScale(pct, skipSave) {
 document.getElementById('numFontScale').addEventListener('change', e => setFontScale(e.target.value));
 document.getElementById('numFontScale').addEventListener('input', e => setFontScale(e.target.value));
 setFontScale(localStorage.getItem('mes416_font') || 100, true);
-document.getElementById('btnSelAll').addEventListener('click', () => { recordsOf(curType).forEach((_, i) => sel[curType].add(i)); renderLabelTab(); });
+document.getElementById('recFilter').addEventListener('input', e => { labelFilter = e.target.value; renderLabelTab(); });
+document.getElementById('btnSelAll').addEventListener('click', () => { recShown(recordsOf(curType)).forEach(({ i }) => sel[curType].add(i)); renderLabelTab(); });
 document.getElementById('btnSelNone').addEventListener('click', () => { sel[curType].clear(); renderLabelTab(); });
 document.getElementById('btnDelRec').addEventListener('click', () => {
+  if (curType === 'zone') {
+    const zidx = [...sel.zone].sort((a, b) => b - a);
+    if (!zidx.length || !confirm('从台账删除勾选的 ' + zidx.length + ' 条模块区记录？')) return;
+    const zones = recordsOf('zone');
+    zidx.forEach(i => { const zi = state.locations.findIndex(l => l.code === zones[i].code); if (zi >= 0) state.locations.splice(zi, 1); });
+    sel.zone.clear(); save(); renderLabelTab(); return;
+  }
   const idx = [...sel[curType]].sort((a, b) => b - a);
   if (!idx.length || !confirm('从台账删除勾选的 ' + idx.length + ' 条' + TYPES[curType].name + '记录？')) return;
   const arr = recordsOf(curType); idx.forEach(i => arr.splice(i, 1));
@@ -974,6 +1241,23 @@ document.getElementById('btnGenCtn').addEventListener('click', () => {
   const from = +document.getElementById('gCtnFrom').value, n = +document.getElementById('gCtnCount').value;
   const items = []; for (let i = from; i < from + n; i++) items.push({ code: pre + '-' + pad(i, 3), type, spec, loc: '' });
   alert('新增 ' + addUnique(state.containers, items, 'code') + ' 个容器码（重复自动跳过）');
+});
+/* ---- 模块区（A4 大卡） ---- */
+document.getElementById('btnGenZone').addEventListener('click', () => {
+  const name = document.getElementById('gZoneName').value.trim();
+  if (!name) { alert('请填写模块区名称'); return; }
+  let max = 0;
+  state.locations.forEach(l => { const m = String(l.code).match(/^M-(\d+)$/); if (m) max = Math.max(max, +m[1]); });
+  const code = 'M-' + pad(max + 1, 2);
+  state.locations.push({ code, kind: '模块区', desc: name });
+  save();
+  document.getElementById('gZoneName').value = '';
+  if (confirm('已生成模块区 ' + code + '（' + name + '），与库位码同台账、同导出。\n是否立即去打印 A4 区卡？')) {
+    curType = 'zone';
+    sel.zone.clear(); sel.zone.add(recordsOf('zone').length - 1);
+    setPaper('a4');
+    document.querySelector('nav.tabs button[data-tab=label]').click();
+  }
 });
 /* ---- 物品 / 手册流水码 ---- */
 function nextCode(arr, prefix) {
