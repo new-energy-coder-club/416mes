@@ -338,6 +338,7 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         <tbody></tbody>
       </table>
       <div class="toolbar" style="margin-top:8px"><button class="btn small ghost" id="btnWipAddItem">+ 添加明细行</button></div>
+      <p class="hint" id="wipMatHint">⚠️ 物料码必须先在「<a href="javascript:void 0" onclick="document.querySelector('nav.tabs button[data-tab=ledger]').click()" style="color:var(--blue)">物料台账</a>」里建档；输入后右侧会显示物料名称与当前库存，<span style="color:#d33a2c">红色 = 未建档，无法生成工单</span>。同一物料填多行会自动合并为一行。</p>
       <p class="hint">生成的工单打印后随货走；发料/补货时在「扫码出入库」页扫 <b>WIP:</b> 码执行扣减/增加库存，不扫码库存不变。</p>
     </div>
     <div class="panel">
@@ -1632,10 +1633,27 @@ function refreshMatDatalist() {
 }
 function wipItemRow() {
   const tr = document.createElement('tr');
-  tr.innerHTML = '<td><input type="text" class="wiMat" list="matList" placeholder="物料码，如 GJ-SD-001"></td>' +
+  tr.innerHTML = '<td><input type="text" class="wiMat" list="matList" placeholder="物料码，如 GJ-SD-001"><div class="wiMatInfo hint" style="margin-top:2px;min-height:16px"></div></td>' +
     '<td><input type="number" class="wiQty" value="1" min="1"></td>' +
     '<td><button class="btn small warn wiDel">删</button></td>';
   tr.querySelector('.wiDel').addEventListener('click', () => tr.remove());
+  // 实时校验：显示物料名称与当前库存；未建档标红
+  const matInp = tr.querySelector('.wiMat');
+  const info = tr.querySelector('.wiMatInfo');
+  const showInfo = () => {
+    const code = matInp.value.trim();
+    if (!code) { info.textContent = ''; info.style.color = ''; return; }
+    const m = findMat(code);
+    if (m) {
+      info.textContent = '✓ ' + (m.name || '') + (m.spec ? '（' + m.spec + '）' : '') + '　当前库存 ' + m.qty;
+      info.style.color = '#2d9d4f';
+    } else {
+      info.textContent = '✗ 未在物料台账建档，无法生成工单';
+      info.style.color = '#d33a2c';
+    }
+  };
+  matInp.addEventListener('input', showInfo);
+  matInp.addEventListener('change', showInfo);
   return tr;
 }
 document.getElementById('btnWipAddItem').addEventListener('click', () => document.querySelector('#wipItemTable tbody').appendChild(wipItemRow()));
@@ -1660,7 +1678,13 @@ document.getElementById('btnGenWip').addEventListener('click', () => {
   if (merged.length) notes.push('同一物料多行已自动合并：' + merged.join('、'));
   if (dropped.length) notes.push('已忽略 ' + dropped.length + ' 行无效明细（' + dropped.map(d => d.reason).join('；') + '）');
   alert('已生成工单 ' + code + '（' + WIP_NAMES[type] + '，明细 ' + r.order.items.length + ' 项）' + (notes.length ? '\n\n' + notes.join('\n') : ''));
-  if (confirm('是否立即去打印标签？')) {
+  // 三选：去扫码执行 / 去打印标签 / 留在本页
+  const choice = prompt('工单 ' + code + ' 已生成。下一步：\n输入 1 = 去「扫码出入库」立即执行（扣减/增加库存）\n输入 2 = 去「标签打印」打印工单标签\n其他/取消 = 留在本页', '1');
+  if (choice === '1') {
+    document.querySelector('nav.tabs button[data-tab=scan]').click();
+    const si = document.getElementById('scanInput');
+    if (si) { si.value = 'WIP:' + code; si.focus(); si.select(); }
+  } else if (choice === '2') {
     curType = 'wip'; sel.wip.clear(); sel.wip.add(state.workorders.length - 1);
     document.querySelector('nav.tabs button[data-tab=label]').click();
   }
