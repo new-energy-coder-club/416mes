@@ -443,12 +443,17 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
   <!-- ========== 扫码出入库 ========== -->
   <section class="tab" id="tab-scan">
     <div class="panel">
-      <h2>扫码 / 手输机读串（前缀：LOC: 库位 · CTN: 容器 · MAT: 物料 · WIP: 工单）</h2>
+      <h2>扫码 / 手输机读串</h2>
+      <p class="hint" style="margin:0 0 8px">支持 7 种前缀：
+        <b>MAT:</b> 物料 · <b>LOC:</b> 库位（含模块区 <b>M-01</b>）· <b>CTN:</b> 容器 ·
+        <b>WIP:</b> 工单 · <b>NEC:</b> NEC工单 · <b>ITM:</b> 物品 · <b>MAN:</b> 手册
+        <br>不写前缀也能扫：系统会按「工单码 → 物料码」顺序自动识别。
+      </p>
       <input class="scan-input" id="scanInput" placeholder="扫描或输入，如 MAT:GJ-SD-001 / WIP:LL20260909007，回车确认" autofocus>
       <button class="btn ghost" id="btnCam" style="margin-top:8px">📷 摄像头扫码</button>
       <div id="camOverlay" style="display:none;position:fixed;inset:0;background:rgba(10,16,28,.92);z-index:99;flex-direction:column;align-items:center;justify-content:center;gap:10px;">
         <video id="camVideo" autoplay playsinline style="width:min(92vw,480px);border-radius:10px;background:#000;"></video>
-        <div class="hint" style="color:#bfe0c8">对准二维码（MAT:/LOC:/CTN:/WIP:），识别后自动填入</div>
+        <div class="hint" style="color:#bfe0c8">对准二维码（MAT:/LOC:/CTN:/WIP:/NEC:/ITM:/MAN:），识别后自动填入</div>
         <button class="btn warn" id="btnCamClose">关闭摄像头</button>
       </div>
       <label style="display:inline-flex;align-items:center;gap:6px;margin-top:10px;font-size:13px;cursor:pointer;"><input type="checkbox" id="chkStocktake"> 📦 盘点模式（扫物料码 → 输实盘数 → 自动生成盘点差异流水）</label>
@@ -781,6 +786,8 @@ function load() {
   state.manuals = state.manuals || [];
   state.necSerials = state.necSerials || {};
   state.transactions = state.transactions || [];
+  state.scanHistory = state.scanHistory || [];   // 结构化扫码历史（30S 定位回查用），旧数据为空数组
+  state.scanSeq = Math.max(state.scanSeq || 0, ...state.scanHistory.map(s => s.seq || 0), 0);
   state.operators = (state.operators && state.operators.length) ? state.operators : ['管理员'];
   state.operator = state.operator || state.operators[0];
   state.deviceId = state.deviceId || ('dev-' + Math.random().toString(36).slice(2, 8));
@@ -1754,6 +1761,41 @@ function log(msg) {
   document.getElementById('scanLog').textContent = state.scanLog.slice(0, 200).join('\n');
 }
 function findMat(code) { return state.materials.find(m => m.code === code); }
+
+/* ---------- 扫码结果渲染工具 ---------- */
+/** 位置线索卡片：库位 / 容器 / 模块区 + 最近扫码 / 流水 / 工单 时间 */
+function locationCard(code, { withTimes = true } = {}) {
+  const L = CORE.locateMaterial(state, code);
+  const rows = [];
+  if (L.loc) rows.push('<b>库位</b>' + esc(L.loc) + (L.source === '最近扫码' ? ' <span class="hint">（上次扫码时的位置）</span>' : ''));
+  if (L.container) rows.push('<b>容器</b>' + esc(L.container));
+  if (L.zone) rows.push('<b>模块区</b>' + esc(L.zone));
+  if (!rows.length) rows.push('<span class="hint">（台账未登记库位 / 容器 / 模块区）</span>');
+
+  const times = [];
+  if (L.lastScan) times.push('<b>最近扫码</b>' + esc(L.lastScan.time) + ' <span class="hint">' + CORE.timeAgo(L.lastScan.ts) + ' · ' + esc(L.lastScan.operator || '—') + '</span>');
+  if (L.lastTxn) times.push('<b>最近流水</b>' + esc(L.lastTxn.time) + ' <span class="hint">' + CORE.timeAgo(L.lastTxn.ts) + ' · ' + esc(L.lastTxn.type) + ' ' + (L.lastTxn.delta > 0 ? '+' : '') + L.lastTxn.delta + ' → ' + esc(L.lastTxn.balance) + (L.lastTxn.ref ? ' · 单 ' + esc(L.lastTxn.ref) : '') + '</span>');
+  if (L.lastOrder) times.push('<b>最近工单</b>' + esc(L.lastOrder.code) + ' <span class="hint">' + esc(WIP_NAMES[L.lastOrder.type] || L.lastOrder.type) + ' · ' + esc(L.lastOrder.status) + (L.lastOrder.execTime ? ' · ' + esc(L.lastOrder.execTime) : '') + '</span>');
+
+  return '<div class="kv" style="margin-top:6px">' +
+    '<div><span class="hint">定位来源：' + esc(L.source) + '</span></div>' +
+    rows.map(r => '<div>' + r + '</div>').join('') +
+    (times.length && withTimes ? '<div style="margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">' + times.map(t => '<div>' + t + '</div>').join('') + '</div>' : '') +
+    '</div>';
+}
+
+/** 记录结构化扫码历史（供 30S 定位回查）+ 人类可读日志由 log() 负责 */
+function addScan(kind, prefix, code, hit, hitObj) {
+  CORE.recordScan(state, {
+    raw: prefix + code, prefix, code, kind, hit,
+    name: (hitObj && hitObj.name) || '',
+    loc: (hitObj && hitObj.loc) || '',
+    container: (hitObj && hitObj.container) || '',
+    zone: (hitObj && hitObj.zone) || '',
+    operator: state.operator
+  });
+}
+
 function scanMat(code, box) {
   const m = findMat(code);
   const stocktake = document.getElementById('chkStocktake').checked;
@@ -1777,20 +1819,124 @@ function scanMat(code, box) {
     return;
   }
   box.className = 'scan-result panel ' + (m ? 'flash-ok' : 'flash-bad');
-  box.innerHTML = m ? '<div class="kv"><b>物料码</b>' + esc(m.code) + '<br><b>名称</b>' + esc(m.name) + '<br><b>规格型号</b>' + esc(m.spec) +
-    '<br><b>当前库位</b>' + esc(m.loc || '—') + '　<b>容器</b>' + esc(m.container || '—') +
-    '<br><b>库存数量</b><span style="font-size:20px;font-weight:bold;color:#16233a">' + m.qty + '</span>　<b>成本</b>¥' + m.cost + '</div>'
-    : '未找到物料：' + esc(code);
-  log((m ? '查询物料 ' : '未命中物料 ') + code);
+  if (m) {
+    const low = m.minQty > 0 && m.qty < m.minQty;
+    box.innerHTML = '<div class="kv" style="font-size:15px">' +
+      '<div><b>物料码</b>' + esc(m.code) + '　<b>名称</b><span style="font-size:17px;font-weight:bold">' + esc(m.name) + '</span></div>' +
+      '<div><b>规格</b>' + esc(m.spec || '—') + '　<b>成本</b>¥' + esc(m.cost) + '</div>' +
+      '<div style="margin-top:4px"><b>库存</b><span style="font-size:26px;font-weight:bold;color:' + (m.qty < 0 ? '#d33a2c' : low ? '#a4600a' : '#16233a') + '">' + m.qty + '</span>' +
+      (m.qty < 0 ? ' <span class="badge" style="background:#d33a2c">负库存</span>' : low ? ' <span class="badge" style="background:#e8a020">低于安全库存 ' + m.minQty + '</span>' : '') + '</div>' +
+      '</div>' + locationCard(code);
+    addScan('material', 'MAT:', code, true, m);
+    log((low ? '查询物料（低库存）' : '查询物料 ') + code + '（库存 ' + m.qty + '）');
+    return;
+  }
+  // ===== MAT: 未命中 → 回查最近扫码 / 流水 / 工单，给出最近位置线索 =====
+  const L = CORE.locateMaterial(state, code);
+  const hasClue = !!(L.lastScan || L.lastTxn || L.lastOrder);
+  box.innerHTML = '<div class="kv" style="font-size:15px">' +
+    '<div><b>未找到物料</b>' + esc(code) + ' <span class="hint">（台账中无此编码）</span></div>' +
+    (hasClue
+      ? '<div style="margin-top:6px;padding:8px;background:#fff8e6;border:1px solid #f0d090;border-radius:6px">' +
+        '<b>🔍 最近位置线索</b>' + locationCard(code) + '</div>'
+      : '<div class="hint" style="margin-top:6px">没有任何该编码的扫码 / 流水 / 工单记录，无法给出位置线索。</div>') +
+    '</div>';
+  addScan('material', 'MAT:', code, false, null);
+  log('未命中物料 ' + code + (hasClue ? '（已给出最近线索：' + L.source + '）' : '（无任何历史记录）'));
 }
 function scanWhere(kind, code, box) {
   // 模块区（M-xx）：按物料的「模块区」字段匹配；普通库位/容器按 loc/container 匹配
   const isZone = /^M-\d+$/.test(code);
   const list = state.materials.filter(m => isZone ? (m.zone === code || m.loc === code) : (kind === 'LOC:' ? m.loc === code : m.container === code));
+  const rec = kind === 'LOC:' ? state.locations.find(l => l.code === code) : state.containers.find(c => c.code === code);
+  const total = list.reduce((a, m) => a + (Number(m.qty) || 0), 0);
+  const lastScan = CORE.scanHistoryFor(state, code, 1)[0] || null;
   box.className = 'scan-result panel flash-ok';
-  box.innerHTML = '<div class="kv"><b>' + (kind === 'LOC:' ? '库位' : '容器') + '</b>' + esc(code) +
-    '<br><b>存放物料</b>' + (list.length ? list.map(m => esc(m.code) + ' ' + esc(m.name) + ' ×' + m.qty).join('<br>　') : '（空）') + '</div>';
-  log('查询' + (kind === 'LOC:' ? '库位 ' : '容器 ') + code + '，物料 ' + list.length + ' 项');
+  box.innerHTML = '<div class="kv" style="font-size:15px">' +
+    '<div><b>' + (isZone ? '模块区' : kind === 'LOC:' ? '库位' : '容器') + '</b><span style="font-size:17px;font-weight:bold">' + esc(code) + '</span>' +
+    (rec && rec.desc ? ' <span class="hint">' + esc(rec.desc) + '</span>' : '') +
+    (rec && rec.kind ? ' <span class="hint">' + esc(rec.kind) + '</span>' : '') + '</div>' +
+    '<div><b>存放物料</b>' + list.length + ' 项　<b>合计库存</b>' + total + '</div>' +
+    (lastScan ? '<div><b>最近扫码</b>' + esc(lastScan.time) + ' <span class="hint">' + CORE.timeAgo(lastScan.ts) + '</span></div>' : '') +
+    '</div>' +
+    (list.length
+      ? '<table class="grid" style="margin-top:8px"><thead><tr><th>物料码</th><th>名称</th><th style="width:70px">库存</th><th>模块区</th></tr></thead><tbody>' +
+        list.map(m => '<tr><td>' + esc(m.code) + '</td><td>' + esc(m.name) + '</td><td' + (m.qty < 0 ? ' style="color:#d33a2c;font-weight:bold"' : '') + '>' + m.qty + '</td><td>' + esc(m.zone || '—') + '</td></tr>').join('') +
+        '</tbody></table>'
+      : '<p class="hint" style="margin-top:8px">（空）</p>');
+  addScan(isZone ? 'zone' : kind === 'LOC:' ? 'location' : 'container', kind, code, !!rec || list.length > 0, rec);
+  log('查询' + (isZone ? '模块区 ' : kind === 'LOC:' ? '库位 ' : '容器 ') + code + '，物料 ' + list.length + ' 项');
+}
+
+/* ---------- NEC: NEC 小工单详情 ---------- */
+function scanNec(code, box) {
+  const o = state.necOrders.find(x => x.code === code);
+  if (!o) {
+    box.className = 'scan-result panel flash-bad';
+    box.innerHTML = '<div class="kv"><b>未找到 NEC 工单</b>' + esc(code) + '<br><span class="hint">请在「NEC小工单」页确认工单号</span></div>';
+    addScan('nec', 'NEC:', code, false, null);
+    log('未命中 NEC 工单 ' + code);
+    return;
+  }
+  const related = state.materials.filter(m => o.materials && String(o.materials).includes(m.code));
+  box.className = 'scan-result panel flash-ok';
+  box.innerHTML = '<div class="kv" style="font-size:15px">' +
+    '<div><b>NEC 工单</b><span style="font-size:17px;font-weight:bold">' + esc(o.code) + '</span>　<span class="badge st-' + esc(o.status) + '">' + esc(o.status) + '</span></div>' +
+    '<div><b>标题</b>' + esc(o.title || '—') + '</div>' +
+    '<div><b>类型</b>' + esc(NEC_TYPE_NAMES[o.type] || o.type || '—') + '　<b>负责人</b>' + esc(o.owner || '—') + '　<b>优先级</b>' + esc(o.priority || '—') + '</div>' +
+    '<div><b>截止</b>' + esc(o.due || '—') + '　<b>创建</b>' + esc(o.createdAt || '—') + (o.doneAt ? '　<b>完成</b>' + esc(o.doneAt) : '') + '</div>' +
+    (o.materials ? '<div><b>物料</b>' + esc(o.materials) + '</div>' : '') +
+    (o.note ? '<div><b>备注</b>' + esc(o.note) + '</div>' : '') +
+    '</div>' +
+    (related.length
+      ? '<table class="grid" style="margin-top:8px"><thead><tr><th>物料码</th><th>名称</th><th style="width:70px">库存</th><th>库位</th></tr></thead><tbody>' +
+        related.map(m => '<tr><td>' + esc(m.code) + '</td><td>' + esc(m.name) + '</td><td>' + m.qty + '</td><td>' + esc(m.loc || '—') + '</td></tr>').join('') +
+        '</tbody></table>'
+      : '');
+  addScan('nec', 'NEC:', code, true, o);
+  log('查询 NEC 工单 ' + code + '（' + o.status + '）');
+}
+
+/* ---------- ITM: 物品（设备/工具/展品） ---------- */
+function scanItem(code, box) {
+  const it = state.items.find(x => x.code === code);
+  if (!it) {
+    box.className = 'scan-result panel flash-bad';
+    box.innerHTML = '<div class="kv"><b>未找到物品</b>' + esc(code) + '<br><span class="hint">请在「编码生成 → ④ 物品标签生成」建档</span></div>';
+    addScan('item', 'ITM:', code, false, null);
+    log('未命中物品 ' + code);
+    return;
+  }
+  const loc = state.locations.find(l => l.code === it.loc);
+  box.className = 'scan-result panel flash-ok';
+  box.innerHTML = '<div class="kv" style="font-size:15px">' +
+    '<div><b>物品码</b>' + esc(it.code) + '　<b>名称</b><span style="font-size:17px;font-weight:bold">' + esc(it.name) + '</span></div>' +
+    '<div><b>规格型号</b>' + esc(it.spec || '—') + '</div>' +
+    '<div><b>库位</b><span style="font-size:17px;font-weight:bold;color:#16233a">' + esc(it.loc || '—') + '</span>' + (loc && loc.desc ? ' <span class="hint">' + esc(loc.desc) + '</span>' : '') + '</div>' +
+    '</div>';
+  addScan('item', 'ITM:', code, true, it);
+  log('查询物品 ' + code + '（库位 ' + (it.loc || '—') + '）');
+}
+
+/* ---------- MAN: 手册（资料册） ---------- */
+function scanManual(code, box) {
+  const mn = state.manuals.find(x => x.code === code);
+  if (!mn) {
+    box.className = 'scan-result panel flash-bad';
+    box.innerHTML = '<div class="kv"><b>未找到手册</b>' + esc(code) + '<br><span class="hint">请在「编码生成 → ⑤ 手册标签生成」建档</span></div>';
+    addScan('manual', 'MAN:', code, false, null);
+    log('未命中手册 ' + code);
+    return;
+  }
+  const loc = state.locations.find(l => l.code === mn.loc);
+  box.className = 'scan-result panel flash-ok';
+  box.innerHTML = '<div class="kv" style="font-size:15px">' +
+    '<div><b>手册码</b>' + esc(mn.code) + '　<b>名称</b><span style="font-size:17px;font-weight:bold">' + esc(mn.name) + '</span></div>' +
+    '<div><b>版本</b>' + esc(mn.ver || '—') + '</div>' +
+    '<div><b>库位</b><span style="font-size:17px;font-weight:bold;color:#16233a">' + esc(mn.loc || '—') + '</span>' + (loc && loc.desc ? ' <span class="hint">' + esc(loc.desc) + '</span>' : '') + '</div>' +
+    '</div>';
+  addScan('manual', 'MAN:', code, true, mn);
+  log('查询手册 ' + code + '（版本 ' + (mn.ver || '—') + '，库位 ' + (mn.loc || '—') + '）');
 }
 function scanWip(code, box) {
   const w = state.workorders.find(x => x.code === code);
@@ -1832,12 +1978,27 @@ function handleScan(raw) {
   raw = (raw || '').trim();
   if (!raw) return;
   const box = document.getElementById('scanResult');
-  const m = raw.match(/^(LOC:|CTN:|MAT:|WIP:|NEC:)(.+)$/i);
-  const prefix = m ? m[1].toUpperCase() : (state.workorders.some(w => w.code === raw) ? 'WIP:' : 'MAT:');
-  const code = m ? m[2].trim() : raw;
+  const m = raw.match(/^(LOC:|CTN:|MAT:|WIP:|NEC:|ITM:|MAN:)(.+)$/i);
+  let prefix, code;
+  if (m) {
+    prefix = m[1].toUpperCase();
+    code = m[2].trim();
+  } else {
+    // 无前缀自动识别：工单码 → NEC 工单码 → 物品码 → 手册码 → 物料码
+    code = raw;
+    if (state.workorders.some(w => w.code === raw)) prefix = 'WIP:';
+    else if (state.necOrders.some(o => o.code === raw)) prefix = 'NEC:';
+    else if (state.items.some(i => i.code === raw)) prefix = 'ITM:';
+    else if (state.manuals.some(x => x.code === raw)) prefix = 'MAN:';
+    else prefix = 'MAT:';
+  }
   if (prefix === 'MAT:') scanMat(code, box);
   else if (prefix === 'LOC:' || prefix === 'CTN:') scanWhere(prefix, code, box);
-  else scanWip(code, box);
+  else if (prefix === 'NEC:') scanNec(code, box);
+  else if (prefix === 'ITM:') scanItem(code, box);
+  else if (prefix === 'MAN:') scanManual(code, box);
+  else if (prefix === 'WIP:') scanWip(code, box);
+  else scanMat(code, box);   // 兜底：未知前缀按物料查
 }
 document.getElementById('scanInput').addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;

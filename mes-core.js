@@ -359,6 +359,126 @@
     };
   }
 
+  /* ================= 扫码历史（结构化，供 30S 定位回查） ================= */
+
+  /**
+   * 追加一条扫码记录。只增不改，与库存流水同构（seq + ts）。
+   * @returns {object} 写入的扫码记录
+   */
+  function recordScan(state, entry) {
+    entry = entry || {};
+    if (!state) throw new Error('recordScan: 缺少 state');
+    if (!Array.isArray(state.scanHistory)) state.scanHistory = [];
+    state.scanSeq = (state.scanSeq || 0) + 1;
+    var now = entry.now ? new Date(entry.now) : new Date();
+    var rec = {
+      seq: state.scanSeq,
+      ts: now.toISOString(),
+      time: now.toLocaleString(),
+      operator: entry.operator != null ? entry.operator : (state.operator || ''),
+      raw: entry.raw || '',
+      prefix: entry.prefix || '',
+      code: entry.code || '',
+      kind: entry.kind || 'unknown',
+      hit: !!entry.hit,
+      name: entry.name || '',
+      loc: entry.loc || '',
+      container: entry.container || '',
+      zone: entry.zone || ''
+    };
+    state.scanHistory.unshift(rec);
+    if (state.scanHistory.length > 2000) state.scanHistory.length = 2000;   // 防无限增长
+    return rec;
+  }
+
+  /** 某编码的扫码记录（新的在前） */
+  function scanHistoryFor(state, code, limit) {
+    var list = ((state && state.scanHistory) || []).filter(function (s) { return s && s.code === code; });
+    return limit ? list.slice(0, limit) : list;
+  }
+
+  /** 某物料最近一条流水（按时间正序取最后一条） */
+  function lastTransactionFor(state, code) {
+    var list = orderedTransactions(state).filter(function (t) { return t.matCode === code; });
+    return list.length ? list[list.length - 1] : null;
+  }
+
+  /** 某物料最近一张相关工单（优先按执行时间，其次按日期） */
+  function lastOrderFor(state, code) {
+    var list = ((state && state.workorders) || []).filter(function (w) {
+      return (w.items || []).some(function (it) { return it && it.matCode === code; });
+    });
+    if (!list.length) return null;
+    return list.slice().sort(function (a, b) {
+      var ka = String(a.execTime || a.date || '');
+      var kb = String(b.execTime || b.date || '');
+      if (ka === kb) return 0;
+      return ka < kb ? -1 : 1;
+    })[list.length - 1];
+  }
+
+  /** 相对时间描述（可注入 now 便于测试） */
+  function timeAgo(ts, now) {
+    if (!ts) return '';
+    var t = new Date(ts).getTime();
+    if (!Number.isFinite(t)) return '';
+    var ref = now ? new Date(now).getTime() : Date.now();
+    var d = Math.floor((ref - t) / 1000);
+    if (d < 0) d = 0;
+    if (d < 60) return d + ' 秒前';
+    if (d < 3600) return Math.floor(d / 60) + ' 分钟前';
+    if (d < 86400) return Math.floor(d / 3600) + ' 小时前';
+    return Math.floor(d / 86400) + ' 天前';
+  }
+
+  /** 某编码最近一条**带位置**的扫码记录（未命中的扫码不带位置，不能覆盖早先的线索） */
+  function lastScanWithLocation(state, code) {
+    var list = scanHistoryFor(state, code);
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].loc || list[i].container || list[i].zone) return list[i];
+    }
+    return null;
+  }
+
+  /**
+   * 30S 定位：查台账；台账没有（或没有库位）时回查最近扫码 / 流水 / 工单。
+   * 纯函数：不写 state、不产生副作用。
+   * @returns {{found:boolean, material:object|null, loc:string, container:string, zone:string,
+   *            source:string, lastScan:object|null, lastTxn:object|null, lastOrder:object|null}}
+   */
+  function locateMaterial(state, code) {
+    var m = findMaterial(state, code);
+    var lastScan = scanHistoryFor(state, code, 1)[0] || null;   // 最近一次扫码（用于时间展示）
+    var located = lastScanWithLocation(state, code);            // 最近一次带位置的扫码（用于位置兜底）
+    var txn = lastTransactionFor(state, code);
+    var order = lastOrderFor(state, code);
+
+    var loc = '', container = '', zone = '', source = '无记录';
+    if (m) {
+      loc = m.loc || ''; container = m.container || ''; zone = m.zone || '';
+      source = '物料台账';
+    }
+    // 台账里没有库位（或整条记录缺失）→ 用最近一次带位置的扫码记录兜底
+    if (!loc && located && located.loc) { loc = located.loc; source = '最近扫码'; }
+    if (!container && located && located.container) container = located.container;
+    if (!zone && located && located.zone) zone = located.zone;
+    // 仍无位置线索 → 由最近一条流水/工单给出「谁在什么时候动过它」
+    if (!loc && !m) {
+      if (txn) source = '最近流水';
+      else if (order) source = '最近工单';
+    }
+
+    return {
+      found: !!m,
+      material: m,
+      loc: loc, container: container, zone: zone,
+      source: source,
+      lastScan: lastScan,
+      lastTxn: txn,
+      lastOrder: order
+    };
+  }
+
   return {
     WIP_NAMES: WIP_NAMES,
     OUTBOUND_TYPES: OUTBOUND_TYPES,
@@ -380,6 +500,12 @@
     applyStocktake: applyStocktake,
     applyManualAdjust: applyManualAdjust,
     orderedTransactions: orderedTransactions,
-    replayAudit: replayAudit
+    replayAudit: replayAudit,
+    recordScan: recordScan,
+    scanHistoryFor: scanHistoryFor,
+    lastTransactionFor: lastTransactionFor,
+    lastOrderFor: lastOrderFor,
+    timeAgo: timeAgo,
+    locateMaterial: locateMaterial
   };
 });

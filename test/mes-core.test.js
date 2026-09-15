@@ -389,3 +389,164 @@ test('落库一致性：执行后库存等于期初加全部流水变动之和',
   assert.equal(stockOf(s, 'MAT-A'), q0 + sum);
   assert.equal(Core.replayAudit(s).ok, true);
 });
+
+/* ================= Phase 2：30S 定位回查 ================= */
+
+const T0 = '2026-09-15T02:00:00.000Z';
+const T1 = '2026-09-15T03:00:00.000Z';
+const T2 = '2026-09-15T04:00:00.000Z';
+
+test('扫码历史：recordScan 追加结构化记录并递增 seq', () => {
+  const s = mkState();
+  const a = Core.recordScan(s, { prefix: 'MAT:', code: 'MAT-A', kind: 'material', hit: true, name: '螺丝刀', loc: 'B-01-01-01', now: T0 });
+  const b = Core.recordScan(s, { prefix: 'LOC:', code: 'B-01-01-01', kind: 'location', hit: true, now: T1 });
+  assert.equal(a.seq, 1);
+  assert.equal(b.seq, 2);
+  assert.equal(s.scanHistory.length, 2);
+  assert.equal(s.scanHistory[0].code, 'B-01-01-01', '新的在前');
+  assert.equal(a.loc, 'B-01-01-01');
+  assert.equal(a.ts, T0);
+});
+
+test('扫码历史：scanHistoryFor 按编码过滤并支持 limit', () => {
+  const s = mkState();
+  Core.recordScan(s, { code: 'MAT-A', now: T0 });
+  Core.recordScan(s, { code: 'MAT-B', now: T1 });
+  Core.recordScan(s, { code: 'MAT-A', now: T2 });
+  assert.equal(Core.scanHistoryFor(s, 'MAT-A').length, 2);
+  assert.equal(Core.scanHistoryFor(s, 'MAT-A', 1).length, 1);
+  assert.equal(Core.scanHistoryFor(s, 'NOPE').length, 0);
+});
+
+test('lastTransactionFor：取该物料时间上最后一条流水', () => {
+  const s = mkState();
+  Core.executeOrder(s, Core.createOrder(s, { type: 'LL', code: 'L1', items: [{ matCode: 'MAT-A', qty: 1 }] }).order, { now: T0 });
+  Core.executeOrder(s, Core.createOrder(s, { type: 'BH', code: 'L2', items: [{ matCode: 'MAT-A', qty: 3 }] }).order, { now: T1 });
+  Core.executeOrder(s, Core.createOrder(s, { type: 'LL', code: 'L3', items: [{ matCode: 'MAT-B', qty: 1 }] }).order, { now: T2 });
+  const last = Core.lastTransactionFor(s, 'MAT-A');
+  assert.equal(last.ref, 'L2');
+  assert.equal(last.delta, 3);
+  assert.equal(Core.lastTransactionFor(s, 'NOPE'), null);
+});
+
+test('lastOrderFor：找到含该物料且时间最新的工单', () => {
+  const s = mkState();
+  Core.createOrder(s, { type: 'LL', code: 'W1', date: '2026-09-01', items: [{ matCode: 'MAT-A', qty: 1 }] });
+  Core.createOrder(s, { type: 'LL', code: 'W2', date: '2026-09-10', items: [{ matCode: 'MAT-A', qty: 1 }] });
+  Core.createOrder(s, { type: 'LL', code: 'W3', date: '2026-09-05', items: [{ matCode: 'MAT-B', qty: 1 }] });
+  assert.equal(Core.lastOrderFor(s, 'MAT-A').code, 'W2');
+  assert.equal(Core.lastOrderFor(s, 'MAT-B').code, 'W3');
+  assert.equal(Core.lastOrderFor(s, 'NOPE'), null);
+});
+
+test('timeAgo：相对时间描述', () => {
+  assert.equal(Core.timeAgo(null), '');
+  assert.equal(Core.timeAgo(T0, T0), '0 秒前');
+  assert.equal(Core.timeAgo(T0, '2026-09-15T02:00:30.000Z'), '30 秒前');
+  assert.equal(Core.timeAgo(T0, '2026-09-15T02:05:00.000Z'), '5 分钟前');
+  assert.equal(Core.timeAgo(T0, '2026-09-15T05:00:00.000Z'), '3 小时前');
+  assert.equal(Core.timeAgo(T0, '2026-09-17T02:00:00.000Z'), '2 天前');
+});
+
+test('locateMaterial：台账命中时直接用台账位置', () => {
+  const s = mkState();
+  s.materials[0].loc = 'B-01-01-01';
+  s.materials[0].container = 'XK-001';
+  s.materials[0].zone = 'M-01';
+  const L = Core.locateMaterial(s, 'MAT-A');
+  assert.equal(L.found, true);
+  assert.equal(L.source, '物料台账');
+  assert.equal(L.loc, 'B-01-01-01');
+  assert.equal(L.container, 'XK-001');
+  assert.equal(L.zone, 'M-01');
+});
+
+test('locateMaterial【核心】台账未命中时回查最近扫码位置', () => {
+  const s = mkState();
+  Core.recordScan(s, { prefix: 'MAT:', code: 'GHOST', kind: 'material', hit: true, loc: 'B-02-03-04', container: 'XK-009', now: T1 });
+  const L = Core.locateMaterial(s, 'GHOST');
+  assert.equal(L.found, false, '台账里确实没有这条物料');
+  assert.equal(L.loc, 'B-02-03-04', '仍应给出上次扫码时的位置');
+  assert.equal(L.container, 'XK-009');
+  assert.equal(L.source, '最近扫码');
+  assert.equal(L.lastScan.ts, T1);
+});
+
+test('locateMaterial：台账有记录但库位为空时用最近扫码位置兜底', () => {
+  const s = mkState();
+  s.materials[0].loc = '';
+  Core.recordScan(s, { code: 'MAT-A', hit: true, loc: 'B-09-09-09', now: T0 });
+  const L = Core.locateMaterial(s, 'MAT-A');
+  assert.equal(L.found, true);
+  assert.equal(L.source, '最近扫码');
+  assert.equal(L.loc, 'B-09-09-09');
+});
+
+test('locateMaterial：无扫码记录但有流水时给出最近流水线索', () => {
+  const s = mkState();
+  Core.executeOrder(s, Core.createOrder(s, { type: 'LL', code: 'L9', items: [{ matCode: 'MAT-A', qty: 2 }] }).order, { now: T2 });
+  const L = Core.locateMaterial(s, 'MAT-A');
+  assert.ok(L.lastTxn, '应返回最近流水');
+  assert.equal(L.lastTxn.ref, 'L9');
+  assert.ok(L.lastOrder, '同时应能找到相关工单');
+  assert.equal(L.lastOrder.code, 'L9');
+  assert.equal(L.source, '物料台账', '台账有库位时位置来源仍是台账');
+});
+
+test('locateMaterial：完全无记录时返回空线索', () => {
+  const s = mkState();
+  const L = Core.locateMaterial(s, 'NOTHING');
+  assert.equal(L.found, false);
+  assert.equal(L.loc, '');
+  assert.equal(L.lastScan, null);
+  assert.equal(L.lastTxn, null);
+  assert.equal(L.lastOrder, null);
+  assert.equal(L.source, '无记录');
+});
+
+test('locateMaterial：流水回查只认本物料，不串号', () => {
+  const s = mkState();
+  Core.executeOrder(s, Core.createOrder(s, { type: 'LL', code: 'X', items: [{ matCode: 'MAT-B', qty: 1 }] }).order, { now: T0 });
+  const L = Core.locateMaterial(s, 'MAT-A');
+  assert.equal(L.lastTxn, null, 'MAT-A 没有流水，不应拿到 MAT-B 的');
+  assert.equal(L.lastOrder, null);
+});
+
+test('30S 定位可达性：随机抽 10 个物料都能给出库位或时间线索', () => {
+  const s = mkState({ materials: [] });
+  for (let i = 1; i <= 10; i++) {
+    s.materials.push({ code: 'P-' + i, name: '零件' + i, qty: i, minQty: 0, cost: 0, loc: i % 2 ? 'B-01-0' + (i % 9 + 1) + '-01' : '', container: '', zone: 'M-0' + (i % 5 + 1) });
+  }
+  // 偶数号没有台账库位，但曾扫过
+  for (let i = 2; i <= 10; i += 2) {
+    Core.recordScan(s, { code: 'P-' + i, hit: true, loc: 'B-07-0' + i + '-02', now: T0 });
+  }
+  for (let i = 1; i <= 10; i++) {
+    const L = Core.locateMaterial(s, 'P-' + i);
+    assert.ok(L.loc || L.lastScan || L.lastTxn || L.lastOrder, 'P-' + i + ' 应至少有一个位置/时间线索');
+  }
+});
+
+test('locateMaterial【回归】后续无位置的扫码不得覆盖早先的位置线索', () => {
+  const s = mkState();
+  Core.recordScan(s, { code: 'GHOST', hit: true, loc: 'B-02-03-04', container: 'XK-009', now: T0 });
+  assert.equal(Core.locateMaterial(s, 'GHOST').loc, 'B-02-03-04');
+
+  // 再扫一次，这次未命中 → 记录不带位置
+  Core.recordScan(s, { code: 'GHOST', hit: false, now: T1 });
+  const L = Core.locateMaterial(s, 'GHOST');
+  assert.equal(L.loc, 'B-02-03-04', '位置线索必须保住');
+  assert.equal(L.container, 'XK-009');
+  assert.equal(L.source, '最近扫码');
+  assert.equal(L.lastScan.ts, T1, '时间展示仍取最新一次扫码');
+});
+
+test('locateMaterial：位置兜底只认带位置的记录，跳过中间的空位置记录', () => {
+  const s = mkState();
+  Core.recordScan(s, { code: 'G', hit: true, loc: 'B-01-01-01', now: T0 });
+  Core.recordScan(s, { code: 'G', hit: false, now: T1 });
+  Core.recordScan(s, { code: 'G', hit: false, now: T2 });
+  const L = Core.locateMaterial(s, 'G');
+  assert.equal(L.loc, 'B-01-01-01');
+  assert.equal(L.lastScan.ts, T2);
+});
