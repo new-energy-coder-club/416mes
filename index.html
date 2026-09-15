@@ -208,6 +208,7 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         <button class="btn small ghost" id="btnLocateFind">📍 按位置查物料</button>
         <span class="hint">验收标准 9：随机抽查任一零件，都能给出库位/容器/模块区（精确到架-层-位）或最近一次扫码/流水的位置与时间</span>
       </div>
+      <div id="cloudGapBox" class="panel" style="display:none;border-left:5px solid #e8a020;background:#fffbf0;margin-top:10px"></div>
       <div id="locateAuditBox" style="display:none"></div>
       <p class="hint" style="margin-top:8px">所有修改自动保存到浏览器本地；换电脑/换浏览器前请「导出备份 JSON」（全量含流水）或「导出 Excel 台账」。库存数量带<b>黄底=低于安全库存，红底=负库存</b>；手工改数量会要求填写调整原因并写入流水。</p>
       <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;color:#445" id="txnSummary">📜 库存流水</summary>
@@ -1580,6 +1581,7 @@ async function cloudSync({ silent = false } = {}) {
     const stat = mergePackage(pkg, { from: '飞书云端', upsertMembers: true });
     // 这条通路（Vercel 只读接口 / fallback）也要清示例数据，否则 file:// 下清理不生效
     dropSeedDemoRecords(pkg.state || pkg);
+    showCloudGap(cloudGap(pkg.state || pkg));
     save(); renderLedger(); renderMembers(); renderMemberTagBar();
     log('云端同步完成：' + mergeStatText(stat));
     // 关键：云端只读同步成功后也要更新顶部状态。
@@ -2645,6 +2647,55 @@ function seedDemoCodes() {
  * 所以判据是「属于示例基线 **且** 云端没有」才删 —— 用户自己新建的绝不会被误删。
  * 每次云端同步成功都会跑一遍，因此老浏览器里已经存下的示例数据同样会被清掉。
  */
+
+/* ================= 云端差异提示 =================
+   合并是并集，所以「本地有、飞书没有」的记录会一直留着，看上去像同步没生效。
+   差异分两类，处理方向相反：
+     示例数据（示例物料/人员/物品/手册）→ 云端有真数据时丢掉（dropSeedDemoRecords）
+     主数据（库位/容器）→ 出厂内置的 C 区布局等是真数据，应当**推到飞书**
+   这里把差异算出来、显式呈现，并给一键推送，而不是自作主张批量写生产库。 */
+function cloudGap(remote) {
+  const gap = {};
+  ['locations', 'containers'].forEach(key => {
+    if (!Array.isArray(remote[key])) return;
+    const remoteCodes = new Set(remote[key].map(r => r.code).filter(Boolean));
+    const localOnly = (state[key] || []).filter(x => x.code && !remoteCodes.has(x.code));
+    if (localOnly.length) gap[key] = localOnly;
+  });
+  return gap;
+}
+function showCloudGap(gap) {
+  const box = document.getElementById('cloudGapBox');
+  if (!box) return;
+  const total = Object.values(gap).reduce((a, v) => a + v.length, 0);
+  if (!total) { box.style.display = 'none'; return; }
+  const label = { locations: '库位', containers: '容器' };
+  box.style.display = 'block';
+  box.innerHTML = '⚠️ <b>本地有 ' + total + ' 条记录飞书里没有</b>（' +
+    Object.entries(gap).map(([k, v]) => label[k] + ' ' + v.length + ' 条').join('、') +
+    '）—— 多半是出厂内置的 C 区布局。这会让网页端与飞书长期对不上。<br>' +
+    '<span class="hint">推到飞书后两边就一致了；也可以点「忽略」，只影响本机显示。</span>' +
+    '<div class="toolbar" style="margin-top:6px">' +
+    '<button class="btn small" id="btnPushGap">推到飞书</button>' +
+    '<button class="btn small ghost" id="btnIgnoreGap">忽略</button></div>';
+  document.getElementById('btnIgnoreGap').addEventListener('click', () => { box.style.display = 'none'; });
+  document.getElementById('btnPushGap').addEventListener('click', async () => {
+    const btn = document.getElementById('btnPushGap');
+    btn.disabled = true; btn.textContent = '推送中…';
+    let done = 0;
+    for (const [key, list] of Object.entries(gap)) {
+      // 分批推，避免单次请求过大
+      for (let i = 0; i < list.length; i += 100) {
+        await fsPushRecord(key, list.slice(i, i + 100));
+        done += Math.min(100, list.length - i);
+      }
+    }
+    log('☁️ 已把本地独有数据推到飞书：' + done + ' 条');
+    alert('已提交 ' + done + ' 条到飞书。稍等几秒后刷新页面即可看到两边一致。');
+    box.style.display = 'none';
+  });
+}
+
 function dropSeedDemoRecords(remote) {
   if (!remote) return;
   const snap = seedDemoCodes();
@@ -2668,6 +2719,7 @@ function fsMerge(remote) {
     state[key] = [...byCode.values()];
   });
   dropSeedDemoRecords(remote);   // 云端有真实数据时清掉出厂示例
+  showCloudGap(cloudGap(remote));
   if (Array.isArray(remote.transactions) && remote.transactions.length) {
     const bySeq = new Map((state.transactions || []).filter(t => t.seq != null).map(t => [t.seq, t]));
     remote.transactions.forEach(t => { if (t.seq != null) bySeq.set(t.seq, t); });
