@@ -14,6 +14,21 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 
 /* ---------- mock 飞书：只实现用到的几个接口 ---------- */
+/** 模拟真飞书的字段类型校验：这些错误真机上确实会整批写入失败 */
+function mockTypeCheck(defs, fields) {
+  const byName = {}; (defs || []).forEach(d => { byName[d.name] = d; });
+  for (const [k, v] of Object.entries(fields || {})) {
+    const d = byName[k];
+    if (!d) return 'FieldNotFound: ' + k;
+    if (d.type === 5 && typeof v !== 'number') return 'DatetimeFieldConvFail: ' + k;      // 日期必须时间戳
+    if (d.type === 2 && typeof v !== 'number') return 'NumberFieldConvFail: ' + k;         // 数字必须 number
+    if (d.type === 13 && v === '') return 'Failed to convert phone field: ' + k;           // 电话不接受空串
+    if (d.type === 3 && d.options && d.options.length && !d.options.includes(v)) return 'SingleSelectOptionNotFound: ' + k + '=' + v;
+  }
+  return null;
+}
+
+
 function startMock(opts = {}) {
   const tables = opts.tables || {
     tblMAT: { fields: ['物料码', '名称', '库存数量'], rows: [{ '物料码': 'A-1', '名称': '螺丝刀', '库存数量': 5 }] },
@@ -70,6 +85,10 @@ function startMock(opts = {}) {
       if (action === 'batch_create') {
         if (opts.denyWrite || opts.denyCreate) return json({ code: 99991672, msg: 'Forbidden: no permission to write' });
         const b = JSON.parse(body || '{}');
+        for (const r of (b.records || [])) {
+          const err = mockTypeCheck(fieldTypes[tableId], r.fields);
+          if (err) return json({ code: 1254006, msg: err });
+        }
         (b.records || []).forEach(r => { calls.created.push(r.fields); t.rows.push(r.fields); });
         return json({ code: 0, data: { records: (b.records || []).map((_, i) => ({ record_id: 'new_' + i })) } });
       }
@@ -85,6 +104,10 @@ function startMock(opts = {}) {
       if (action === 'batch_update') {
         if (opts.denyWrite) return json({ code: 99991672, msg: 'Forbidden: no permission to write' });
         const b = JSON.parse(body || '{}');
+        for (const r of (b.records || [])) {
+          const err = mockTypeCheck(fieldTypes[tableId], r.fields);
+          if (err) return json({ code: 1254006, msg: err });
+        }
         (b.records || []).forEach(r => {
           calls.updated.push(r);
           const idx = parseInt(String(r.record_id).replace('rec_', ''), 10);
@@ -509,4 +532,74 @@ test('通用 delete：键不存在时删 0 条且不报错', async (t) => {
   const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
   const r = await lib.deleteRecords('members', ['NOT-THERE']);
   assert.equal(r.deleted, 0);
+});
+
+/* ================= 字段类型转换（这两个 bug 真实踩过） ================= */
+
+test('类型转换【回归】电话列不接受空字符串 → 空值直接不发', (t) => {
+  const defs = [{ name: '编号', typeName: '文本' }, { name: '电话', typeName: '电话' }];
+  const r = require('../lib/feishu-api.js').coerceFields(defs, { '编号': 'MB-1', '电话': '' });
+  assert.deepEqual(r.fields, { '编号': 'MB-1' }, '空电话不能被写进去');
+  assert.ok(r.dropped.some(d => /电话/.test(d)), '应报告跳过了电话列：' + JSON.stringify(r.dropped));
+  // 非空的电话要正常写
+  const r2 = require('../lib/feishu-api.js').coerceFields(defs, { '编号': 'MB-1', '电话': '13800000000' });
+  assert.equal(r2.fields['电话'], '13800000000');
+});
+
+test('类型转换【回归】日期列必须转成毫秒时间戳', (t) => {
+  const defs = [{ name: '工单号', typeName: '文本' }, { name: '日期', typeName: '日期' }];
+  const r = require('../lib/feishu-api.js').coerceFields(defs, { '工单号': 'LL-1', '日期': '2026-09-15' });
+  assert.equal(typeof r.fields['日期'], 'number', '必须是数字时间戳，不能是字符串');
+  assert.equal(new Date(r.fields['日期']).toISOString().slice(0, 10), '2026-09-15');
+});
+
+test('类型转换：日期非法时跳过并报告，而不是写个坏值', (t) => {
+  const defs = [{ name: '日期', typeName: '日期' }];
+  const r = require('../lib/feishu-api.js').coerceFields(defs, { '日期': '不是日期' });
+  assert.deepEqual(r.fields, {});
+  assert.ok(r.dropped.some(d => /日期非法/.test(d)));
+});
+
+test('类型转换：数字列收到字符串会转成数字', (t) => {
+  const defs = [{ name: '库存数量', typeName: '数字' }];
+  assert.equal(require('../lib/feishu-api.js').coerceFields(defs, { '库存数量': '7' }).fields['库存数量'], 7);
+  const bad = require('../lib/feishu-api.js').coerceFields(defs, { '库存数量': 'abc' });
+  assert.deepEqual(bad.fields, {});
+  assert.ok(bad.dropped.some(d => /数字非法/.test(d)));
+});
+
+test('类型转换：单选值不在选项里时跳过并列出选项', (t) => {
+  const C = require('../lib/feishu-api.js');
+  const defs = [{ name: '状态', typeName: '单选', options: ['未执行', '已执行'] }];
+  const bad = C.coerceFields(defs, { '状态': '部分执行' });
+  assert.deepEqual(bad.fields, {}, '不在选项里的值不能写');
+  assert.match(bad.dropped[0], /单选无此选项：部分执行/);
+  assert.match(bad.dropped[0], /现有 未执行\/已执行/);
+  assert.equal(C.coerceFields(defs, { '状态': '已执行' }).fields['状态'], '已执行');
+});
+
+test('类型转换：表里没有的列直接丢弃', (t) => {
+  const C = require('../lib/feishu-api.js');
+  const r = C.coerceFields([{ name: '编号', typeName: '文本' }], { '编号': 'A', 'PIN码': '1234' });
+  assert.deepEqual(r.fields, { '编号': 'A' });
+  assert.deepEqual(r.dropped, ['PIN码']);
+});
+
+test('类型转换端到端【回归】人员与工单现在能真的写进 mock 飞书', async (t) => {
+  const mock = await startAllMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+
+  // 人员：电话为空、含不在表里的 PIN码
+  const rm = await lib.upsertRecords('members', [{ code: 'MB-004', name: '卢玉淳', sid: '24220616', dept: '汽车工程学院', role: '本科生', phone: '', group: '天权1楼实验台', pin: '1234' }]);
+  assert.equal(rm.created, 1, '人员应能写入：' + JSON.stringify(rm));
+  assert.equal(mock.tables.tblMBR.rows[0]['姓名'], '卢玉淳');
+  assert.ok(!('电话' in mock.tables.tblMBR.rows[0]) || mock.tables.tblMBR.rows[0]['电话'] !== '', '空电话不应写入');
+
+  // 工单：日期是字符串，必须被转成时间戳
+  const rw = await lib.upsertRecords('workorders', [{ code: 'LL-1', type: 'LL', date: '2026-09-15', items: [{ matCode: 'X', qty: 2 }], status: '未执行' }]);
+  assert.equal(rw.created, 1, '工单应能写入：' + JSON.stringify(rw));
+  assert.equal(typeof mock.tables.tblWIP.rows[0]['日期'], 'number', '日期必须是时间戳');
+  assert.equal(mock.tables.tblWIP.rows[0]['类型'], 'LL 领料');
+  assert.equal(mock.tables.tblWIP.rows[0]['状态'], '未执行');
 });
