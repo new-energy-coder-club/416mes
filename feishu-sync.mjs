@@ -15,7 +15,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const DIR = path.normalize(path.dirname(decodeURIComponent(new URL(import.meta.url).pathname).replace(/^\/([A-Za-z]:)/, '$1')));
-const CONFIG_FILE = path.join(DIR, 'feishu-backend.config.json');
+// 配置文件路径可用 FEISHU_CONFIG 覆盖（便于测试与多 Base 切换），默认取同目录配置
+const CONFIG_FILE = process.env.FEISHU_CONFIG || path.join(DIR, 'feishu-backend.config.json');
 const pad = (n, w) => String(n).padStart(w, '0');
 
 /* ---------- lark-cli 调用封装（Windows 下 JSON 一律走 @file） ---------- */
@@ -29,7 +30,10 @@ function lark(args, { dryRun = false } = {}) {
   return JSON.parse(out);
 }
 function larkJson(args, body, opts) {   // 带 JSON body 的调用：写临时文件用 @相对路径 传参，规避 Windows 引号问题
-  const f = path.join(DIR, '.build', `_feishu_sync_${process.pid}_${tmpSeq++}.json`);
+  const buildDir = path.join(DIR, '.build');
+  try { fs.mkdirSync(buildDir, { recursive: true }); }   // 全新检出时该目录可能不存在，须先建
+  catch (e) { throw new Error('无法创建临时目录 ' + buildDir + '：' + e.message); }
+  const f = path.join(buildDir, `_feishu_sync_${process.pid}_${tmpSeq++}.json`);
   fs.writeFileSync(f, JSON.stringify(body));
   const rel = './' + path.relative(process.cwd(), f).replace(/\\/g, '/');
   try { return lark([...args, '--json', '@' + rel], opts); }
@@ -123,15 +127,23 @@ function D(v) { const d = toDate(v); return d ? d.getFullYear() + '-' + pad(d.ge
 function DT(v) { const d = toDate(v); return d ? d.getFullYear() + '-' + pad(d.getMonth() + 1, 2) + '-' + pad(d.getDate(), 2) + ' ' + pad(d.getHours(), 2) + ':' + pad(d.getMinutes(), 2) : ''; }
 function fmtLocal(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1, 2) + '-' + pad(d.getDate(), 2) + ' ' + pad(d.getHours(), 2) + ':' + pad(d.getMinutes(), 2) + ':' + pad(d.getSeconds(), 2); }
 
-/* ---------- 读全表（分页；+record-list 返回行式结构：fields + record_id_list + data 对齐） ---------- */
+/* ---------- 读全表（分页；+record-list 返回行式结构：fields + record_id_list + data 对齐） ----------
+   重要：读取失败必须抛错，绝不能返回空数组——否则「拉取失败」会被上层当成「飞书表是空的」，
+   页面还会误报「🟢 飞书真源已连接」，让故障看起来像成功。 */
 function listAll(cfg, tableId, { dryRun = false } = {}) {
   const out = [];
   let offset = 0;
   while (true) {
     const res = lark(['base', '+record-list', '--base-token', cfg.base_token, '--table-id', tableId,
       '--limit', '200', '--offset', String(offset), '--json', '--as', 'user'], { dryRun });
-    if (!res) return out;
-    const d = res.data || {};
+    if (!res) return out;                       // dry-run：不读数据
+    if (res.ok === false) {
+      throw new Error('读取表 ' + tableId + ' 失败：' + JSON.stringify(res.error || res).slice(0, 200));
+    }
+    const d = res.data;
+    if (!d || (!Array.isArray(d.fields) && !Array.isArray(d.data))) {
+      throw new Error('读取表 ' + tableId + ' 返回结构异常：' + JSON.stringify(res).slice(0, 200));
+    }
     const fields = d.fields || [];
     const ids = d.record_id_list || [];
     const rows = Array.isArray(d.data) ? d.data : [];
@@ -177,7 +189,9 @@ async function push(cfg, file, { dryRun = false } = {}) {
       if (existing[code]) toUpdate[existing[code]] = fields;
       else toCreate.push(fields);
     });
-    console.log(`  ${map.table}：本地 ${rows.length} 条 → 新建 ${toCreate.length} / 更新 ${Object.keys(toUpdate).length}`);
+    console.log(`  ${map.table}：本地 ${rows.length} 条 → ` + (dryRun
+      ? `预演：将写入 ${rows.length} 条（dry-run 不读飞书现有记录，无法区分新建/更新）`
+      : `新建 ${toCreate.length} / 更新 ${Object.keys(toUpdate).length}`));
     for (let i = 0; i < toCreate.length; i += 200) {
       const res = larkJson(['base', '+record-batch-create', '--base-token', cfg.base_token, '--table-id', tableId, '--as', 'user'],
         { create_records: toCreate.slice(i, i + 200) }, { dryRun });
@@ -205,6 +219,7 @@ async function pull(cfg, outFile, { dryRun = false } = {}) {
     console.log(`  ${map.table}：${state[key].length} 条`);
   }
   state.transactions.sort((a, b) => (b.seq || 0) - (a.seq || 0));   // 网页端约定：新的在前
+  state.txnSeq = Math.max(0, ...state.transactions.map(t => t.seq || 0));   // 与云端接口保持一致，防止合并后撞号
   if (!dryRun) {
     const pkg = { app: '416MES', version: 2, deviceId: 'feishu-pull', exportedAt: new Date().toLocaleString(), state };
     fs.writeFileSync(outFile, JSON.stringify(pkg, null, 1));
@@ -217,14 +232,24 @@ const isMain = path.basename(process.argv[1] || '') === 'feishu-sync.mjs';
 if (isMain) {
   const [, , cmd, arg, ...rest] = process.argv;
   const dryRun = rest.includes('--dry-run') || (arg === '--dry-run');
-  const cfg = loadConfig();
-  if (cmd === 'status') status(cfg);
-  else if (cmd === 'push') push(cfg, arg && arg !== '--dry-run' ? arg : path.join(DIR, '416MES_备份.json'), { dryRun });
-  else if (cmd === 'pull') pull(cfg, arg && arg !== '--dry-run' ? arg : path.join(DIR, '416MES_从飞书_备份.json'), { dryRun });
-  else {
-    console.log('用法: node feishu-sync.mjs status | push [备份.json] [--dry-run] | pull [输出.json] [--dry-run]');
-  }
+  // 统一错误出口：把异常变成一行清晰的提示 + 非零退出码，避免抛出满屏堆栈
+  const die = (e) => {
+    console.error('\n❌ ' + (e && e.message ? e.message : e));
+    if (e && e.code === 'ENOENT') {
+      console.error('   提示：找不到 lark-cli。请确认它已安装且在 PATH 中（用 `lark-cli --help` 验证）。');
+    }
+    process.exit(1);
+  };
+  (async () => {
+    const cfg = loadConfig();
+    if (cmd === 'status') status(cfg);
+    else if (cmd === 'push') await push(cfg, arg && arg !== '--dry-run' ? arg : path.join(DIR, '416MES_备份.json'), { dryRun });
+    else if (cmd === 'pull') await pull(cfg, arg && arg !== '--dry-run' ? arg : path.join(DIR, '416MES_从飞书_备份.json'), { dryRun });
+    else {
+      console.log('用法: node feishu-sync.mjs status | push [备份.json] [--dry-run] | pull [输出.json] [--dry-run]');
+    }
+  })().catch(die);
 }
 
-/* ---------- 供 feishu-server.mjs 复用 ---------- */
+/* 供 feishu-server.mjs 复用 */
 export { CONFIG_FILE, loadConfig, listAll, larkJson, lark, MAPS, PUSH_ORDER, T, N, pad, fmtLocal };

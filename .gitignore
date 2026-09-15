@@ -32,3 +32,6 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# 本地验证残留（假 lark-cli 运行目录等）
+.verify/

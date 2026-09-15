@@ -55,6 +55,64 @@ npm test             # 语法检查 + 核心库存规则单元测试
 
 改任何库存相关逻辑时，请先改 `mes-core.js` 并补 `test/mes-core.test.js`，再让 `index.html` 调用。
 
+## 验证飞书同步
+
+飞书这条链路有**两条独立的路**，需要的凭据不同：
+
+| 路径 | 入口 | 依赖 | 能力 |
+|---|---|---|---|
+| A. 本地真源服务 | `node feishu-server.mjs` | 本机装有 `lark-cli` 且已 `lark-cli config` 登录 | 启动拉取 8 表 + 工单执行/盘点/手工调整**直写飞书** |
+| B. 云端只读接口 | `api/feishu-sync.js`（Vercel） | 环境变量 `FEISHU_APP_ID` / `FEISHU_APP_SECRET`（应用需 `base:record:read` 权限且已加入该 Base） | 只读拉取，网页「☁️ 云端同步」与打开页面时自动同步 |
+
+### 不需要凭据就能验的部分
+
+用仓库自带的假 lark-cli 把真实代码路径完整跑一遍（不联网、不需要任何飞书凭据）：
+
+```bash
+npm test        # 含 7 个飞书集成用例
+```
+
+覆盖：8 表拉取与字段映射、工单明细串解析、流水按 seq 排序、`push` 幂等（全「更新」不重复）、`--dry-run` 零写入、以及读取/写入失败必须报错而不是静默成功。
+
+### 需要真实凭据的部分（在你的机器上做）
+
+```bash
+# 0) 确认 lark-cli 装好且已登录
+lark-cli --help
+lark-cli config show        # 应能看到已登录身份
+
+# 1) 只读连通性与各表记录数（最安全的第一步，不写任何数据）
+node feishu-sync.mjs status
+
+# 2) 拉全量到本地 JSON，人工核对内容对不对（仍不写飞书）
+node feishu-sync.mjs pull 416MES_从飞书_备份.json
+
+# 3) 真源服务：启动后应在页面顶部看到 🟢 飞书真源已连接
+node feishu-server.mjs
+curl -s http://localhost:8000/api/feishu/ping      # {"ok":true,"feishu":true}
+curl -s http://localhost:8000/api/feishu/state | head -c 300   # 应返回 8 表数据
+
+# 4) 写入前先预演，确认要写什么
+node feishu-sync.mjs push 416MES_备份.json --dry-run
+```
+
+浏览器里确认（`http://localhost:8000/index.html`）：
+1. 顶部状态应为 **🟢 飞书真源已连接**；断网/关掉服务后应变成 **⚪ 离线模式 · 本机数据**
+2. 在台账页改一个物料库存 → 到飞书多维表刷新，该物料「库存数量」应已变化，且「库存流水」多一条
+3. 执行一张工单 → 飞书对应物料库存与流水同步更新
+4. 断网时改库存 → 顶部出现 **☁️ 离线队列 N 条**；恢复网络后刷新页面，队列应自动冲刷并消失
+
+### 排错
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| `⚪ 离线模式`，`ping` 返回 `feishu:false` | 缺 `feishu-backend.config.json` | 放到项目根目录（已被 .gitignore 排除，需单独拷贝） |
+| `❌ 读取表 ... 失败` | `lark-cli` 未登录 / token 过期 / 应用未加入该 Base / 表 ID 不匹配 | 重新 `lark-cli config`，或核对配置里的 8 个表 ID |
+| `❌ 找不到 lark-cli` | PATH 里没有 | 安装后确认 `lark-cli --help` 可用 |
+| 页面一直绿但数据不更新 | 早期版本的缺陷（已修复） | 升级到 `043fc20` 之后；`/api/feishu/state` 读取失败现在会返回 502 并显示离线 |
+
+> ⚠️ 读取失败**绝不能**被当成「飞书表是空的」。历史版本曾把 `lark-cli` 报错静默转成空表，导致页面误报 🟢「已连接」——如果你在旧版本上验证过飞书同步，建议在修复版本上重跑一次 `status` 与 `pull`。
+
 ## 库存工单管理（Phase 3）
 
 「库存工单」页签把工单从「创建 + 扫码执行」两段式升级为完整管理模块：

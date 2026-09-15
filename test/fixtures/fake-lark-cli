@@ -1,0 +1,66 @@
+#!/usr/bin/env node
+/**
+ * 测试用假 lark-cli —— 让 feishu-sync.mjs / feishu-server.mjs 的代码路径可以在
+ * 没有飞书凭据、不联网的情况下被完整验证。
+ *
+ * 数据源：环境变量 FAKE_LARK_FIXTURE 指向的 JSON 文件（默认同目录 fixture.json）。
+ * 该文件的 tables 字段模拟飞书 8 张表；failOn 字段可注入故障：
+ *   failOn: 'record-list' → 读取表时报错
+ *   failOn: 'write'       → 写入时报错
+ * 每次调用追加一行到 FAKE_LARK_LOG（若设置），便于断言参数拼装。
+ */
+const fs = require('node:fs');
+const path = require('node:path');
+
+const FIXTURE = process.env.FAKE_LARK_FIXTURE || path.join(__dirname, 'fixture.json');
+const LOG = process.env.FAKE_LARK_LOG;
+
+const args = process.argv.slice(2);
+const has = (f) => args.includes(f);
+const val = (f) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : null; };
+const out = (o) => process.stdout.write(JSON.stringify(o));
+
+if (LOG) fs.appendFileSync(LOG, JSON.stringify(args) + '\n');
+
+let fx;
+try { fx = JSON.parse(fs.readFileSync(FIXTURE, 'utf8')); }
+catch (e) { out({ ok: false, error: { code: 1, msg: 'fake-lark-cli 读不到 fixture：' + e.message } }); process.exit(0); }
+
+let body = null;
+const jsonArg = args.find(a => a.startsWith('@'));
+if (jsonArg) {
+  try { body = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), jsonArg.slice(1)), 'utf8')); }
+  catch (e) { out({ ok: false, error: { code: 1, msg: '读不到 --json 文件：' + e.message } }); process.exit(0); }
+}
+
+if (fx.failOn && args.includes('+' + fx.failOn)) {
+  out({ ok: false, error: { code: 99991663, msg: '注入的模拟错误(' + fx.failOn + ')' } });
+  process.exit(0);
+}
+
+if (has('+table-list')) {
+  out({ ok: true, data: { tables: Object.entries(fx.tables).map(([name, t]) => ({ name, records_count: t.rows.length })) } });
+} else if (has('+record-list')) {
+  const t = Object.values(fx.tables).find(x => x.id === val('--table-id'));
+  if (!t) { out({ ok: false, error: { code: 1254005, msg: 'table not found: ' + val('--table-id') } }); process.exit(0); }
+  const offset = parseInt(val('--offset') || '0', 10);
+  const limit = parseInt(val('--limit') || '200', 10);
+  const slice = t.rows.slice(offset, offset + limit);
+  out({
+    ok: true,
+    data: {
+      fields: t.fields,
+      record_id_list: slice.map((_, i) => 'rec_' + t.id + '_' + (offset + i)),
+      data: slice.map(r => t.fields.map(f => (r[f] != null ? r[f] : null))),
+      has_more: offset + slice.length < t.rows.length
+    }
+  });
+} else if (has('+record-batch-create') || has('+record-batch-update')) {
+  if (fx.failOn === 'write') { out({ ok: false, error: { code: 99991663, msg: '注入的写入失败' } }); process.exit(0); }
+  const n = body && body.create_records ? body.create_records.length
+    : (body && body.update_records ? Object.keys(body.update_records).length : 0);
+  if (LOG) fs.appendFileSync(LOG, 'WRITE ' + JSON.stringify(body) + '\n');
+  out({ ok: true, data: { records: Array.from({ length: n }, (_, i) => ({ record_id: 'new_' + i })) } });
+} else {
+  out({ ok: false, error: { code: 1, msg: 'fake-lark-cli 未实现的命令: ' + args.join(' ') } });
+}
