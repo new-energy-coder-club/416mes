@@ -2,6 +2,11 @@
 node_modules/
 .venv-xianyu/
 .build/
+__pycache__/
+.vercel/
+backups/
+# 本地 Python 取数适配器（可选）；合并逻辑在 xianyu-sync.mjs
+xianyu-sync.py
 
 # Local integration credentials (never commit)
 *.config.json
@@ -16,6 +21,7 @@ inventree-data/
 
 # Generated exports, backups, and temporary files
 416MES_台账_*.xlsx
+416MES_导入_*.xlsx
 416MES_台账_*.csv
 416MES_备份*.json
 416MES_从飞书_备份.json
@@ -39,6 +45,7 @@ Thumbs.db
 # 本地内部文档（不上传仓库；文件仍保留在本机）
 416MES分阶段开发计划.md
 416MES开发需求书.md
+MES开发需求书.md
 验收报告.md
 
 # 本地待定事项（不上传仓库）
