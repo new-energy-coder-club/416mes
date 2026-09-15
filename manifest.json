@@ -1,0 +1,13 @@
+{
+  "name": "常州工NEC · 智能仓库MES",
+  "short_name": "416MES",
+  "description": "四类标签 · 扫码出入库闭环 · Excel 台账 · InvenTree 集成镜像",
+  "start_url": "home.html",
+  "display": "standalone",
+  "background_color": "#16233a",
+  "theme_color": "#16233a",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

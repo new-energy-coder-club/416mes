@@ -1,0 +1,33 @@
+# Dependencies and local tooling
+node_modules/
+.venv-xianyu/
+
+# Local integration credentials and runtime data
+feishu-backend.config.json
+inventree-sync.config.json
+nec-sync.config.json
+xianyu-sync.config.json
+**/feishu-backend.config.json
+**/inventree-sync.config.json
+**/nec-sync.config.json
+**/xianyu-sync.config.json
+inventree-data/
+**/inventree-data/
+.cloudflared/
+416MES-迁移包/
+
+# Generated exports, backups, and temporary files
+416MES_台账_*.xlsx
+416MES_台账_*.csv
+416MES_备份_*.json
+*_backup_*.json
+*.bak
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
+
+# Local environment files
+.env
+.env.*
+!.env.example

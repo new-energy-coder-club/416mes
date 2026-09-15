@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#16233a"/>
+  <!-- 货架 -->
+  <g stroke="#3ddc84" stroke-width="14" stroke-linecap="round">
+    <line x1="110" y1="150" x2="402" y2="150"/>
+    <line x1="110" y1="256" x2="402" y2="256"/>
+    <line x1="110" y1="362" x2="402" y2="362"/>
+  </g>
+  <g stroke="#5b7ba6" stroke-width="16" stroke-linecap="round">
+    <line x1="120" y1="120" x2="120" y2="400"/>
+    <line x1="392" y1="120" x2="392" y2="400"/>
+  </g>
+  <!-- 箱子 -->
+  <rect x="150" y="186" width="70" height="70" rx="8" fill="#e8a020"/>
+  <rect x="252" y="186" width="70" height="70" rx="8" fill="#1f6fd6"/>
+  <rect x="200" y="292" width="70" height="70" rx="8" fill="#d33a2c"/>
+  <!-- 扫描框 -->
+  <g stroke="#ffffff" stroke-width="10" fill="none" stroke-linecap="round">
+    <path d="M170 410 v-22 h22"/>
+    <path d="M342 388 h22 v22"/>
+    <path d="M392 388 v22 h-22" transform="translate(-50,0)"/>
+  </g>
+  <line x1="150" y1="430" x2="362" y2="430" stroke="#3ddc84" stroke-width="8" stroke-linecap="round" stroke-dasharray="20 14"/>
+</svg>
