@@ -12,6 +12,32 @@
 3. 「标签打印」页勾选 → 预览 → 打印（纸张可选 **60×40 标签纸** 或 **A4 整版** 3×7=21 张/页；色彩可选 **高对比纯黑 / 彩色主视觉**；属性文字 **自动占满空白**（8.5–18pt 自适应），编码自动填满左栏，字号 70%–120% 可微调）
 4. 定期点「导出备份 JSON」（全量含流水）或「导出 Excel 台账」备份（数据存在浏览器 localStorage，换浏览器/清缓存会丢）
 
+## 开发命令（Phase 0 统一入口）
+
+```bash
+npm install          # 安装依赖（仅 xlsx）
+npm run dev          # 启动真源服务（静态页 + /api/feishu/* 代理），http://localhost:8000
+npm run serve:static # 无飞书配置时只想开静态页：scripts/static-server.mjs
+npm run check        # 全量脚本语法检查（node --check）
+npm test             # 当前 = npm run check
+```
+
+`npm run dev` 在缺少 `feishu-backend.config.json` 时自动降级为纯静态服务（页面顶部显示「⚪ 离线模式 · 本机数据」），不会因为没配密钥而启动失败。
+
+## 本地配置（不进入版本库）
+
+以下文件由 `.gitignore` 排除，仅保存在本机：
+
+| 文件 | 用途 |
+|---|---|
+| `feishu-backend.config.json` | 飞书多维表 base_token 与 8 张表 ID |
+| `nec-sync.config.json` | NEC 小工单飞书表配置 |
+| `inventree-sync.config.json` | InvenTree 地址与 API Token |
+| `xianyu-sync.config.json` | 闲鱼同步凭据（尚未实现） |
+| `inventree-data/`、`.cloudflared/` | InvenTree 数据库、隧道凭证 |
+
+提交前请确认 `git status` 中不出现上述文件；`npm run check` 通过后再提交。
+
 ## 人员台账（v3 新增）
 
 「人员台账」页维护社团成员名录：编号（MB-xxx 自动生成不可改）、姓名、学号、部门/SIG、职务、电话、备注。姓名自动同步到右上角「操作人」下拉与 NEC 工单「负责人」候选；支持搜索、增删行、Excel「人员」sheet 导出导入、JSON 备份合并。

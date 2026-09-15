@@ -22,7 +22,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import XLSX from 'xlsx';
 
-const DIR = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+const DIR = path.normalize(path.dirname(decodeURIComponent(new URL(import.meta.url).pathname).replace(/^\/([A-Za-z]:)/, '$1')));
 const CONFIG_FILE = path.join(DIR, 'inventree-sync.config.json');
 
 const MAT_CATEGORY = { GJ: '工具', HC: '耗材', PJ: '配件', DZ: '电子件' };

@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 
-const DIR = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+const DIR = path.normalize(path.dirname(decodeURIComponent(new URL(import.meta.url).pathname).replace(/^\/([A-Za-z]:)/, '$1')));
 const CONFIG_FILE = path.join(DIR, 'nec-sync.config.json');
 const DEFAULT_EXPORT = path.join(DIR, 'nec-wip-export.json');
 
@@ -220,7 +220,7 @@ function status() {
   console.log('  初始化时间：' + (cfg.created_at || '—'));
   try {
     const res = lark(['base', '+record-list', '--base-token', cfg.app_token, '--table-id', cfg.table_id || '小工单', '--format', 'json']);
-    const total = res?.total ?? res?.data?.total ?? (res?.records || res?.items || []).length;
+    const total = res?.total ?? res?.data?.total ?? rowsToRecords(res).length;
     console.log('  连通性：✅ 正常，表中现有记录 ' + total + ' 条');
   } catch (e) { console.log('  连通性：❌ ' + e.message); }
 }

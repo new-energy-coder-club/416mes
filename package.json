@@ -4,9 +4,10 @@
   "description": "单文件网页应用：`index.html` 双击即用，无需安装、无需联网。适配汉印 N41 热敏打印机 + 60×40mm 三防标签纸。",
   "main": "index.js",
   "scripts": {
-    "dev": "node scripts/static-server.mjs",
-    "serve": "node scripts/static-server.mjs",
-    "check": "node --check scripts/static-server.mjs && node --check feishu-import.mjs && node --check feishu-sync.mjs && node --check inventree-sync.mjs && node --check nec-sync.mjs && node --check api/feishu-sync.js",
+    "dev": "node feishu-server.mjs",
+    "serve": "node feishu-server.mjs",
+    "serve:static": "node scripts/static-server.mjs",
+    "check": "node --check scripts/static-server.mjs && node --check feishu-server.mjs && node --check feishu-import.mjs && node --check feishu-sync.mjs && node --check inventree-sync.mjs && node --check nec-sync.mjs && node --check api/feishu-sync.js",
     "test": "npm run check"
   },
   "keywords": [],

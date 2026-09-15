@@ -19,6 +19,8 @@ header .slogan{font-size:11px;color:#00B0F0;letter-spacing:2px;font-weight:bold;
 nav.tabs{display:flex;background:#fff;border-bottom:1px solid var(--line);padding:0 12px;}
 nav.tabs button{border:none;background:none;padding:12px 18px;font-size:14px;cursor:pointer;border-bottom:3px solid transparent;color:#555;}
 nav.tabs button.on{border-bottom-color:var(--blue);color:var(--blue);font-weight:bold;}
+nav.tabs a.tab-link{display:inline-block;padding:12px 18px;font-size:14px;border-bottom:3px solid transparent;color:#555;text-decoration:none;}
+nav.tabs a.tab-link:hover{color:var(--blue);border-bottom-color:#bcd4f6;}
 main{padding:16px 20px;max-width:1280px;margin:0 auto;}
 section.tab{display:none;}
 section.tab.on{display:block;}
@@ -146,11 +148,20 @@ tr.row-low td{background:#fff8e1;}
 .zc-rule{height:2.5mm;background:#22a9f0;margin-top:2mm;border-radius:1px;}
 .log{font-family:Consolas,monospace;font-size:12px;max-height:220px;overflow:auto;background:#16233a;color:#bfe0c8;border-radius:6px;padding:8px 10px;margin-top:10px;white-space:pre-wrap;}
 footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
-@media(max-width:560px){header .slogan{display:none;}header h1{font-size:16px;}header .sub{display:none;}}
+@media(max-width:560px){header .slogan{display:none;}header h1{font-size:16px;}header .sub{display:none;}
+/* 台账表格 → 卡片式 */
+#matTable thead{display:none;}
+#matTable,#matTable tbody,#matTable tr{display:block;width:100%;}
+#matTable tr{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;padding:8px;background:#fff;}
+#matTable td{display:flex;align-items:center;gap:8px;border:none;padding:3px 4px;}
+#matTable td::before{content:attr(data-th);min-width:74px;font-size:12px;color:#8892a2;flex:none;}
+#matTable td:first-child{padding:0;}#matTable td:first-child::before{content:"";min-width:0;}
+#matTable td input,#matTable td select{font-size:14px;border:1px solid var(--line);border-radius:6px;padding:6px 8px;width:100%;}
+}
 </style>
 </head>
 <body>
-<header><img class="nec-logo" id="hdrLogo" alt="NEC"><div><div class="slogan">BUILT TO DAWN · KEEP BUILDING&#9608;</div><h1>416MES 仓储管理系统</h1></div><span class="sub">七类标签 · Excel 台账 · 扫码出入库闭环（单机离线版）</span><span style="margin-left:auto;font-size:13px">操作人 <select id="selOperator" style="font-size:13px;padding:2px 8px;border-radius:4px;border:none;"></select></span></header>
+<header><img class="nec-logo" id="hdrLogo" alt="NEC"><div><div class="slogan">BUILT TO DAWN · KEEP BUILDING&#9608;</div><h1>416MES 仓储管理系统</h1></div><span class="sub">七类标签 · Excel 台账 · 扫码出入库闭环（单机离线版）</span><span id="fsQueueChip" title="离线期间的库存变动，联网后自动冲刷到飞书" style="display:none;margin-left:10px;font-size:12px;background:#fff4e0;color:#a4600a;border:1px solid #f0c884;border-radius:10px;padding:2px 10px;"></span><span style="margin-left:auto;font-size:13px">操作人 <select id="selOperator" style="font-size:13px;padding:2px 8px;border-radius:4px;border:none;"></select></span></header>
 <nav class="tabs">
   <button data-tab="ledger" class="on">物料台账</button>
   <button data-tab="member">人员台账</button>
@@ -159,6 +170,8 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
   <button data-tab="nec">NEC小工单</button>
   <button data-tab="design">排版工具</button>
   <button data-tab="scan">扫码出入库</button>
+  <a class="tab-link" style="margin-left:auto" href="home.html">🏠 首页</a>
+  <a class="tab-link" href="flyer-a4.html" target="_blank" rel="noopener">📄 宣传页</a>
 </nav>
 <main>
   <!-- ========== 台账 ========== -->
@@ -184,10 +197,11 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         <thead><tr>
           <th style="width:28px"><input type="checkbox" id="matCheckAll"></th>
           <th>物料码</th><th style="width:86px">分类</th><th>名称</th><th>规格型号</th><th>闲鱼XY编号</th>
-          <th>当前库位码</th><th>容器码</th><th style="width:76px">库存数量</th><th style="width:70px">安全库存</th><th style="width:76px">成本(元)</th><th>图片链接</th>
+          <th>当前库位码</th><th>容器码</th><th style="width:70px">模块区</th><th style="width:76px">库存数量</th><th style="width:70px">安全库存</th><th style="width:76px">成本(元)</th><th>图片链接</th>
         </tr></thead>
         <tbody></tbody>
       </table>
+      <datalist id="zoneList"></datalist>
       <p class="hint" style="margin-top:8px">所有修改自动保存到浏览器本地；换电脑/换浏览器前请「导出备份 JSON」（全量含流水）或「导出 Excel 台账」。库存数量带<b>黄底=低于安全库存，红底=负库存</b>；手工改数量会要求填写调整原因并写入流水。</p>
       <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;color:#445" id="txnSummary">📜 库存流水</summary>
       <div class="toolbar" style="margin-top:8px">
@@ -430,7 +444,21 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
     <div class="panel">
       <h2>扫码 / 手输机读串（前缀：LOC: 库位 · CTN: 容器 · MAT: 物料 · WIP: 工单）</h2>
       <input class="scan-input" id="scanInput" placeholder="扫描或输入，如 MAT:GJ-SD-001 / WIP:LL20260909007，回车确认" autofocus>
+      <button class="btn ghost" id="btnCam" style="margin-top:8px">📷 摄像头扫码</button>
+      <div id="camOverlay" style="display:none;position:fixed;inset:0;background:rgba(10,16,28,.92);z-index:99;flex-direction:column;align-items:center;justify-content:center;gap:10px;">
+        <video id="camVideo" autoplay playsinline style="width:min(92vw,480px);border-radius:10px;background:#000;"></video>
+        <div class="hint" style="color:#bfe0c8">对准二维码（MAT:/LOC:/CTN:/WIP:），识别后自动填入</div>
+        <button class="btn warn" id="btnCamClose">关闭摄像头</button>
+      </div>
       <label style="display:inline-flex;align-items:center;gap:6px;margin-top:10px;font-size:13px;cursor:pointer;"><input type="checkbox" id="chkStocktake"> 📦 盘点模式（扫物料码 → 输实盘数 → 自动生成盘点差异流水）</label>
+      <details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px;color:#445">☁️ InvenTree 实时同步（可选，设置一次即可）</summary>
+      <div class="toolbar" style="margin-top:8px">
+        <label style="font-size:13px"><input type="checkbox" id="invEnabled"> 变动后自动写入</label>
+        <input type="text" id="invUrl" placeholder="API 地址" style="border:1px solid var(--line);border-radius:5px;padding:5px 8px;font-size:12px;width:240px;">
+        <input type="password" id="invToken" placeholder="API Token（仅存在本浏览器）" style="border:1px solid var(--line);border-radius:5px;padding:5px 8px;font-size:12px;width:220px;">
+        <button class="btn small ghost" id="btnInvTest">测试连接</button>
+        <span class="hint" id="invStatus"></span>
+      </div></details>
       <div class="scan-result" id="scanResult"></div>
     </div>
     <div class="panel">
@@ -455,6 +483,7 @@ var q=B?E+B-1:E;if(F>D.e.c)D.e.c=F;if(F<D.s.c)D.s.c=F;if(E<D.s.r)D.s.r=E;if(q>D.
 parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.content)throw new Error("ECMA-376 Encrypted file missing "+a);var o=parse_EncryptionInfo(n.content);a="/EncryptedPackage";n=Qe.find(e,a);if(!n||!n.content)throw new Error("ECMA-376 Encrypted file missing "+a);if(o[0]==4&&typeof decrypt_agile!=="undefined")return decrypt_agile(o[1],n.content,t.password||"",t);if(o[0]==2&&typeof decrypt_std76!=="undefined")return decrypt_std76(o[1],n.content,t.password||"",t);throw new Error("File is password-protected")}function Ro(e,r){if(e&&!e.SSF){e.SSF=yr(q)}if(e&&e.SSF){He();je(e.SSF);r.revssf=or(e.SSF);r.revssf[e.SSF[65535]]=0;r.ssf=e.SSF}r.rels={};r.wbrels={};r.Strings=[];r.Strings.Count=0;r.Strings.Unique=0;if(Vs)r.revStrings=new Map;else{r.revStrings={};r.revStrings.foo=[];delete r.revStrings.foo}var t="bin";var a=true;var n=Mn();Eo(r=r||{});var i=et();var s="",l=0;r.cellXfs=[];Js(r.cellXfs,{},{revssf:{General:0}});if(!e.Props)e.Props={};s="docProps/core.xml";Qr(i,s,Kn(e.Props,r));n.coreprops.push(s);zn(r.rels,2,s,Rn.CORE_PROPS);s="docProps/app.xml";if(e.Props&&e.Props.SheetNames){}else if(!e.Workbook||!e.Workbook.Sheets)e.Props.SheetNames=e.SheetNames;else{var o=[];for(var c=0;c<e.SheetNames.length;++c)if((e.Workbook.Sheets[c]||{}).Hidden!=2)o.push(e.SheetNames[c]);e.Props.SheetNames=o}e.Props.Worksheets=e.Props.SheetNames.length;Qr(i,s,ti(e.Props,r));n.extprops.push(s);zn(r.rels,3,s,Rn.EXT_PROPS);if(e.Custprops!==e.Props&&ir(e.Custprops||{}).length>0){s="docProps/custom.xml";Qr(i,s,ii(e.Custprops,r));n.custprops.push(s);zn(r.rels,4,s,Rn.CUST_PROPS)}var f=["SheetJ5"];r.tcid=0;for(l=1;l<=e.SheetNames.length;++l){var u={"!id":{}};var h=e.Sheets[e.SheetNames[l-1]];var d=(h||{})["!type"]||"sheet";switch(d){case"chart":;default:s="xl/worksheets/sheet"+l+"."+t;Qr(i,s,write_ws_bin(l-1,r,e,u));n.sheets.push(s);zn(r.wbrels,-1,"worksheets/sheet"+l+"."+t,Rn.WS[0]);}if(h){var p=h["!comments"];var m=false;var v="";if(p&&p.length>0){var g=false;p.forEach(function(e){e[1].forEach(function(e){if(e.T==true)g=true})});if(g){v="xl/threadedComments/threadedComment"+l+".xml";Qr(i,v,ks(p,f,r));n.threadedcomments.push(v);zn(u,-1,"../threadedComments/threadedComment"+l+".xml",Rn.TCMNT)}v="xl/comments"+l+"."+t;Qr(i,v,write_comments_bin(p,r));n.comments.push(v);zn(u,-1,"../comments"+l+"."+t,Rn.CMNT);m=true}if(h["!legacy"]){if(m)Qr(i,"xl/drawings/vmlDrawing"+l+".vml",ps(l,h["!comments"]))}delete h["!comments"];delete h["!legacy"]}if(u["!id"].rId1)Qr(i,Ln(s),Bn(u))}if(r.Strings!=null&&r.Strings.length>0){s="xl/sharedStrings."+t;Qr(i,s,write_sst_bin(r.Strings,r));n.strs.push(s);zn(r.wbrels,-1,"sharedStrings."+t,Rn.SST)}s="xl/workbook."+t;Qr(i,s,write_wb_bin(e,r));n.workbooks.push(s);zn(r.rels,1,s,Rn.WB);s="xl/theme/theme1.xml";var b=ls(e.Themes,r);Qr(i,s,b);n.themes.push(s);zn(r.wbrels,-1,"theme/theme1.xml",Rn.THEME);s="xl/styles."+t;Qr(i,s,write_sty_bin(e,r));n.styles.push(s);zn(r.wbrels,-1,"styles."+t,Rn.STY);if(e.vbaraw&&a){s="xl/vbaProject.bin";Qr(i,s,e.vbaraw);n.vba.push(s);zn(r.wbrels,-1,"vbaProject.bin",Rn.VBA)}s="xl/metadata."+t;Qr(i,s,write_xlmeta_bin());n.metadata.push(s);zn(r.wbrels,-1,"metadata."+t,Rn.XLMETA);if(f.length>1){s="xl/persons/person.xml";Qr(i,s,xs(f,r));n.people.push(s);zn(r.wbrels,-1,"persons/person.xml",Rn.PEOPLE)}Qr(i,"[Content_Types].xml",Pn(n,r));Qr(i,"_rels/.rels",Bn(r.rels));Qr(i,"xl/_rels/workbook."+t+".rels",Bn(r.wbrels));delete r.revssf;delete r.ssf;return i}function Lo(e,r){if(e&&!e.SSF){e.SSF=yr(q)}if(e&&e.SSF){He();je(e.SSF);r.revssf=or(e.SSF);r.revssf[e.SSF[65535]]=0;r.ssf=e.SSF}r.rels={};r.wbrels={};r.Strings=[];r.Strings.Count=0;r.Strings.Unique=0;if(Vs)r.revStrings=new Map;else{r.revStrings={};r.revStrings.foo=[];delete r.revStrings.foo}var t="xml";var a=As.indexOf(r.bookType)>-1;var n=Mn();Eo(r=r||{});var i=et();var s="",l=0;r.cellXfs=[];Js(r.cellXfs,{},{revssf:{General:0}});if(!e.Props)e.Props={};s="docProps/core.xml";Qr(i,s,Kn(e.Props,r));n.coreprops.push(s);zn(r.rels,2,s,Rn.CORE_PROPS);s="docProps/app.xml";if(e.Props&&e.Props.SheetNames){}else if(!e.Workbook||!e.Workbook.Sheets)e.Props.SheetNames=e.SheetNames;else{var o=[];for(var c=0;c<e.SheetNames.length;++c)if((e.Workbook.Sheets[c]||{}).Hidden!=2)o.push(e.SheetNames[c]);e.Props.SheetNames=o}e.Props.Worksheets=e.Props.SheetNames.length;Qr(i,s,ti(e.Props,r));n.extprops.push(s);zn(r.rels,3,s,Rn.EXT_PROPS);if(e.Custprops!==e.Props&&ir(e.Custprops||{}).length>0){s="docProps/custom.xml";Qr(i,s,ii(e.Custprops,r));n.custprops.push(s);zn(r.rels,4,s,Rn.CUST_PROPS)}var f=["SheetJ5"];r.tcid=0;for(l=1;l<=e.SheetNames.length;++l){var u={"!id":{}};var h=e.Sheets[e.SheetNames[l-1]];var d=(h||{})["!type"]||"sheet";switch(d){case"chart":;default:s="xl/worksheets/sheet"+l+"."+t;Qr(i,s,Tl(l-1,r,e,u));n.sheets.push(s);zn(r.wbrels,-1,"worksheets/sheet"+l+"."+t,Rn.WS[0]);}if(h){var p=h["!comments"];var m=false;var v="";if(p&&p.length>0){var g=false;p.forEach(function(e){e[1].forEach(function(e){if(e.T==true)g=true})});if(g){v="xl/threadedComments/threadedComment"+l+".xml";Qr(i,v,ks(p,f,r));n.threadedcomments.push(v);zn(u,-1,"../threadedComments/threadedComment"+l+".xml",Rn.TCMNT)}v="xl/comments"+l+"."+t;Qr(i,v,bs(p,r));n.comments.push(v);zn(u,-1,"../comments"+l+"."+t,Rn.CMNT);m=true}if(h["!legacy"]){if(m)Qr(i,"xl/drawings/vmlDrawing"+l+".vml",ps(l,h["!comments"]))}delete h["!comments"];delete h["!legacy"]}if(u["!id"].rId1)Qr(i,Ln(s),Bn(u))}if(r.Strings!=null&&r.Strings.length>0){s="xl/sharedStrings."+t;Qr(i,s,Ci(r.Strings,r));n.strs.push(s);zn(r.wbrels,-1,"sharedStrings."+t,Rn.SST)}s="xl/workbook."+t;Qr(i,s,Vl(e,r));n.workbooks.push(s);zn(r.rels,1,s,Rn.WB);s="xl/theme/theme1.xml";Qr(i,s,ls(e.Themes,r));n.themes.push(s);zn(r.wbrels,-1,"theme/theme1.xml",Rn.THEME);s="xl/styles."+t;Qr(i,s,es(e,r));n.styles.push(s);zn(r.wbrels,-1,"styles."+t,Rn.STY);if(e.vbaraw&&a){s="xl/vbaProject.bin";Qr(i,s,e.vbaraw);n.vba.push(s);zn(r.wbrels,-1,"vbaProject.bin",Rn.VBA)}s="xl/metadata."+t;Qr(i,s,cs());n.metadata.push(s);zn(r.wbrels,-1,"metadata."+t,Rn.XLMETA);if(f.length>1){s="xl/persons/person.xml";Qr(i,s,xs(f,r));n.people.push(s);zn(r.wbrels,-1,"persons/person.xml",Rn.PEOPLE)}Qr(i,"[Content_Types].xml",Pn(n,r));Qr(i,"_rels/.rels",Bn(r.rels));Qr(i,"xl/_rels/workbook."+t+".rels",Bn(r.wbrels));delete r.revssf;delete r.ssf;return i}function Uo(e,r){var t="";switch((r||{}).type||"base64"){case"buffer":return[e[0],e[1],e[2],e[3],e[4],e[5],e[6],e[7]];case"base64":t=S(e.slice(0,12));break;case"binary":t=e;break;case"array":return[e[0],e[1],e[2],e[3],e[4],e[5],e[6],e[7]];default:throw new Error("Unrecognized type "+(r&&r.type||"undefined"));}return[t.charCodeAt(0),t.charCodeAt(1),t.charCodeAt(2),t.charCodeAt(3),t.charCodeAt(4),t.charCodeAt(5),t.charCodeAt(6),t.charCodeAt(7)]}function Bo(e,r){if(Qe.find(e,"EncryptedPackage"))return Po(e,r);return parse_xlscfb(e,r)}function zo(e,r){var t,a=e;var n=r||{};if(!n.type)n.type=_&&Buffer.isBuffer(e)?"buffer":"base64";t=rt(a,n);return Io(t,n)}function $o(e,r){var t=0;e:while(t<e.length)switch(e.charCodeAt(t)){case 10:;case 13:;case 32:++t;break;case 60:return parse_xlml(e.slice(t),r);default:break e;}return ui.to_workbook(e,r)}function Wo(e,r){var t="",a=Uo(e,r);switch(r.type){case"base64":t=S(e);break;case"binary":t=e;break;case"buffer":t=e.toString("binary");break;case"array":t=kr(e);break;default:throw new Error("Unrecognized type "+r.type);}if(a[0]==239&&a[1]==187&&a[2]==191)t=Dt(t);r.type="binary";return $o(t,r)}function jo(e,r){var t=e;if(r.type=="base64")t=S(t);if(typeof ArrayBuffer!=="undefined"&&e instanceof ArrayBuffer)t=new Uint8Array(e);t=typeof a!=="undefined"?a.utils.decode(1200,t.slice(2),"str"):_&&Buffer.isBuffer(e)?e.slice(2).toString("utf16le"):typeof Uint8Array!=="undefined"&&t instanceof Uint8Array?typeof TextDecoder!=="undefined"?new TextDecoder("utf-16le").decode(t.slice(2)):h(t.slice(2)):u(t.slice(2));r.type="binary";return $o(t,r)}function Ho(e){return!e.match(/[^\x00-\x7F]/)?e:Ot(e)}function Vo(e,r,t,a){if(a){t.type="string";return ui.to_workbook(e,t)}return ui.to_workbook(r,t)}function Xo(e,r){c();var t=r||{};if(t.codepage&&typeof a==="undefined")console.error("Codepage tables are not loaded.  Non-ASCII characters may not give expected results");if(typeof ArrayBuffer!=="undefined"&&e instanceof ArrayBuffer)return Xo(new Uint8Array(e),(t=yr(t),t.type="array",t));if(typeof Int8Array!=="undefined"&&e instanceof Int8Array)return Xo(new Uint8Array(e.buffer,e.byteOffset,e.length),t);if(typeof Uint8Array!=="undefined"&&e instanceof Uint8Array&&!t.type)t.type=typeof Deno!=="undefined"?"buffer":"array";var n=e,i=[0,0,0,0],s=false;if(t.cellStyles){t.cellNF=true;t.sheetStubs=true}Hs={};if(t.dateNF)Hs.dateNF=t.dateNF;if(!t.type)t.type=_&&Buffer.isBuffer(e)?"buffer":"base64";if(t.type=="file"){t.type=_?"buffer":"binary";n=nr(e);if(typeof Uint8Array!=="undefined"&&!_)t.type="array"}if(t.type=="string"){s=true;t.type="binary";t.codepage=65001;n=Ho(e)}if(t.type=="array"&&typeof Uint8Array!=="undefined"&&e instanceof Uint8Array&&typeof ArrayBuffer!=="undefined"){var l=new ArrayBuffer(3),o=new Uint8Array(l);o.foo="bar";if(!o.foo){t=yr(t);t.type="array";return Xo(I(n),t)}}switch((i=Uo(n,t))[0]){case 208:if(i[1]===207&&i[2]===17&&i[3]===224&&i[4]===161&&i[5]===177&&i[6]===26&&i[7]===225)return Bo(Qe.read(n,t),t);break;case 9:if(i[1]<=8)return parse_xlscfb(n,t);break;case 60:return parse_xlml(n,t);case 73:if(i[1]===73&&i[2]===42&&i[3]===0)throw new Error("TIFF Image File is not a spreadsheet");if(i[1]===68)return hi(n,t);break;case 84:if(i[1]===65&&i[2]===66&&i[3]===76)return ci.to_workbook(n,t);break;case 80:return i[1]===75&&i[2]<9&&i[3]<9?zo(n,t):Vo(e,n,t,s);case 239:return i[3]===60?parse_xlml(n,t):Vo(e,n,t,s);case 255:if(i[1]===254){return jo(n,t)}else if(i[1]===0&&i[2]===2&&i[3]===0)return WK_.to_workbook(n,t);break;case 0:if(i[1]===0){if(i[2]>=2&&i[3]===0)return WK_.to_workbook(n,t);if(i[2]===0&&(i[3]===8||i[3]===9))return WK_.to_workbook(n,t)}break;case 3:;case 131:;case 139:;case 140:return li.to_workbook(n,t);case 123:if(i[1]===92&&i[2]===114&&i[3]===116)return rtf_to_workbook(n,t);break;case 10:;case 13:;case 32:return Wo(n,t);case 137:if(i[1]===80&&i[2]===78&&i[3]===71)throw new Error("PNG Image File is not a spreadsheet");break;case 8:if(i[1]===231)throw new Error("Unsupported Multiplan 1.x file!");break;case 12:if(i[1]===236)throw new Error("Unsupported Multiplan 2.x file!");if(i[1]===237)throw new Error("Unsupported Multiplan 3.x file!");break;}if(si.indexOf(i[0])>-1&&i[2]<=12&&i[3]<=31)return li.to_workbook(n,t);return Vo(e,n,t,s)}function Go(e,r){var t=r||{};t.type="file";return Xo(e,t)}function Yo(e,r){switch(r.type){case"base64":;case"binary":break;case"buffer":;case"array":r.type="";break;case"file":return ar(r.file,Qe.write(e,{type:_?"buffer":""}));case"string":throw new Error("'string' output type invalid for '"+r.bookType+"' files");default:throw new Error("Unrecognized type "+r.type);}return Qe.write(e,r)}function Jo(e,r){switch(r.bookType){case"ods":return _o(e,r);case"numbers":return write_numbers_iwa(e,r);case"xlsb":return Ro(e,r);default:return Lo(e,r);}}function Zo(e,r){var t=yr(r||{});var a=Jo(e,t);return qo(a,t)}function Ko(e,r){var t=yr(r||{});var a=Lo(e,t);return qo(a,t)}function qo(e,r){var t={};var a=_?"nodebuffer":typeof Uint8Array!=="undefined"?"array":"string";if(r.compression)t.compression="DEFLATE";if(r.password)t.type=a;else switch(r.type){case"base64":t.type="base64";break;case"binary":t.type="string";break;case"string":throw new Error("'string' output type invalid for '"+r.bookType+"' files");case"buffer":;case"file":t.type=a;break;default:throw new Error("Unrecognized type "+r.type);}var n=e.FullPaths?Qe.write(e,{fileType:"zip",type:{nodebuffer:"buffer",string:"binary"}[t.type]||t.type,compression:!!r.compression}):e.generate(t);if(typeof Deno!=="undefined"){if(typeof n=="string"){if(r.type=="binary"||r.type=="base64")return n;n=new Uint8Array(O(n))}}if(r.password&&typeof encrypt_agile!=="undefined")return Yo(encrypt_agile(n,r.password),r);if(r.type==="file")return ar(r.file,n);return r.type=="string"?Dt(n):n}function Qo(e,r){var t=r||{};var a=write_xlscfb(e,t);return Yo(a,t)}function ec(e,r,t){if(!t)t="";var a=t+e;switch(r.type){case"base64":return y(Ot(a));case"binary":return Ot(a);case"string":return e;case"file":return ar(r.file,a,"utf8");case"buffer":{if(_)return A(a,"utf8");else if(typeof TextEncoder!=="undefined")return(new TextEncoder).encode(a);else return ec(a,{type:"binary"}).split("").map(function(e){return e.charCodeAt(0)})};}throw new Error("Unrecognized type "+r.type)}function rc(e,r){switch(r.type){case"base64":return x(e);case"binary":return e;case"string":return e;case"file":return ar(r.file,e,"binary");case"buffer":{if(_)return A(e,"binary");else return e.split("").map(function(e){return e.charCodeAt(0)})};}throw new Error("Unrecognized type "+r.type)}function tc(e,r){switch(r.type){case"string":;case"base64":;case"binary":var t="";for(var a=0;a<e.length;++a)t+=String.fromCharCode(e[a]);return r.type=="base64"?y(t):r.type=="string"?Dt(t):t;case"file":return ar(r.file,e);case"buffer":return e;default:throw new Error("Unrecognized type "+r.type);}}function ac(e,r){c();Wl(e);var t=yr(r||{});if(t.cellStyles){t.cellNF=true;t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=ac(e,t);t.type="array";return O(a)}return Ko(e,t)}function nc(e,r){c();Wl(e);var t=yr(r||{});if(t.cellStyles){t.cellNF=true;t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=nc(e,t);t.type="array";return O(a)}var n=0;if(t.sheet){if(typeof t.sheet=="number")n=t.sheet;else n=e.SheetNames.indexOf(t.sheet);if(!e.SheetNames[n])throw new Error("Sheet not found: "+t.sheet+" : "+typeof t.sheet)}switch(t.bookType||"xlsb"){case"xml":;case"xlml":return ec(write_xlml(e,t),t);case"slk":;case"sylk":return ec(oi.from_sheet(e.Sheets[e.SheetNames[n]],t,e),t);case"htm":;case"html":return ec(co(e.Sheets[e.SheetNames[n]],t),t);case"txt":return rc(pc(e.Sheets[e.SheetNames[n]],t),t);case"csv":return ec(dc(e.Sheets[e.SheetNames[n]],t),t,"\ufeff");case"dif":return ec(ci.from_sheet(e.Sheets[e.SheetNames[n]],t),t);case"dbf":return tc(li.from_sheet(e.Sheets[e.SheetNames[n]],t),t);case"prn":return ec(ui.from_sheet(e.Sheets[e.SheetNames[n]],t),t);case"rtf":return ec(sheet_to_rtf(e.Sheets[e.SheetNames[n]],t),t);case"eth":return ec(fi.from_sheet(e.Sheets[e.SheetNames[n]],t),t);case"fods":return ec(_o(e,t),t);case"wk1":return tc(WK_.sheet_to_wk1(e.Sheets[e.SheetNames[n]],t),t);case"wk3":return tc(WK_.book_to_wk3(e,t),t);case"biff2":if(!t.biff)t.biff=2;case"biff3":if(!t.biff)t.biff=3;case"biff4":if(!t.biff)t.biff=4;return tc(write_biff_buf(e,t),t);case"biff5":if(!t.biff)t.biff=5;case"biff8":;case"xla":;case"xls":if(!t.biff)t.biff=8;return Qo(e,t);case"xlsx":;case"xlsm":;case"xlam":;case"xlsb":;case"numbers":;case"ods":return Zo(e,t);default:throw new Error("Unrecognized bookType |"+t.bookType+"|");}}function ic(e){if(e.bookType)return;var r={xls:"biff8",htm:"html",slk:"sylk",socialcalc:"eth",Sh33tJS:"WTF"};var t=e.file.slice(e.file.lastIndexOf(".")).toLowerCase();if(t.match(/^\.[a-z]+$/))e.bookType=t.slice(1);e.bookType=r[e.bookType]||e.bookType}function sc(e,r,t){var a=t||{};a.type="file";a.file=r;ic(a);return nc(e,a)}function lc(e,r,t){var a=t||{};a.type="file";a.file=r;ic(a);return ac(e,a)}function oc(e,r,t,a){var n=t||{};n.type="file";n.file=e;ic(n);n.type="buffer";var i=a;if(!(i instanceof Function))i=t;return er.writeFile(e,nc(r,n),i)}function cc(e,r,t,a,n,i,s){var l=za(t);var o=s.defval,c=s.raw||!Object.prototype.hasOwnProperty.call(s,"raw");var f=true,u=e["!data"]!=null;var h=n===1?[]:{};if(n!==1){if(Object.defineProperty)try{Object.defineProperty(h,"__rowNum__",{value:t,enumerable:false})}catch(d){h.__rowNum__=t}else h.__rowNum__=t}if(!u||e["!data"][t])for(var p=r.s.c;p<=r.e.c;++p){var m=u?(e["!data"][t]||[])[p]:e[a[p]+l];if(m==null||m.t===undefined){if(o===undefined)continue;if(i[p]!=null){h[i[p]]=o}continue}var v=m.v;switch(m.t){case"z":if(v==null)break;continue;case"e":v=v==0?null:void 0;break;case"s":;case"b":;case"n":if(!m.z||!Re(m.z))break;v=pr(v);if(typeof v=="number")break;case"d":if(!(s&&(s.UTC||s.raw===false)))v=Mr(new Date(v));break;default:throw new Error("unrecognized type "+m.t);}if(i[p]!=null){if(v==null){if(m.t=="e"&&v===null)h[i[p]]=null;else if(o!==undefined)h[i[p]]=o;else if(c&&v===null)h[i[p]]=null;else continue}else{h[i[p]]=(m.t==="n"&&typeof s.rawNumbers==="boolean"?s.rawNumbers:c)?v:tn(m,v,s)}if(v!=null)f=false}}return{row:h,isempty:f}}function fc(e,r){if(e==null||e["!ref"]==null)return[];var t={t:"n",v:0},a=0,n=1,i=[],s=0,l="";var o={s:{r:0,c:0},e:{r:0,c:0}};var c=r||{};var f=c.range!=null?c.range:e["!ref"];if(c.header===1)a=1;else if(c.header==="A")a=2;else if(Array.isArray(c.header))a=3;else if(c.header==null)a=0;switch(typeof f){case"string":o=en(f);break;case"number":o=en(e["!ref"]);o.s.r=f;break;default:o=f;}if(a>0)n=0;var u=za(o.s.r);var h=[];var d=[];var p=0,m=0;var v=e["!data"]!=null;var g=o.s.r,b=0;var w={};if(v&&!e["!data"][g])e["!data"][g]=[];var k=c.skipHidden&&e["!cols"]||[];var y=c.skipHidden&&e["!rows"]||[];for(b=o.s.c;b<=o.e.c;++b){if((k[b]||{}).hidden)continue;h[b]=Ha(b);t=v?e["!data"][g][b]:e[h[b]+u];switch(a){case 1:i[b]=b-o.s.c;break;case 2:i[b]=h[b];break;case 3:i[b]=c.header[b-o.s.c];break;default:if(t==null)t={w:"__EMPTY",t:"s"};l=s=tn(t,null,c);m=w[s]||0;if(!m)w[s]=1;else{do{l=s+"_"+m++}while(w[l]);w[s]=m;w[l]=1}i[b]=l;}}for(g=o.s.r+n;g<=o.e.r;++g){if((y[g]||{}).hidden)continue;var x=cc(e,o,g,h,a,i,c);if(x.isempty===false||(a===1?c.blankrows!==false:!!c.blankrows))d[p++]=x.row}d.length=p;return d}var uc=/"/g;function hc(e,r,t,a,n,i,s,l,o){var c=true;var f=[],u="",h=za(t);var d=e["!data"]!=null;var p=d&&e["!data"][t]||[];for(var m=r.s.c;m<=r.e.c;++m){if(!a[m])continue;var v=d?p[m]:e[a[m]+h];if(v==null)u="";else if(v.v!=null){c=false;u=""+(o.rawNumbers&&v.t=="n"?v.v:tn(v,null,o));for(var g=0,b=0;g!==u.length;++g)if((b=u.charCodeAt(g))===n||b===i||b===34||o.forceQuotes){u='"'+u.replace(uc,'""')+'"';break}if(u=="ID"&&l==0&&f.length==0)u='"ID"'}else if(v.f!=null&&!v.F){c=false;u="="+v.f;if(u.indexOf(",")>=0)u='"'+u.replace(uc,'""')+'"'}else u="";f.push(u)}if(o.strip)while(f[f.length-1]==="")--f.length;if(o.blankrows===false&&c)return null;return f.join(s)}function dc(e,r){var t=[];var a=r==null?{}:r;if(e==null||e["!ref"]==null)return"";var n=en(e["!ref"]);var i=a.FS!==undefined?a.FS:",",s=i.charCodeAt(0);var l=a.RS!==undefined?a.RS:"\n",o=l.charCodeAt(0);var c="",f=[];var u=a.skipHidden&&e["!cols"]||[];var h=a.skipHidden&&e["!rows"]||[];for(var d=n.s.c;d<=n.e.c;++d)if(!(u[d]||{}).hidden)f[d]=Ha(d);var p=0;for(var m=n.s.r;m<=n.e.r;++m){if((h[m]||{}).hidden)continue;c=hc(e,n,m,f,s,o,i,p,a);if(c==null){continue}if(c||a.blankrows!==false)t.push((p++?l:"")+c)}return t.join("")}function pc(e,r){if(!r)r={};r.FS="\t";r.RS="\n";var t=dc(e,r);if(typeof a=="undefined"||r.type=="string")return t;var n=a.utils.encode(1200,t,"str");return String.fromCharCode(255)+String.fromCharCode(254)+n}function mc(e,r){var t="",a,n="";if(e==null||e["!ref"]==null)return[];var i=en(e["!ref"]),s="",l=[],o;var c=[];var f=e["!data"]!=null;for(o=i.s.c;o<=i.e.c;++o)l[o]=Ha(o);for(var u=i.s.r;u<=i.e.r;++u){s=za(u);for(o=i.s.c;o<=i.e.c;++o){t=l[o]+s;a=f?(e["!data"][u]||[])[o]:e[t];n="";if(a===undefined)continue;else if(a.F!=null){t=a.F;if(!a.f)continue;n=a.f;if(t.indexOf(":")==-1)t=t+":"+t}if(a.f!=null)n=a.f;else if(r&&r.values===false)continue;else if(a.t=="z")continue;else if(a.t=="n"&&a.v!=null)n=""+a.v;else if(a.t=="b")n=a.v?"TRUE":"FALSE";else if(a.w!==undefined)n="'"+a.w;else if(a.v===undefined)continue;else if(a.t=="s")n="'"+a.v;else n=""+a.v;c[c.length]=t+"="+n}}return c}function vc(e,r,t){var a=t||{};var n=e?e["!data"]!=null:a.dense;if(b!=null&&n==null)n=b;var i=+!a.skipHeader;var s=e||{};if(!e&&n)s["!data"]=[];var l=0,o=0;if(s&&a.origin!=null){if(typeof a.origin=="number")l=a.origin;else{var c=typeof a.origin=="string"?Ya(a.origin):a.origin;l=c.r;o=c.c}}var f={s:{c:0,r:0},e:{c:o,r:l+r.length-1+i}};if(s["!ref"]){var u=en(s["!ref"]);f.e.c=Math.max(f.e.c,u.e.c);f.e.r=Math.max(f.e.r,u.e.r);if(l==-1){l=u.e.r+1;f.e.r=l+r.length-1+i}}else{if(l==-1){l=0;f.e.r=r.length-1+i}}var h=a.header||[],d=0;var p=[];r.forEach(function(e,r){if(n&&!s["!data"][l+r+i])s["!data"][l+r+i]=[];if(n)p=s["!data"][l+r+i];ir(e).forEach(function(t){if((d=h.indexOf(t))==-1)h[d=h.length]=t;var c=e[t];var f="z";var u="";var m=n?"":Ha(o+d)+za(l+r+i);var v=n?p[o+d]:s[m];if(c&&typeof c==="object"&&!(c instanceof Date)){if(n)p[o+d]=c;else s[m]=c}else{if(typeof c=="number")f="n";else if(typeof c=="boolean")f="b";else if(typeof c=="string")f="s";else if(c instanceof Date){f="d";if(!a.UTC)c=Ir(c);if(!a.cellDates){f="n";c=dr(c)}u=v!=null&&v.z&&Re(v.z)?v.z:a.dateNF||q[14]}else if(c===null&&a.nullError){f="e";c=0}if(!v){if(!n)s[m]=v={t:f,v:c};else p[o+d]=v={t:f,v:c}}else{v.t=f;v.v=c;delete v.w;delete v.R;if(u)v.z=u}if(u)v.z=u}})});f.e.c=Math.max(f.e.c,o+h.length-1);var m=za(l);if(n&&!s["!data"][l])s["!data"][l]=[];if(i)for(d=0;d<h.length;++d){if(n)s["!data"][l][d+o]={t:"s",v:h[d]};else s[Ha(d+o)+m]={t:"s",v:h[d]}}s["!ref"]=Ka(f);return s}function gc(e,r){return vc(null,e,r)}function bc(e,r,t){if(typeof r=="string"){if(e["!data"]!=null){var a=Ya(r);if(!e["!data"][a.r])e["!data"][a.r]=[];return e["!data"][a.r][a.c]||(e["!data"][a.r][a.c]={t:"z"})}return e[r]||(e[r]={t:"z"})}if(typeof r!="number")return bc(e,Ja(r));return bc(e,Ha(t||0)+za(r))}function wc(e,r){if(typeof r=="number"){if(r>=0&&e.SheetNames.length>r)return r;throw new Error("Cannot find sheet # "+r)}else if(typeof r=="string"){var t=e.SheetNames.indexOf(r);if(t>-1)return t;throw new Error("Cannot find sheet name |"+r+"|")}else throw new Error("Cannot find sheet |"+r+"|")}function kc(e,r){var t={SheetNames:[],Sheets:{}};if(e)yc(t,e,r||"Sheet1");return t}function yc(e,r,t,a){var n=1;if(!t)for(;n<=65535;++n,t=undefined)if(e.SheetNames.indexOf(t="Sheet"+n)==-1)break;if(!t||e.SheetNames.length>=65535)throw new Error("Too many worksheets");if(a&&e.SheetNames.indexOf(t)>=0&&t.length<32){var i=t.match(/\d+$/);n=i&&+i[0]||0;var s=i&&t.slice(0,i.index)||t;for(++n;n<=65535;++n)if(e.SheetNames.indexOf(t=s+n)==-1)break}zl(t);if(e.SheetNames.indexOf(t)>=0)throw new Error("Worksheet with name |"+t+"| already exists!");e.SheetNames.push(t);e.Sheets[t]=r;return t}function xc(e,r,t){if(!e.Workbook)e.Workbook={};if(!e.Workbook.Sheets)e.Workbook.Sheets=[];var a=wc(e,r);if(!e.Workbook.Sheets[a])e.Workbook.Sheets[a]={};switch(t){case 0:;case 1:;case 2:break;default:throw new Error("Bad sheet visibility setting "+t);}e.Workbook.Sheets[a].Hidden=t}function Cc(e,r){e.z=r;return e}function Sc(e,r,t){if(!r){delete e.l}else{e.l={Target:r};if(t)e.l.Tooltip=t}return e}function _c(e,r,t){return Sc(e,"#"+r,t)}function Ac(e,r,t){if(!e.c)e.c=[];e.c.push({t:r,a:t||"SheetJS"})}function Tc(e,r,t,a){var n=typeof r!="string"?r:en(r);var i=typeof r=="string"?r:Ka(r);for(var s=n.s.r;s<=n.e.r;++s)for(var l=n.s.c;l<=n.e.c;++l){var o=bc(e,s,l);o.t="n";o.F=i;delete o.v;if(s==n.s.r&&l==n.s.c){o.f=t;if(a)o.D=true}}var c=Za(e["!ref"]);if(c.s.r>n.s.r)c.s.r=n.s.r;if(c.s.c>n.s.c)c.s.c=n.s.c;if(c.e.r<n.e.r)c.e.r=n.e.r;if(c.e.c<n.e.c)c.e.c=n.e.c;e["!ref"]=Ka(c);return e}var Ec={encode_col:Ha,encode_row:za,encode_cell:Ja,encode_range:Ka,decode_col:ja,decode_row:Ba,split_cell:Ga,decode_cell:Ya,decode_range:Za,format_cell:tn,sheet_new:nn,sheet_add_aoa:sn,sheet_add_json:vc,sheet_add_dom:fo,aoa_to_sheet:ln,json_to_sheet:gc,table_to_sheet:uo,table_to_book:ho,sheet_to_csv:dc,sheet_to_txt:pc,sheet_to_json:fc,sheet_to_html:co,sheet_to_formulae:mc,sheet_to_row_object_array:fc,sheet_get_cell:bc,book_new:kc,book_append_sheet:yc,book_set_sheet_visibility:xc,cell_set_number_format:Cc,cell_set_hyperlink:Sc,cell_set_internal_link:_c,cell_add_comment:Ac,sheet_set_array_formula:Tc,consts:{SHEET_VISIBLE:0,SHEET_HIDDEN:1,SHEET_VERY_HIDDEN:2}};if(typeof parse_xlscfb!=="undefined")e.parse_xlscfb=parse_xlscfb;e.parse_zip=Io;e.read=Xo;e.readFile=Go;e.readFileSync=Go;e.write=nc;e.writeFile=sc;e.writeFileSync=sc;e.writeFileAsync=oc;e.utils=Ec;e.writeXLSX=ac;e.writeFileXLSX=lc;e.set_fs=rr;e.set_cptable=g;e.SSF=Ve;if(typeof __stream!=="undefined")e.stream=__stream;if(typeof Qe!=="undefined")e.CFB=Qe;if(typeof require!=="undefined"){var Fc=undefined;if((Fc||{}).Readable)set_readable(Fc.Readable);try{er=undefined}catch(Ms){}}}if(typeof exports!=="undefined")make_xlsx_lib(exports);else if(typeof module!=="undefined"&&module.exports)make_xlsx_lib(module.exports);else if(typeof define==="function"&&define.amd)define("xlsx",function(){if(!XLSX.version)make_xlsx_lib(XLSX);return XLSX});else make_xlsx_lib(XLSX);if(typeof window!=="undefined"&&!window.XLSX)try{window.XLSX=XLSX}catch(e){}
 </script>
 <script src="nec-gallery.js"></script>
+<script src="jsqr.min.js"></script>
 <script>
 /* ================= 416MES 应用逻辑 ================= */
 'use strict';
@@ -739,7 +768,7 @@ function load() {
   state.necOrders = state.necOrders || [];      // 旧版本数据迁移
   state.items = state.items || [];
   state.members = state.members || [];
-  state.members.forEach(m => { if (m.group == null) m.group = ''; });   // 标签字段迁移
+  state.members.forEach(m => { if (m.group == null) m.group = ''; if (m.pin == null) m.pin = ''; });   // 标签/PIN字段迁移
   state.manuals = state.manuals || [];
   state.necSerials = state.necSerials || {};
   state.transactions = state.transactions || [];
@@ -981,7 +1010,7 @@ document.getElementById('galAlbum').addEventListener('change', () => { galShown 
 document.getElementById('btnGalMore').addEventListener('click', () => { galShown += GAL_PAGE; renderGalGrid(); });
 
 /* ================= ① 物料台账 ================= */
-const MAT_COLS = [['code', '物料码'], ['cat', '分类'], ['name', '名称'], ['spec', '规格型号'], ['xy', '闲鱼XY编号'], ['loc', '当前库位码'], ['container', '容器码'], ['qty', '库存数量'], ['minQty', '安全库存'], ['cost', '成本'], ['img', '图片链接']];
+const MAT_COLS = [['code', '物料码'], ['cat', '分类'], ['name', '名称'], ['spec', '规格型号'], ['xy', '闲鱼XY编号'], ['loc', '当前库位码'], ['container', '容器码'], ['zone', '模块区'], ['qty', '库存数量'], ['minQty', '安全库存'], ['cost', '成本'], ['img', '图片链接']];
 /* 分类码：JG机构件 DJ电机驱动 DZ电子件 GZ贵重件 TS调试设备 GJ工具 HC耗材 QT其他 */
 const MAT_CATS = { JG: '机构件', DJ: '电机驱动', DZ: '电子件', GZ: '贵重件', TS: '调试设备', GJ: '工具', HC: '耗材', QT: '其他' };
 let ledgerFilter = '';
@@ -989,16 +1018,17 @@ function renderLedger() {
   const tb = document.querySelector('#matTable tbody');
   const kw = ledgerFilter.trim().toLowerCase();
   tb.innerHTML = state.materials.map((m, i) => ({ m, i }))
-    .filter(({ m }) => !kw || [m.code, m.name, m.spec, m.loc, m.container].some(v => String(v || '').toLowerCase().includes(kw)))
+    .filter(({ m }) => !kw || [m.code, m.name, m.spec, m.loc, m.container, m.zone].some(v => String(v || '').toLowerCase().includes(kw)))
     .map(({ m, i }) => {
       const neg = m.qty < 0, low = !neg && m.minQty > 0 && m.qty < m.minQty;
       return '<tr' + (neg ? ' class="row-neg"' : low ? ' class="row-low"' : '') + '>' +
         '<td><input type="checkbox" class="matSel" data-i="' + i + '"></td>' +
-        MAT_COLS.map(([k]) => {
-          if (k === 'cat') return '<td><select data-i="' + i + '" data-k="cat">' +
+        MAT_COLS.map(([k, label]) => {
+          if (k === 'cat') return '<td data-th="分类"><select data-i="' + i + '" data-k="cat">' +
             Object.entries(MAT_CATS).map(([c, n]) => '<option value="' + c + '"' + ((m.cat || 'QT') === c ? ' selected' : '') + '>' + c + ' ' + n + '</option>').join('') + '</select></td>';
+          if (k === 'zone') return '<td data-th="模块区"><input type="text" list="zoneList" data-i="' + i + '" data-k="zone" value="' + esc(m.zone || '') + '" placeholder="M-01" style="width:64px"></td>';
           const num = (k === 'qty' || k === 'cost' || k === 'minQty');
-          return '<td><input type="' + (num ? 'number' : 'text') + '" data-i="' + i + '" data-k="' + k + '" value="' + esc(m[k]) + '"' + (k === 'cost' ? ' step="0.01"' : '') + '></td>';
+          return '<td data-th="' + label + '"><input type="' + (num ? 'number' : 'text') + '" data-i="' + i + '" data-k="' + k + '" value="' + esc(m[k]) + '"' + (k === 'cost' ? ' step="0.01"' : '') + '></td>';
         }).join('') + '</tr>';
     }).join('');
   tb.querySelectorAll('[data-k]').forEach(inp => inp.addEventListener('change', () => {
@@ -1011,6 +1041,8 @@ function renderLedger() {
       const delta = v - m.qty;
       m.qty = v;
       recordTxn('手工调整', m.code, delta, '', reason || '（未填）');
+      invPush(m.code, v);   // InvenTree 实时同步
+      fsPushStock(m.code, v, delta, '手工调整', reason || '', '');   // 飞书真源直写
       save(); renderLedger(); renderTxns();
       log('手工调整 ' + m.code + ' ' + (delta > 0 ? '+' : '') + delta + '（' + (reason || '未填原因') + '）｜操作人 ' + state.operator);
       return;
@@ -1020,10 +1052,12 @@ function renderLedger() {
     if (k === 'minQty') renderLedger();   // 安全库存变化影响预警底色
   }));
   if (typeof refreshMatDatalist === 'function') refreshMatDatalist();
+  const zl = document.getElementById('zoneList');
+  if (zl) zl.innerHTML = recordsOf('zone').map(z => '<option value="' + esc(z.code) + '">' + esc(z.code + ' ' + z.desc) + '</option>').join('');
 }
 document.getElementById('matSearch').addEventListener('input', e => { ledgerFilter = e.target.value; renderLedger(); });
 document.getElementById('btnAddMat').addEventListener('click', () => {
-  state.materials.push({ code: '', cat: 'QT', name: '', spec: '', xy: '', loc: '', container: '', qty: 0, minQty: 0, cost: 0, img: '' });
+  state.materials.push({ code: '', cat: 'QT', name: '', spec: '', xy: '', loc: '', container: '', zone: '', qty: 0, minQty: 0, cost: 0, img: '' });
   save(); renderLedger();
   const tb = document.querySelector('#matTable tbody'); tb.lastElementChild && tb.lastElementChild.scrollIntoView();
 });
@@ -1053,7 +1087,7 @@ document.getElementById('matCheckAll').addEventListener('change', e =>
   document.querySelectorAll('.matSel').forEach(c => c.checked = e.target.checked));
 
 /* ================= ①b 人员台账 ================= */
-const MEMBER_COLS = [['code', '编号'], ['name', '姓名'], ['sid', '学号'], ['dept', '部门/SIG'], ['role', '职务'], ['group', '标签'], ['phone', '电话'], ['note', '备注']];
+const MEMBER_COLS = [['code', '编号'], ['name', '姓名'], ['sid', '学号'], ['dept', '部门/SIG'], ['role', '职务'], ['group', '标签'], ['pin', 'PIN码'], ['phone', '电话'], ['note', '备注']];
 let memberFilter = '';
 let memberTag = '';   // 标签筛选：'' = 全部
 function renderMemberTagBar() {
@@ -1112,15 +1146,15 @@ document.getElementById('memberCheckAll').addEventListener('change', e =>
 document.getElementById('btnExport').addEventListener('click', () => {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-    ['物料码', '分类', '名称', '规格型号', '闲鱼XY编号', '当前库位码', '容器码', '库存数量', '安全库存', '成本', '图片链接'],
-    ...state.materials.map(m => [m.code, m.cat || 'QT', m.name, m.spec, m.xy, m.loc, m.container, m.qty, m.minQty || 0, m.cost, m.img || ''])]), '物料台账');
+    ['物料码', '分类', '名称', '规格型号', '闲鱼XY编号', '当前库位码', '容器码', '模块区', '库存数量', '安全库存', '成本', '图片链接'],
+    ...state.materials.map(m => [m.code, m.cat || 'QT', m.name, m.spec, m.xy, m.loc, m.container, m.zone || '', m.qty, m.minQty || 0, m.cost, m.img || ''])]), '物料台账');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ['库位码', '类型', '说明'], ...state.locations.map(l => [l.code, l.kind, l.desc])]), '库位');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ['容器码', '容器类型', '规格', '当前库位码'], ...state.containers.map(c => [c.code, c.type, c.spec, c.loc])]), '容器');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-    ['编号', '姓名', '学号', '部门/SIG', '职务', '电话', '备注', '标签'],
-    ...state.members.map(m => [m.code, m.name, m.sid, m.dept, m.role, m.phone, m.note, m.group || ''])]), '人员');
+    ['编号', '姓名', '学号', '部门/SIG', '职务', '电话', '备注', '标签', 'PIN码'],
+    ...state.members.map(m => [m.code, m.name, m.sid, m.dept, m.role, m.phone, m.note, m.group || '', m.pin || ''])]), '人员');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ['物品码', '名称', '规格型号', '库位码'], ...state.items.map(i => [i.code, i.name, i.spec, i.loc])]), '物品');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
@@ -1161,14 +1195,14 @@ document.getElementById('fileImport').addEventListener('change', e => {
       const hIdx = {}; (ms[0] || []).forEach((h, i) => { hIdx[String(h).trim()] = i; });   // 表头驱动，兼容旧版列序
       const col = (r, n) => (hIdx[n] != null && r[hIdx[n]] != null ? r[hIdx[n]] : '');
       const normCat = v => { const c = String(v || '').trim().split(/[\s　]/)[0].toUpperCase(); return MAT_CATS[c] ? c : 'QT'; };
-      state.materials = bodyRows(ms).map(r => ({ code: String(col(r, '物料码')), cat: normCat(col(r, '分类')), name: col(r, '名称') || '', spec: col(r, '规格型号') || '', xy: col(r, '闲鱼XY编号') || '', loc: col(r, '当前库位码') || '', container: col(r, '容器码') || '', qty: parseFloat(col(r, '库存数量')) || 0, minQty: parseFloat(col(r, '安全库存')) || 0, cost: parseFloat(col(r, '成本')) || 0, img: col(r, '图片链接') || '' }));
+      state.materials = bodyRows(ms).map(r => ({ code: String(col(r, '物料码')), cat: normCat(col(r, '分类')), name: col(r, '名称') || '', spec: col(r, '规格型号') || '', xy: col(r, '闲鱼XY编号') || '', loc: col(r, '当前库位码') || '', container: col(r, '容器码') || '', zone: col(r, '模块区') || '', qty: parseFloat(col(r, '库存数量')) || 0, minQty: parseFloat(col(r, '安全库存')) || 0, cost: parseFloat(col(r, '成本')) || 0, img: col(r, '图片链接') || '' }));
       const ls = sheet('库位'); if (ls) state.locations = bodyRows(ls).map(r => ({ code: String(r[0]), kind: r[1] || '', desc: r[2] || '' }));
       const cs = sheet('容器'); if (cs) state.containers = bodyRows(cs).map(r => ({ code: String(r[0]), type: r[1] || '', spec: r[2] || '', loc: r[3] || '' }));
       const ws = sheet('工单记录'); if (ws) state.workorders = bodyRows(ws).map(r => ({
         code: String(r[0]), type: r[1] || 'LL', date: r[2] || '', status: r[4] || '未执行', execTime: r[5] || '',
         items: String(r[3] || '').split(';').map(s => s.trim()).filter(Boolean).map(s => { const m = s.match(/^(.+?)[x×](\d+(?:\.\d+)?)$/); return m ? { matCode: m[1], qty: +m[2] } : null; }).filter(Boolean)
       }));
-      const ppl = sheet('人员'); if (ppl) state.members = bodyRows(ppl).map(r => ({ code: String(r[0]), name: r[1] || '', sid: String(r[2] || ''), dept: r[3] || '', role: r[4] || '成员', phone: String(r[5] || ''), note: r[6] || '', group: r[7] || '' }));
+      const ppl = sheet('人员'); if (ppl) state.members = bodyRows(ppl).map(r => ({ code: String(r[0]), name: r[1] || '', sid: String(r[2] || ''), dept: r[3] || '', role: r[4] || '成员', phone: String(r[5] || ''), note: r[6] || '', group: r[7] || '', pin: String(r[8] || '') }));
       const is2 = sheet('物品'); if (is2) state.items = bodyRows(is2).map(r => ({ code: String(r[0]), name: r[1] || '', spec: r[2] || '', loc: r[3] || '' }));
       const ms2 = sheet('手册'); if (ms2) state.manuals = bodyRows(ms2).map(r => ({ code: String(r[0]), name: r[1] || '', ver: r[2] || '', loc: r[3] || '' }));
       const ns = sheet('NEC工单'); if (ns) state.necOrders = bodyRows(ns).map(r => ({
@@ -1699,6 +1733,8 @@ function scanMat(code, box) {
       const delta = real - m.qty;
       m.qty = real;
       recordTxn('盘点', m.code, delta, '', delta === 0 ? '账实相符' : '盘点差异');
+      invPush(m.code, real);   // InvenTree 实时同步
+      fsPushStock(m.code, real, delta, '盘点', delta === 0 ? '账实相符' : '盘点差异', '');   // 飞书真源直写
       save(); renderLedger(); renderTxns();
       log('盘点 ' + m.code + '：' + (delta === 0 ? '账实相符（' + real + '）' : '差异 ' + (delta > 0 ? '+' : '') + delta + '，实盘 ' + real) + '｜操作人 ' + state.operator);
       scanMat(code, box);
@@ -1714,7 +1750,9 @@ function scanMat(code, box) {
   log((m ? '查询物料 ' : '未命中物料 ') + code);
 }
 function scanWhere(kind, code, box) {
-  const list = state.materials.filter(m => (kind === 'LOC:' ? m.loc === code : m.container === code));
+  // 模块区（M-xx）：按物料的「模块区」字段匹配；普通库位/容器按 loc/container 匹配
+  const isZone = /^M-\d+$/.test(code);
+  const list = state.materials.filter(m => isZone ? (m.zone === code || m.loc === code) : (kind === 'LOC:' ? m.loc === code : m.container === code));
   box.className = 'scan-result panel flash-ok';
   box.innerHTML = '<div class="kv"><b>' + (kind === 'LOC:' ? '库位' : '容器') + '</b>' + esc(code) +
     '<br><b>存放物料</b>' + (list.length ? list.map(m => esc(m.code) + ' ' + esc(m.name) + ' ×' + m.qty).join('<br>　') : '（空）') + '</div>';
@@ -1744,7 +1782,7 @@ function scanWip(code, box) {
       if (sign < 0 && m.qty < it.qty) problems.push(it.matCode + ' 库存不足（现 ' + m.qty + '，需 ' + it.qty + '）');
     });
     if (problems.length) { alert('无法执行：\n' + problems.join('\n')); return; }
-    w.items.forEach(it => { const m = findMat(it.matCode); if (m) { m.qty += sign * it.qty; recordTxn(WIP_NAMES[w.type] || w.type, it.matCode, sign * it.qty, w.code, ''); } });
+    w.items.forEach(it => { const m = findMat(it.matCode); if (m) { m.qty += sign * it.qty; recordTxn(WIP_NAMES[w.type] || w.type, it.matCode, sign * it.qty, w.code, ''); invPush(m.code, m.qty); fsPushStock(m.code, m.qty, sign * it.qty, WIP_NAMES[w.type] || w.type, '', w.code); } });
     w.status = '已执行'; w.execTime = new Date().toLocaleString();
     save(); renderLedger(); renderTxns();
     log('执行工单 ' + w.code + '（' + WIP_NAMES[w.type] + '）：' + w.items.map(it => it.matCode + (sign < 0 ? '-' : '+') + it.qty).join('，') + '｜操作人 ' + state.operator);
@@ -1752,27 +1790,230 @@ function scanWip(code, box) {
   });
   log('扫描工单 ' + code + '（' + w.status + '）');
 }
-document.getElementById('scanInput').addEventListener('keydown', e => {
-  if (e.key !== 'Enter') return;
-  const raw = e.target.value.trim(); e.target.value = '';
+/* 统一扫码入口：手输回车 / 扫码枪 / 摄像头 共用 */
+function handleScan(raw) {
+  raw = (raw || '').trim();
   if (!raw) return;
   const box = document.getElementById('scanResult');
-  const m = raw.match(/^(LOC:|CTN:|MAT:|WIP:)(.+)$/i);
+  const m = raw.match(/^(LOC:|CTN:|MAT:|WIP:|NEC:)(.+)$/i);
   const prefix = m ? m[1].toUpperCase() : (state.workorders.some(w => w.code === raw) ? 'WIP:' : 'MAT:');
   const code = m ? m[2].trim() : raw;
   if (prefix === 'MAT:') scanMat(code, box);
   else if (prefix === 'LOC:' || prefix === 'CTN:') scanWhere(prefix, code, box);
   else scanWip(code, box);
+}
+document.getElementById('scanInput').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const raw = e.target.value; e.target.value = '';
+  handleScan(raw);
 });
 
+/* ---------- 摄像头扫码（jsQR，本地文件离线可用） ---------- */
+(function () {
+  const overlay = document.getElementById('camOverlay');
+  const video = document.getElementById('camVideo');
+  let stream = null, rafId = 0;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  function stop() {
+    cancelAnimationFrame(rafId);
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = null; overlay.style.display = 'none';
+  }
+  function tick() {
+    if (!stream) return;
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0);
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const q = window.jsQR && jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+      if (q && q.data) {
+        stop();
+        handleScan(q.data);
+        return;
+      }
+    }
+    rafId = requestAnimationFrame(tick);
+  }
+  document.getElementById('btnCam').addEventListener('click', async () => {
+    if (!window.jsQR) { alert('摄像头组件未加载（jsqr.min.js 缺失）'); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { alert('当前浏览器不支持摄像头（需 HTTPS 或 localhost）'); return; }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      video.srcObject = stream;
+      overlay.style.display = 'flex';
+      tick();
+    } catch (e) { alert('无法打开摄像头：' + e.message); }
+  });
+  document.getElementById('btnCamClose').addEventListener('click', stop);
+})();
+
 document.getElementById('selOperator').addEventListener('change', e => {
+  const prev = state.operator;
   if (e.target.value === '__new__') {
     const name = prompt('新操作人姓名：', '');
     if (name && name.trim()) { state.operators.push(name.trim()); state.operator = name.trim(); }
-  } else state.operator = e.target.value;
+  } else {
+    const name = e.target.value;
+    const mbr = state.members.find(m => m.name === name);
+    if (mbr && mbr.pin) {
+      // 已设 PIN：验证（防误触 + 责任可追）
+      if (prompt('请输入 ' + name + ' 的 PIN 码：') !== String(mbr.pin)) {
+        alert('PIN 码错误，未切换操作人');
+        renderOperators(); return;
+      }
+    } else if (mbr && !mbr.pin && confirm('「' + name + '」尚未设置 PIN 码，现在设置？（4 位数字，设置后切换需验证）')) {
+      const p = prompt('设置 PIN 码（4 位数字）：', '');
+      if (p && /^\d{4}$/.test(p.trim())) { mbr.pin = p.trim(); }
+      else if (p !== null) alert('PIN 需为 4 位数字，本次未设置');
+    }
+    state.operator = name;
+  }
   save(); renderOperators();
   log('切换操作人：' + state.operator);
 });
+
+/* ---------- InvenTree 实时同步（可选，扫码即写） ---------- */
+const INV_LS = 'mes416_inventree_cfg';
+function invCfg() { try { return JSON.parse(localStorage.getItem(INV_LS) || '{}'); } catch { return {}; } }
+function invCfgSave(c) { localStorage.setItem(INV_LS, JSON.stringify(c)); }
+async function invPush(matCode, qty) {
+  const c = invCfg();
+  if (!c.enabled || !c.url || !c.token) return;
+  const base = c.url.replace(/\/$/, '');
+  const H = { 'Authorization': 'Token ' + c.token, 'Content-Type': 'application/json', 'Accept': 'application/json' };
+  try {
+    const ps = await fetch(base + '/api/part/?IPN=' + encodeURIComponent(matCode), { headers: H }).then(r => r.json());
+    const parts = Array.isArray(ps) ? ps : (ps.results || []);
+    let part = parts.find(p => p.IPN === matCode);
+    if (!part) {
+      const m = state.materials.find(x => x.code === matCode);
+      part = await fetch(base + '/api/part/', { method: 'POST', headers: H, body: JSON.stringify({ name: (m && m.name) || matCode, IPN: matCode, description: m ? ('规格：' + (m.spec || '')) : '', purchaseable: true, active: true }) }).then(r => r.json());
+    }
+    if (!part || !part.pk) throw new Error('Part 创建失败');
+    const ss = await fetch(base + '/api/stock/?part=' + part.pk, { headers: H }).then(r => r.json());
+    const items = (Array.isArray(ss) ? ss : (ss.results || [])).filter(x => x.part === part.pk);
+    if (items.length) {
+      const r = await fetch(base + '/api/stock/' + items[0].pk + '/', { method: 'PATCH', headers: H, body: JSON.stringify({ quantity: qty }) });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+    } else {
+      const r = await fetch(base + '/api/stock/', { method: 'POST', headers: H, body: JSON.stringify({ part: part.pk, quantity: qty, status: 10 }) });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+    }
+    log('☁️ InvenTree 已同步 ' + matCode + ' → ' + qty);
+  } catch (e) {
+    log('⚠️ InvenTree 同步失败 ' + matCode + '：' + e.message + '（可稍后 inventree-sync.mjs push 对账）');
+  }
+}
+(function initInvSync() {
+  const c = invCfg();
+  const en = document.getElementById('invEnabled'), url = document.getElementById('invUrl'), tk = document.getElementById('invToken');
+  if (!en) return;
+  en.checked = !!c.enabled;
+  url.value = c.url || (location.protocol === 'https:' ? 'https://inv.newenergycoder.club' : 'http://' + location.hostname + ':8001');
+  tk.value = c.token || '';
+  const persist = () => invCfgSave({ enabled: en.checked, url: url.value.trim(), token: tk.value.trim() });
+  [en, url, tk].forEach(el => el.addEventListener('change', persist));
+  document.getElementById('btnInvTest').addEventListener('click', async () => {
+    persist();
+    const st = document.getElementById('invStatus');
+    st.textContent = '测试中…';
+    try {
+      const d = await fetch(url.value.trim().replace(/\/$/, '') + '/api/', { headers: { 'Authorization': 'Token ' + tk.value.trim() } }).then(r => r.json());
+      st.textContent = '✅ ' + d.server + ' ' + d.version;
+    } catch (e) { st.textContent = '❌ ' + e.message; }
+  });
+})();
+
+/* ---------- 飞书真源（路线 A：服务可达时，启动拉取 + 写口直写；不可达自动离线） ---------- */
+const FS_QUEUE_LS = 'mes416_fs_queue';
+const FS_FALLBACK_BASE = 'https://api.newenergycoder.club';   // 公网版（Vercel）走 Cloudflare Tunnel 后端
+let fsOnline = false;
+let fsBase = '';   // 真源服务基地址：同源优先，其次隧道域名
+function fsQueue() { try { return JSON.parse(localStorage.getItem(FS_QUEUE_LS) || '[]'); } catch { return []; } }
+function fsQueueSave(q) {
+  localStorage.setItem(FS_QUEUE_LS, JSON.stringify(q));
+  const chip = document.getElementById('fsQueueChip');
+  if (chip) {
+    chip.textContent = q.length ? ('☁️ 离线队列 ' + q.length + ' 条') : '';
+    chip.style.display = q.length ? 'inline-block' : 'none';
+  }
+}
+function fsStatusHint(msg, ok) {
+  const el = document.querySelector('header .sub');
+  if (el) el.textContent = el.textContent.replace(/（.*）/, '') + '（' + (ok ? '🟢 ' : '⚪ ') + msg + '）';
+  if (el) el.style.color = ok ? '#7be3a8' : '#e8a87c';
+  // 顶部离线队列入口：有待冲刷记录时常驻显示条数
+  const q = fsQueue();
+  const chip = document.getElementById('fsQueueChip');
+  if (chip) {
+    chip.textContent = q.length ? ('☁️ 离线队列 ' + q.length + ' 条') : '';
+    chip.style.display = q.length ? 'inline-block' : 'none';
+  }
+}
+async function fsPullState() {
+  const tryBase = async base => {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 30000);   // 8 表拉取约 10-15s，留足余量
+    try {
+      const r = await fetch(base + '/api/feishu/state', { signal: ctl.signal });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || '拉取失败');
+      return d.state;
+    } finally { clearTimeout(t); }
+  };
+  try { fsBase = ''; return await tryBase(''); }   // 同源（node feishu-server）
+  catch (e1) { fsBase = FS_FALLBACK_BASE; return await tryBase(FS_FALLBACK_BASE); }   // 隧道后端
+}
+function fsMerge(remote) {
+  // 飞书为真源：按编码覆盖本地（本地多出的保留；流水按 seq 合并取并集）
+  ['materials', 'locations', 'containers', 'members', 'items', 'manuals', 'workorders'].forEach(key => {
+    if (!Array.isArray(remote[key])) return;
+    const byCode = new Map((state[key] || []).map(x => [x.code, x]));
+    remote[key].forEach(r => { if (r.code) byCode.set(r.code, Object.assign({}, byCode.get(r.code) || {}, r)); });
+    state[key] = [...byCode.values()];
+  });
+  if (Array.isArray(remote.transactions) && remote.transactions.length) {
+    const bySeq = new Map((state.transactions || []).filter(t => t.seq != null).map(t => [t.seq, t]));
+    remote.transactions.forEach(t => { if (t.seq != null) bySeq.set(t.seq, t); });
+    const noSeq = (state.transactions || []).filter(t => t.seq == null);
+    state.transactions = [...bySeq.values()].sort((a, b) => (b.seq || 0) - (a.seq || 0)).concat(noSeq).slice(0, 500);
+    state.txnSeq = Math.max(...state.transactions.map(t => t.seq || 0), state.txnSeq || 0);
+  }
+}
+async function fsPushStock(matCode, qty, delta, type, reason, ref) {
+  if (!fsOnline) { fsQueueSave([...fsQueue(), { matCode, qty, delta, type, reason, ref, operator: state.operator }]); return; }
+  try {
+    const r = await fetch(fsBase + '/api/feishu/stock', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ matCode, qty, delta, operator: state.operator, type, reason, ref }) });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'HTTP ' + r.status);
+    log('☁️ 飞书台账已同步 ' + matCode + ' → ' + qty);
+  } catch (e) {
+    fsQueueSave([...fsQueue(), { matCode, qty, delta, type, reason, ref, operator: state.operator }]);
+    log('⚠️ 飞书写入失败（已入离线队列）' + matCode + '：' + e.message);
+  }
+}
+async function fsBoot() {
+  try {
+    const remote = await fsPullState();
+    fsOnline = true;
+    fsMerge(remote);
+    save(); renderLedger(); renderTxns(); renderOperators();
+    // 冲刷离线队列
+    const q = fsQueue();
+    if (q.length) {
+      fsQueueSave([]);
+      for (const it of q) await fsPushStock(it.matCode, it.qty, it.delta, it.type, it.reason, it.ref);
+      log('☁️ 离线队列冲刷 ' + q.length + ' 条');
+    }
+    fsStatusHint('飞书真源已连接', true);
+  } catch (e) {
+    fsOnline = false;
+    fsStatusHint('离线模式 · 本机数据', false);
+  }
+}
 
 /* ---------- 启动 ---------- */
 document.getElementById('gWipDate').value = today();
@@ -1782,6 +2023,7 @@ load(); renderLedger(); refreshMatDatalist(); refreshMemberDatalist(); renderNec
   if (h) { const btn = document.querySelector('nav.tabs button[data-tab="' + h + '"]'); if (btn) btn.click(); }
 })();
 if (state.scanLog.length) document.getElementById('scanLog').textContent = state.scanLog.slice(0, 200).join('\n');
+fsBoot();   // 飞书真源：可达则拉取合并 + 冲刷离线队列，不可达自动离线
 
 </script>
 </body>

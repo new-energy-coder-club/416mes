@@ -14,7 +14,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const DIR = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+const DIR = path.normalize(path.dirname(decodeURIComponent(new URL(import.meta.url).pathname).replace(/^\/([A-Za-z]:)/, '$1')));
 const CONFIG_FILE = path.join(DIR, 'feishu-backend.config.json');
 const pad = (n, w) => String(n).padStart(w, '0');
 
@@ -36,8 +36,11 @@ function larkJson(args, body, opts) {   // 带 JSON body 的调用：写临时�
   finally { try { fs.unlinkSync(f); } catch { } }
 }
 
-function loadConfig() {
-  if (!fs.existsSync(CONFIG_FILE)) { console.error('缺少 feishu-backend.config.json'); process.exit(1); }
+function loadConfig({ exitOnMissing = true } = {}) {
+  if (!fs.existsSync(CONFIG_FILE)) {
+    if (exitOnMissing) { console.error('缺少 feishu-backend.config.json'); process.exit(1); }
+    return null;
+  }
   return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
 }
 
@@ -210,12 +213,18 @@ async function pull(cfg, outFile, { dryRun = false } = {}) {
 }
 
 /* ---------- 入口 ---------- */
-const [, , cmd, arg, ...rest] = process.argv;
-const dryRun = rest.includes('--dry-run') || (arg === '--dry-run');
-const cfg = loadConfig();
-if (cmd === 'status') status(cfg);
-else if (cmd === 'push') push(cfg, arg && arg !== '--dry-run' ? arg : path.join(DIR, '416MES_备份.json'), { dryRun });
-else if (cmd === 'pull') pull(cfg, arg && arg !== '--dry-run' ? arg : path.join(DIR, '416MES_从飞书_备份.json'), { dryRun });
-else {
-  console.log('用法: node feishu-sync.mjs status | push [备份.json] [--dry-run] | pull [输出.json] [--dry-run]');
+const isMain = path.basename(process.argv[1] || '') === 'feishu-sync.mjs';
+if (isMain) {
+  const [, , cmd, arg, ...rest] = process.argv;
+  const dryRun = rest.includes('--dry-run') || (arg === '--dry-run');
+  const cfg = loadConfig();
+  if (cmd === 'status') status(cfg);
+  else if (cmd === 'push') push(cfg, arg && arg !== '--dry-run' ? arg : path.join(DIR, '416MES_备份.json'), { dryRun });
+  else if (cmd === 'pull') pull(cfg, arg && arg !== '--dry-run' ? arg : path.join(DIR, '416MES_从飞书_备份.json'), { dryRun });
+  else {
+    console.log('用法: node feishu-sync.mjs status | push [备份.json] [--dry-run] | pull [输出.json] [--dry-run]');
+  }
 }
+
+/* ---------- 供 feishu-server.mjs 复用 ---------- */
+export { CONFIG_FILE, loadConfig, listAll, larkJson, lark, MAPS, PUSH_ORDER, T, N, pad, fmtLocal };

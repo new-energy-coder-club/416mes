@@ -1,25 +1,26 @@
 # Dependencies and local tooling
 node_modules/
 .venv-xianyu/
+.build/
 
-# Local integration credentials and runtime data
-feishu-backend.config.json
-inventree-sync.config.json
-nec-sync.config.json
-xianyu-sync.config.json
-**/feishu-backend.config.json
-**/inventree-sync.config.json
-**/nec-sync.config.json
-**/xianyu-sync.config.json
+# Local integration credentials (never commit)
+*.config.json
+!package.json
+!package-lock.json
+
+# Local runtime data and tunnel credentials
 inventree-data/
-**/inventree-data/
 .cloudflared/
 416MES-迁移包/
+.nec-json-*.tmp.json
 
 # Generated exports, backups, and temporary files
 416MES_台账_*.xlsx
 416MES_台账_*.csv
-416MES_备份_*.json
+416MES_备份*.json
+416MES_从飞书_备份.json
+nec-wip-export.json
+nec-wip-import.json
 *_backup_*.json
 *.bak
 *.tmp
