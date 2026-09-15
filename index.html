@@ -1142,7 +1142,7 @@ function renderLedger() {
           return '<td data-th="' + label + '"><input type="' + (num ? 'number' : 'text') + '" data-i="' + i + '" data-k="' + k + '" value="' + esc(m[k]) + '"' + (k === 'cost' ? ' step="0.01"' : '') + '></td>';
         }).join('') + '</tr>';
     }).join('');
-  tb.querySelectorAll('[data-k]').forEach(inp => inp.addEventListener('change', () => {
+  tb.querySelectorAll('[data-k]').forEach(inp => inp.addEventListener('change', async () => {
     const i = +inp.dataset.i, k = inp.dataset.k, m = state.materials[i];
     if (k === 'qty') {
       const raw = inp.value;
@@ -1150,6 +1150,12 @@ function renderLedger() {
       if (v === m.qty) return;
       const reason = prompt('库存调整原因（必填，将写入库存流水）：\n' + m.code + ' ' + m.name + '　' + m.qty + ' → ' + v, '');
       if (reason === null) { inp.value = m.qty; return; }   // 取消 → 还原原值
+      // 改库存之前必须先确保这条物料在飞书台账里存在，否则飞书写库存会以
+      // 「物料码 xx 不在飞书台账」失败并进离线队列（重试 5 次后连数据一起丢掉）。
+      // 新建的物料若先填「物料码」再填「库存数量」，就正好踩这个坑。
+      if (!m.code) { alert('请先填写物料码再改库存'); inp.value = m.qty; return; }
+      save();                       // 先落盘，推送失败也不会丢
+      await fsPushRecord('materials', [m]);
       // 统一写入口：改数量 + 写流水（mes-core 内保证二者不可分离）
       const r = CORE.applyManualAdjust(state, m.code, v, { reason: reason || '（未填）' });
       if (!r.ok) { alert('调整失败：' + r.error); inp.value = m.qty; return; }
@@ -1193,6 +1199,10 @@ document.getElementById('btnAutoCode').addEventListener('click', () => {
   };
   blanks.forEach(m => { m.code = (m.cat && MAT_CATS[m.cat] ? m.cat : 'QT') + '-' + String(maxOf(m.cat && MAT_CATS[m.cat] ? m.cat : 'QT')).padStart(3, '0'); });
   save(); renderLedger();
+  // 编号刚刚才生成 → 之前这条记录没有业务键，飞书里还不存在；这里补一次建档。
+  // 漏掉这一步的后果：物料在飞书台账里永远没有，之后改库存会被「物料不存在」拒绝，
+  // 离线队列只进不出，重试 5 次后连数据一起丢掉。
+  fsPushRecord('materials', blanks);
 });
 document.getElementById('btnDelMat').addEventListener('click', () => {
   const idx = [...document.querySelectorAll('.matSel:checked')].map(c => +c.dataset.i).sort((a, b) => b - a);
@@ -1568,7 +1578,7 @@ function mergeStatText(stat) {
     '、工单 ' + stat.wip + '、NEC工单 ' + stat.nec + (stat.necUpd ? '（另更新 ' + stat.necUpd + ' 张）' : '') + '、流水 ' + stat.txn + ' 条';
 }
 
-/* ---------- 云端实时同步（飞书后端 → 本机，经 /api/feishu-sync） ---------- */
+/* ---------- 云端同步（飞书后端 → 本机，经 /api/feishu/state） ---------- */
 // 统一走 /api/feishu/state（与 fsBoot 同源同接口，不再有两个功能重复的读接口）
 const CLOUD_SYNC_API = location.protocol.startsWith('http') ? 'api/feishu/state' : 'https://mes.newenergycoder.club/api/feishu/state';
 async function cloudSync({ silent = false } = {}) {
@@ -1578,21 +1588,23 @@ async function cloudSync({ silent = false } = {}) {
     const r = await fetch(CLOUD_SYNC_API, { cache: 'no-store' });
     if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ('HTTP ' + r.status)); }
     const pkg = await r.json();
-    const stat = mergePackage(pkg, { from: '飞书云端', upsertMembers: true });
-    // 这条通路（Vercel 只读接口 / fallback）也要清示例数据，否则 file:// 下清理不生效
-    dropSeedDemoRecords(pkg.state || pkg);
-    showCloudGap(cloudGap(pkg.state || pkg));
-    save(); renderLedger(); renderMembers(); renderMemberTagBar();
-    log('云端同步完成：' + mergeStatText(stat));
+    // 这条通路是「Vercel 函数直连飞书」：读写都可用，所以写接口也切到这里。
+    // file:// 打开时同源写不存在，旧版会把写请求打到已废弃的隧道域名上，离线队列只进不出。
+    fsWriteBase = location.protocol.startsWith('http') ? '' : 'https://mes.newenergycoder.club';
+    const stat = fsMerge(pkg.state || pkg);
+    save(); renderLedger(); renderMembers(); renderMemberTagBar(); renderTxns(); renderWip();
+    log('云端同步完成：' + mergeStatText2(stat));
     // 关键：云端只读同步成功后也要更新顶部状态。
-    // fsBoot()（真源服务/隧道）与 cloudSync()（Vercel 只读接口）是两条独立通路，
+    // fsBoot()（真源服务/隧道）与 cloudSync()（Vercel 接口）是两条独立通路，
     // 若这里不改状态，部署在 Vercel 上时会出现「数据明明同步了，顶部却显示 ⚪ 离线」。
     cloudOnline = true; refreshStatusHint();
-    if (!silent) alert('云端同步完成：' + mergeStatText(stat));
+    await fsFlushQueue();          // 这条通路也能写，积压的离线队列在这里补上
+    runReconcile();
+    if (!silent) alert('云端同步完成：' + mergeStatText2(stat));
     return stat;
   } catch (err) {
     log('云端同步失败：' + err.message);
-    // 只有真源服务也不可用时才回落成离线，避免把「只读同步失败」误报成整站离线
+    // 只有真源服务也不可用时才回落成离线，避免把「同步失败」误报成整站离线
     cloudOnline = false; refreshStatusHint();
     if (!silent) alert('云端同步失败：' + err.message + '\n（离线/无后端环境请改用「导入合并」）');
     return null;
@@ -1608,7 +1620,7 @@ document.getElementById('btnMergeJson').addEventListener('click', () => document
 document.getElementById('fileMerge').addEventListener('change', e => {
   const f = e.target.files[0]; if (!f) return;
   const rd = new FileReader();
-  rd.onload = ev => {
+  rd.onload = async ev => {
     try {
       const pkg = JSON.parse(ev.target.result);
       const inc = pkg.state || pkg;                     // 兼容裸 state
@@ -1617,7 +1629,13 @@ document.getElementById('fileMerge').addEventListener('change', e => {
       const from = pkg.deviceId || '备份文件';
       const stat = mergePackage(pkg, { from });
       log('导入合并完成（来自 ' + from + '）');
-      alert('合并完成：' + mergeStatText(stat));
+      let tail = '';
+      // 导入只改本机。要让它也进飞书，显式问一次，而不是默默写生产库。
+      if (confirm('合并完成：' + mergeStatText(stat) + '\n\n是否把合并后的数据一并推送到飞书？（两边就一致了）')) {
+        const n = await pushAllLocal();
+        tail = '\n已推送 ' + n + ' 条到飞书。';
+      }
+      alert('合并完成：' + mergeStatText(stat) + tail);
     } catch (err) { alert('合并失败：' + err.message); }
     e.target.value = '';
   };
@@ -1801,8 +1819,16 @@ document.getElementById('btnDelRec').addEventListener('click', () => {
   }
   const idx = [...sel[curType]].sort((a, b) => b - a);
   if (!idx.length || !confirm('从台账删除勾选的 ' + idx.length + ' 条' + TYPES[curType].name + '记录？')) return;
-  const arr = recordsOf(curType); idx.forEach(i => arr.splice(i, 1));
+  const arr = recordsOf(curType);
+  // 先取出业务键再删除；删完才有东西可以推给飞书
+  const delKeys = idx.map(i => arr[i]).filter(Boolean).map(r => (curType === 'wip' ? r.code : r.code));
+  idx.forEach(i => arr.splice(i, 1));
   sel[curType].clear(); save(); renderLabelTab();
+  // 旧版只有「模块区」和「物料/人员」会同步删除，库位/容器/物品/手册/工单删了飞书里还在，
+  // 下次同步又会被拉回来 —— 看上去就是「删不掉」。
+  const DEL_TABLE = { loc: 'locations', ctn: 'containers', itm: 'items', man: 'manuals', mat: 'materials', wip: 'workorders' };
+  const tbl = DEL_TABLE[curType];
+  if (tbl && delKeys.length) fsPushDelete(tbl, delKeys);
 });
 document.getElementById('btnPrint').addEventListener('click', () => {
   if (!sel[curType].size) { alert('请先勾选要打印的标签'); return; }
@@ -2079,6 +2105,7 @@ function showWipDetail(code) {
     (open ? '<button class="btn" id="btnWipExec">去扫码执行（剩余 ' + p.remainingTotal + '）</button>' : '') +
     (CORE.isPending(w) ? '<button class="btn warn" id="btnWipCancel">取消工单</button>' : '') +
     (p.anyExecuted && !CORE.isCancelled(w) ? '<button class="btn warn" id="btnWipReverse">冲销工单（回退 ' + p.executedTotal + '）</button>' : '') +
+    '<button class="btn ghost" id="btnWipDelete">删除工单</button>' +
     '<button class="btn ghost" id="btnWipClose">关闭详情</button>' +
     (w.reverseInfo ? '<span class="hint">已于 ' + esc(w.reverseInfo.at) + ' 由 ' + esc(w.reverseInfo.operator || '—') + ' 冲销</span>' : '') +
     (w.cancelInfo ? '<span class="hint">已于 ' + esc(w.cancelInfo.at) + ' 由 ' + esc(w.cancelInfo.operator || '—') + ' 取消' + (w.cancelInfo.reason ? '（' + esc(w.cancelInfo.reason) + '）' : '') + '</span>' : '') +
@@ -2115,6 +2142,17 @@ function showWipDetail(code) {
     fsPushRecord('workorders', [w]);   // 冲销记录 + 已取消状态写回飞书
   });
   document.getElementById('btnWipClose').addEventListener('click', () => { panel.style.display = 'none'; wipDetailCode = ''; });
+  // 删除工单：已执行过的必须先冲销，否则库存流水与结存会对不上
+  const db = document.getElementById('btnWipDelete');
+  if (db) db.addEventListener('click', () => {
+    if (p.anyExecuted && !CORE.isCancelled(w)) { alert('该工单已执行过库存变动，请先「冲销工单」再删除。'); return; }
+    if (!confirm('删除工单 ' + w.code + '？飞书「工单记录」里的同号记录也会一起删除，不可恢复。')) return;
+    state.workorders = state.workorders.filter(x => x.code !== w.code);
+    save(); renderWip();
+    wipDetailCode = ''; panel.style.display = 'none';
+    fsPushDelete('workorders', [w.code]);   // 飞书侧同步删除（旧版工单删了飞书还在，下次同步又被拉回来）
+    log('删除工单 ' + w.code);
+  });
 }
 
 ['wipSearch'].forEach(id => document.getElementById(id).addEventListener('input', renderWip));
@@ -2573,6 +2611,10 @@ const FS_FALLBACK_BASE = 'https://api.newenergycoder.club';   // 公网版（Ver
 let fsOnline = false;      // 真源服务（feishu-server / 隧道）可用
 let cloudOnline = false;   // Vercel 只读接口可用
 let fsBase = '';   // 真源服务基地址：同源优先，其次隧道域名
+/* 写接口基地址必须跟着「当前可用的那条读通路」走。
+   旧版固定用 fsBase，于是 file:// 打开时写请求会打到已经废弃的隧道域名上，
+   离线队列只进不出。现在任何一条通路可用就写它，两条都不可用才入队。 */
+let fsWriteBase = '';
 function fsQueue() { try { return JSON.parse(localStorage.getItem(FS_QUEUE_LS) || '[]'); } catch { return []; } }
 /* 顶部状态按优先级统一渲染：真源服务 > 云端只读 > 离线。
    两条通路（fsBoot 与 cloudSync）各自的成败都会调用它，因此最终显示与谁先返回无关。 */
@@ -2613,8 +2655,8 @@ async function fsPullState() {
       return d.state;
     } finally { clearTimeout(t); }
   };
-  try { fsBase = ''; return await tryBase(''); }   // 同源（node feishu-server）
-  catch (e1) { fsBase = FS_FALLBACK_BASE; return await tryBase(FS_FALLBACK_BASE); }   // 隧道后端
+  try { fsBase = ''; fsWriteBase = ''; return await tryBase(''); }   // 同源（Vercel / node feishu-server）
+  catch (e1) { fsBase = FS_FALLBACK_BASE; fsWriteBase = FS_FALLBACK_BASE; return await tryBase(FS_FALLBACK_BASE); }   // 隧道后端
 }
 /* 全新初始化时灌了出厂示例数据；云端拉到真实数据后要把这些示例记录丢掉，
    否则网页端会比飞书多出几条「只在本地」的记录（人员多 3 个、物料多 2 个…）。
@@ -2648,52 +2690,149 @@ function seedDemoCodes() {
  * 每次云端同步成功都会跑一遍，因此老浏览器里已经存下的示例数据同样会被清掉。
  */
 
-/* ================= 云端差异提示 =================
-   合并是并集，所以「本地有、飞书没有」的记录会一直留着，看上去像同步没生效。
-   差异分两类，处理方向相反：
-     示例数据（示例物料/人员/物品/手册）→ 云端有真数据时丢掉（dropSeedDemoRecords）
-     主数据（库位/容器）→ 出厂内置的 C 区布局等是真数据，应当**推到飞书**
-   这里把差异算出来、显式呈现，并给一键推送，而不是自作主张批量写生产库。 */
-function cloudGap(remote) {
-  const gap = {};
-  ['locations', 'containers'].forEach(key => {
-    if (!Array.isArray(remote[key])) return;
-    const remoteCodes = new Set(remote[key].map(r => r.code).filter(Boolean));
-    const localOnly = (state[key] || []).filter(x => x.code && !remoteCodes.has(x.code));
-    if (localOnly.length) gap[key] = localOnly;
-  });
-  return gap;
+/* ================= 云端对齐（飞书为真源） =================
+   合并语义由 mes-core 的 mergeRemote 统一实现（纯函数、有单测）：
+     飞书有、本地没有                → 加入
+     两边都有                        → 飞书覆盖（但飞书为空的列不覆盖本地非空值）
+     本地有、飞书没有、上次同步时有   → 飞书侧删掉了 → 本地也删
+     本地有、飞书没有、上次同步时没有 → 本地新建还没推上去 → 保留并待推送
+   这里只负责把差异呈现出来 + 给一键入口，绝不静默批量写生产库。 */
+const TABLE_LABEL = { materials: '物料台账', locations: '库位', containers: '容器', members: '人员', items: '物品', manuals: '手册', workorders: '工单记录', transactions: '库存流水' };
+const PUSHABLE = ['materials', 'locations', 'containers', 'members', 'items', 'manuals', 'workorders'];  // 流水由库存直写产生，不做批量推送
+const SYNC_TABLES = ['materials', 'locations', 'containers', 'members', 'items', 'manuals', 'workorders', 'transactions'];
+
+let _pendingPush = null;    // 本次合并发现的「本地新建、飞书还没有」的记录
+let _lastReport = null;     // 上一次 /api/feishu/reconcile 的只读核查报告
+
+/** 推不上去的字段（飞书缺列 / 单选缺选项），合并时它们以本地为准 */
+function pushBlockedSummary() {
+  const b = state.__pushBlocked || {};
+  const rows = [];
+  Object.entries(b).forEach(([tbl, m]) => Object.entries(m || {}).forEach(([id, fields]) => {
+    if (fields && fields.length) rows.push({ table: tbl, id, fields });
+  }));
+  return rows;
 }
-function showCloudGap(gap) {
+function tableKeyOf(t, rec) { return String(t === 'transactions' ? rec.seq : rec.code); }
+function findRec(t, id) { return (state[t] || []).find(x => tableKeyOf(t, x) === String(id)); }
+
+function renderAlignBox() {
   const box = document.getElementById('cloudGapBox');
   if (!box) return;
-  const total = Object.values(gap).reduce((a, v) => a + v.length, 0);
-  if (!total) { box.style.display = 'none'; return; }
-  const label = { locations: '库位', containers: '容器' };
+  const pendingCount = _pendingPush ? Object.values(_pendingPush).reduce((a, v) => a + v.length, 0) : 0;
+  const blocked = pushBlockedSummary();
+  const rep = _lastReport;
+  const missingCols = rep ? Object.entries(rep.tables).filter(([, t]) => t.missingColumns.length) : [];
+  const missingOpts = rep ? Object.entries(rep.tables).filter(([, t]) => t.missingOptions.length) : [];
+  if (!pendingCount && !blocked.length && !missingCols.length && !missingOpts.length) { box.style.display = 'none'; return; }
+
+  let html = '';
+  if (missingCols.length || missingOpts.length) {
+    html += '⚠️ <b>飞书表结构要补齐，否则这些内容永远同步不上去</b><br>';
+    missingCols.forEach(([k, t]) => {
+      html += '<span class="hint">· <b>' + (TABLE_LABEL[k] || k) + '</b> 缺列：<code>' + t.missingColumns.join('</code>、<code>') + '</code></span><br>';
+    });
+    missingOpts.forEach(([k, t]) => t.missingOptions.forEach(m => {
+      html += '<span class="hint">· <b>' + (TABLE_LABEL[k] || k) + '</b> 列「' + m.column + '」是单选，缺选项 <code>' +
+        m.usedButMissing.join('</code>、<code>') + '</code>（现有 ' + m.existing.join(' / ') + '）</span><br>';
+    }));
+    html += '<span class="hint">在飞书里补完列/选项后，点「重新核对」即可。</span><br>';
+  }
+  if (pendingCount) html += '☁️ <b>本地有 ' + pendingCount + ' 条记录飞书里没有</b>（本地新建或推送失败的）。<br>';
+  if (blocked.length) html += '🔒 <b>' + blocked.length + ' 条记录有字段推不上去</b>，已保持本地值不被飞书旧值覆盖：' +
+    blocked.slice(0, 5).map(b => (TABLE_LABEL[b.table] || b.table) + ' ' + b.id + '（' + b.fields.join('、') + '）').join('；') +
+    (blocked.length > 5 ? ' …' : '') + '<br>';
+
+  html += '<div class="toolbar" style="margin-top:6px">' +
+    (pendingCount ? '<button class="btn small" id="btnPushPending">全部推到飞书</button>' : '') +
+    '<button class="btn small ghost" id="btnRecheck">重新核对</button>' +
+    (blocked.length ? '<button class="btn small ghost" id="btnRepushBlocked">重推受限字段</button>' : '') +
+    '<button class="btn small ghost" id="btnHideAlign">收起</button></div>';
   box.style.display = 'block';
-  box.innerHTML = '⚠️ <b>本地有 ' + total + ' 条记录飞书里没有</b>（' +
-    Object.entries(gap).map(([k, v]) => label[k] + ' ' + v.length + ' 条').join('、') +
-    '）—— 多半是出厂内置的 C 区布局。这会让网页端与飞书长期对不上。<br>' +
-    '<span class="hint">推到飞书后两边就一致了；也可以点「忽略」，只影响本机显示。</span>' +
-    '<div class="toolbar" style="margin-top:6px">' +
-    '<button class="btn small" id="btnPushGap">推到飞书</button>' +
-    '<button class="btn small ghost" id="btnIgnoreGap">忽略</button></div>';
-  document.getElementById('btnIgnoreGap').addEventListener('click', () => { box.style.display = 'none'; });
-  document.getElementById('btnPushGap').addEventListener('click', async () => {
-    const btn = document.getElementById('btnPushGap');
-    btn.disabled = true; btn.textContent = '推送中…';
-    let done = 0;
-    for (const [key, list] of Object.entries(gap)) {
-      // 分批推，避免单次请求过大
-      for (let i = 0; i < list.length; i += 100) {
-        await fsPushRecord(key, list.slice(i, i + 100));
-        done += Math.min(100, list.length - i);
-      }
-    }
-    log('☁️ 已把本地独有数据推到飞书：' + done + ' 条');
-    alert('已提交 ' + done + ' 条到飞书。稍等几秒后刷新页面即可看到两边一致。');
-    box.style.display = 'none';
+  box.innerHTML = html;
+
+  document.getElementById('btnHideAlign').addEventListener('click', () => { box.style.display = 'none'; });
+  document.getElementById('btnRecheck').addEventListener('click', async e => {
+    e.target.disabled = true; e.target.textContent = '核对中…';
+    await runReconcile();
+    e.target.disabled = false; e.target.textContent = '重新核对';
   });
+  const pp = document.getElementById('btnPushPending');
+  if (pp) pp.addEventListener('click', async () => {
+    pp.disabled = true; pp.textContent = '推送中…';
+    const n = await pushPending();
+    alert('已提交 ' + n + ' 条到飞书。刷新后两边即为一致。');
+    fsBoot();
+  });
+  const rb = document.getElementById('btnRepushBlocked');
+  if (rb) rb.addEventListener('click', async () => {
+    rb.disabled = true; rb.textContent = '重推中…';
+    const rows = pushBlockedSummary();
+    for (const r of rows) { const rec = findRec(r.table, r.id); if (rec) await fsPushRecord(r.table, [rec]); }
+    rb.disabled = false;
+    alert('已重推 ' + rows.length + ' 条。若仍失败，请先在飞书补齐列 / 单选选项。');
+    fsBoot();
+  });
+}
+
+/** 把合并时记下的「本地新建、飞书还没有」的记录推到飞书 */
+async function pushPending() {
+  if (!_pendingPush) return 0;
+  let n = 0;
+  for (const [key, list] of Object.entries(_pendingPush)) {
+    if (PUSHABLE.indexOf(key) < 0) continue;
+    for (let i = 0; i < list.length; i += 100) {
+      await fsPushRecord(key, list.slice(i, i + 100));
+      n += Math.min(100, list.length - i);
+    }
+  }
+  return n;
+}
+
+/**
+ * 把本地全部主数据（不含流水）推给飞书。
+ * 用在「导入合并」之后：导入只改本机，要让飞书也对齐得显式推一次。
+ */
+async function pushAllLocal() {
+  let n = 0;
+  for (const key of PUSHABLE) {
+    const list = state[key] || [];
+    for (let i = 0; i < list.length; i += 100) {
+      await fsPushRecord(key, list.slice(i, i + 100));
+      n += Math.min(100, list.length - i);
+    }
+  }
+  return n;
+}
+
+/** 只读核对：把本地 8 张表发给 /api/feishu/reconcile，回报飞书缺列 / 缺选项 / 两侧差异 */
+const RECONCILE_API = location.protocol.startsWith('http') ? 'api/feishu/reconcile' : 'https://mes.newenergycoder.club/api/feishu/reconcile';
+/* 服务端只用到「业务键 + 单选列取值」，所以只发这些字段。
+   别把整个 state 发过去：流水上千条时请求体会白白涨到几百 KB。 */
+const RECONCILE_FIELDS = {
+  materials: ['code', 'zone'], locations: ['code', 'kind'], containers: ['code', 'type'],
+  members: ['code', 'role'], items: ['code'], manuals: ['code'],
+  workorders: ['code', 'type', 'status'], transactions: ['seq']
+};
+async function runReconcile() {
+  try {
+    const body = { state: {} };
+    SYNC_TABLES.forEach(k => {
+      const fields = RECONCILE_FIELDS[k] || ['code'];
+      body.state[k] = (state[k] || []).map(r => { const o = {}; fields.forEach(f => { o[f] = r[f]; }); return o; });
+    });
+    const r = await fetch(RECONCILE_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || ('HTTP ' + r.status));
+    _lastReport = d.report;
+    renderAlignBox();
+    const s = d.report.summary;
+    if (s.missingColumns || s.missingOptions) log('🔎 对齐核对：飞书缺 ' + s.missingColumns + ' 列、缺 ' + s.missingOptions + ' 个单选选项');
+    return d.report;
+  } catch (e) {
+    log('⚠️ 对齐核对失败：' + e.message);
+    return null;
+  }
 }
 
 function dropSeedDemoRecords(remote) {
@@ -2710,23 +2849,49 @@ function dropSeedDemoRecords(remote) {
   });
 }
 
+/** 云端 → 本地：统一走 mes-core 的 mergeRemote，并把「本地新建」记下来待推送 */
 function fsMerge(remote) {
-  // 飞书为真源：按编码覆盖本地（本地多出的保留；流水按 seq 合并取并集）
-  ['materials', 'locations', 'containers', 'members', 'items', 'manuals', 'workorders'].forEach(key => {
-    if (!Array.isArray(remote[key])) return;
-    const byCode = new Map((state[key] || []).map(x => [x.code, x]));
-    remote[key].forEach(r => { if (r.code) byCode.set(r.code, Object.assign({}, byCode.get(r.code) || {}, r)); });
-    state[key] = [...byCode.values()];
+  dropSeedDemoRecords(remote);   // 出厂示例不属于「本地新建」，先清掉再合并，否则会被当成待推送
+  const stat = CORE.mergeRemote(state, remote, {
+    syncedKeys: state.__syncedKeys,
+    protect: state.__pushBlocked
   });
-  dropSeedDemoRecords(remote);   // 云端有真实数据时清掉出厂示例
-  showCloudGap(cloudGap(remote));
-  if (Array.isArray(remote.transactions) && remote.transactions.length) {
-    const bySeq = new Map((state.transactions || []).filter(t => t.seq != null).map(t => [t.seq, t]));
-    remote.transactions.forEach(t => { if (t.seq != null) bySeq.set(t.seq, t); });
-    const noSeq = (state.transactions || []).filter(t => t.seq == null);
-    state.transactions = [...bySeq.values()].sort((a, b) => (b.seq || 0) - (a.seq || 0)).concat(noSeq).slice(0, 500);
-    state.txnSeq = Math.max(...state.transactions.map(t => t.seq || 0), state.txnSeq || 0);
-  }
+  mergeSerials(remote);          // 工单号计数器必须跟上，否则换台浏览器建工单会撞号
+  _pendingPush = {};
+  (stat.pending || []).forEach(p => {
+    const rec = findRec(p.table, p.id);
+    if (rec) (_pendingPush[p.table] = _pendingPush[p.table] || []).push(rec);
+  });
+  renderAlignBox();
+  return stat;
+}
+/**
+ * 从飞书工单号里把当天/当类型的流水号计数器顶上去。
+ * 工单号格式是 <类型><YYYYMMDD><3 位流水>（如 LL20260915001）。计数器只在浏览器本地，
+ * 另一台机器建过工单后本机不知道，不加这一步就会生成同一个工单号、互相覆盖。
+ */
+function mergeSerials(remote) {
+  if (!Array.isArray(remote.workorders)) return;
+  state.serials = state.serials || {};
+  remote.workorders.forEach(w => {
+    if (!w || !w.code || !w.type || !w.date) return;
+    const key = w.type + ymdCompact(w.date);
+    if (w.code.slice(0, key.length) !== key) return;
+    const n = parseInt(w.code.slice(key.length), 10);
+    if (!isNaN(n)) state.serials[key] = Math.max(state.serials[key] || 0, n);
+  });
+}
+/** 合并结果翻译成一句话，给日志和弹窗用 */
+function mergeStatText2(stat) {
+  const p = [];
+  if (stat.created) p.push('拉取新增 ' + stat.created);
+  if (stat.updated) p.push('更新 ' + stat.updated);
+  if (stat.deleted) p.push('同步删除 ' + stat.deleted);
+  if (stat.keptLocal) p.push('保留本地值 ' + stat.keptLocal);
+  if (stat.protected) p.push('受限字段以本地为准 ' + stat.protected);
+  const pend = (stat.pending || []).length;
+  if (pend) p.push('待推送 ' + pend);
+  return p.length ? p.join('、') : '两边已一致';
 }
 /* ================= 飞书写回（8 张表共用一套） =================
    队列项支持三种操作（旧数据没有 op 字段 → 按 stock 处理）：
@@ -2739,7 +2904,7 @@ const QUEUE_MAX_TRIES = 5;   // 连续失败这么多次就移出队列，避免
 
 /** 统一 POST；非 2xx 或 ok:false 一律抛错，让调用方决定入队 */
 async function fsPost(path, body) {
-  const r = await fetch(fsBase + path, {
+  const r = await fetch(fsWriteBase + path, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
   });
   let d = {};
@@ -2785,7 +2950,20 @@ async function fsExecItem(item) {
   }
   if (op === 'upsert') {
     const d = await fsPost('/api/feishu/upsert', { table: item.table, records: item.records });
-    if (d.dropped && d.dropped.length) log('ℹ️ ' + item.table + ' 有 ' + d.dropped.length + ' 个字段飞书表里没有，已跳过：' + d.dropped.join('、') + '（补列后会自动同步）');
+    // 推不上去的字段（飞书缺列 / 单选缺选项）记下来：合并时这些字段以本地为准，
+    // 否则飞书的旧值会在下次同步时把本地真值覆盖掉（典型：工单「部分执行」被打回「未执行」）。
+    const blocked = d.blocked || {};
+    (item.records || []).forEach(r => {
+      const id = tableKeyOf(item.table, r);
+      if (!id) return;
+      const fields = blocked[id];
+      state.__pushBlocked = state.__pushBlocked || {};
+      const t = state.__pushBlocked[item.table] = state.__pushBlocked[item.table] || {};
+      if (fields && fields.length) t[id] = fields;
+      else if (t[id]) delete t[id];        // 这次没被丢列 → 解除限制
+      if (!Object.keys(t).length) delete state.__pushBlocked[item.table];
+    });
+    if (d.dropped && d.dropped.length) log('ℹ️ ' + item.table + ' 有 ' + d.dropped.length + ' 个字段飞书表里没有/不合法，已跳过：' + d.dropped.join('、') + '（在飞书补齐列或选项后点「重推受限字段」）');
     log('☁️ 飞书 ' + item.table + ' 已同步：新建 ' + d.created + ' / 更新 ' + d.updated);
     return d;
   }
@@ -2797,10 +2975,10 @@ async function fsExecItem(item) {
   throw new Error('未知的队列操作：' + op);
 }
 
-/** 写库：在线直写，失败入队（不再无限重试） */
+/** 写库：任一通路可用就直写，都不可用才入队（不再无限重试） */
 async function fsPush(item) {
-  if (!fsOnline) { fsEnqueue(item); return; }
-  try { await fsExecItem(item); }
+  if (!fsOnline && !cloudOnline) { fsEnqueue(item); return; }
+  try { await fsExecItem(item); save(); }
   catch (e) {
     log('⚠️ 飞书写入失败（已入离线队列）：' + (item.matCode || item.table || '') + '　' + e.message);
     fsEnqueue(item);
@@ -2827,7 +3005,7 @@ function fsPushDelete(table, keys) {
 /** 冲刷离线队列 */
 async function fsFlushQueue() {
   const q = fsQueue();
-  if (!q.length) return;
+  if (!q.length) return 0;
   let ok = 0;
   // 逐条处理：成功的从队列移除，失败的累计次数
   for (const item of q) {
@@ -2839,20 +3017,23 @@ async function fsFlushQueue() {
       fsQueueFail(item, e.message);
     }
   }
-  if (ok) log('☁️ 离线队列冲刷成功 ' + ok + ' 条，剩余 ' + fsQueue().length + ' 条');
+  if (ok) { log('☁️ 离线队列冲刷成功 ' + ok + ' 条，剩余 ' + fsQueue().length + ' 条'); save(); }
+  return ok;
 }
 
 async function fsBoot() {
   try {
     const remote = await fsPullState();
     fsOnline = true;
-    fsMerge(remote);
-    save(); renderLedger(); renderTxns(); renderOperators();
+    const stat = fsMerge(remote);
+    save(); renderLedger(); renderTxns(); renderOperators(); renderMembers(); renderWip();
     await fsFlushQueue();          // 网络恢复后先把积压的写入补上
     refreshStatusHint();
+    runReconcile();                // 只读核对飞书缺列 / 缺选项，呈现到对齐面板
+    log('☁️ 飞书同步：' + mergeStatText2(stat));
   } catch (e) {
     fsOnline = false; refreshStatusHint();
-    // 真源服务（feishu-server / 隧道）不可达时，退回云端只读接口 —— 同一份飞书数据。
+    // 真源服务（feishu-server / 隧道）不可达时，退回云端接口 —— 同一份飞书数据。
     // 放在这里而不是页面加载时无条件调用，是为了避免每次打开都把 8 张表拉两遍。
     cloudSync({ silent: true });
   }

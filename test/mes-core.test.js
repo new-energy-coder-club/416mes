@@ -1202,3 +1202,157 @@ test('闲鱼合并：changes 记录可审计的字段变化', () => {
   assert.match(joined, /cost: 10 → 8\.5/);
   assert.match(joined, /name: 旧名字 → 新名字/);
 });
+
+/* ================= 云端合并 mergeRemote（飞书为真源） =================
+   这一组是「网页端与飞书对齐」的核心语义。之前用的是并集合并（只加不删），
+   飞书里删掉的记录会永远留在网页端 —— 这正是「云端的表和飞书没对齐」的头号原因。 */
+
+/** 造一个只含 8 张表空数组的 state */
+function mkSync(over) {
+  const base = {
+    materials: [], locations: [], containers: [], members: [],
+    items: [], manuals: [], workorders: [], transactions: [], txnSeq: 0
+  };
+  return Object.assign(base, over || {});
+}
+
+test('合并：飞书有、本地没有 → 加入', () => {
+  const st = mkSync();
+  const r = Core.mergeRemote(st, { materials: [{ code: 'A', name: '甲' }] }, { syncedKeys: {} });
+  assert.equal(r.created, 1);
+  assert.equal(st.materials.length, 1);
+  assert.equal(st.materials[0].name, '甲');
+});
+
+test('合并：两边都有 → 飞书覆盖本地', () => {
+  const st = mkSync({ materials: [{ code: 'A', name: '本地名', qty: 1 }] });
+  Core.mergeRemote(st, { materials: [{ code: 'A', name: '飞书名', qty: 2 }] }, { syncedKeys: { materials: ['A'] } });
+  assert.equal(st.materials[0].name, '飞书名');
+  assert.equal(st.materials[0].qty, 2);
+});
+
+test('合并：飞书为空值时不覆盖本地非空值', () => {
+  const st = mkSync({ materials: [{ code: 'A', name: '本地名', spec: 'M3' }] });
+  const r = Core.mergeRemote(st, { materials: [{ code: 'A', name: '', spec: '' }] }, { syncedKeys: { materials: ['A'] } });
+  assert.equal(st.materials[0].name, '本地名', '空值不能把本地真值清掉');
+  assert.equal(st.materials[0].spec, 'M3');
+  assert.equal(r.keptLocal, 1);
+});
+
+test('合并【关键】飞书没有这一列 → 本地值原样保留（模块区的消失就是这么来的）', () => {
+  const st = mkSync({
+    materials: [{ code: 'A', name: '螺丝刀', zone: 'M-01' }],
+    locations: [{ code: 'M-01', kind: '模块区', desc: '电控区' }]
+  });
+  // 物料台账没有「模块区」列 → pullState 不会产出 zone 键
+  // 库位「类型」是单选[货架|工位|站点]，写不进「模块区」→ 回读是空串
+  Core.mergeRemote(st, {
+    materials: [{ code: 'A', name: '螺丝刀' }],
+    locations: [{ code: 'M-01', kind: '', desc: '电控区' }]
+  }, { syncedKeys: { materials: ['A'], locations: ['M-01'] } });
+  assert.equal(st.materials[0].zone, 'M-01', '缺列时本地模块区必须保留');
+  assert.equal(st.locations[0].kind, '模块区', '飞书该列为空时本地「模块区」不能被清成空');
+});
+
+test('合并：本地有、飞书没有、上次同步时有 → 判定为飞书侧删除，本地也删', () => {
+  const st = mkSync({
+    materials: [{ code: 'A' }, { code: 'GONE' }, { code: 'NEW' }]
+  });
+  const r = Core.mergeRemote(st, { materials: [{ code: 'A' }] }, { syncedKeys: { materials: ['A', 'GONE'] } });
+  const codes = st.materials.map(m => m.code).sort();
+  assert.deepEqual(codes, ['A', 'NEW'], 'GONE 来自飞书且已被删 → 本地删；NEW 是本地新建 → 保留');
+  assert.equal(r.deleted, 1);
+  assert.deepEqual(r.pending.map(p => p.id), ['NEW']);
+});
+
+test('合并：首次同步（没有 syncedKeys）不删任何东西，全部记为待推送', () => {
+  const st = mkSync({ locations: [{ code: 'C-01-01-01', kind: '货架' }] });
+  const r = Core.mergeRemote(st, { locations: [] }, {});
+  assert.equal(r.deleted, 0, '没有基线时不敢删，否则会把本地刚建的数据一次抹掉');
+  assert.equal(st.locations.length, 1);
+  assert.deepEqual(r.pending.map(p => p.id), ['C-01-01-01']);
+});
+
+test('合并：某张表这次没拉到（不是数组）→ 整表不动', () => {
+  const st = mkSync({ materials: [{ code: 'A' }], members: [{ code: 'MB-1' }] });
+  Core.mergeRemote(st, { materials: [] }, { syncedKeys: {} });
+  assert.deepEqual(st.members.map(m => m.code), ['MB-1'], '没拉到的表不能被清空');
+  assert.ok(!('members' in Core.mergeRemote(st, { materials: [] }, {}).syncedKeys));
+});
+
+test('合并【关键】protect 里的字段不被飞书旧值覆盖（工单「部分执行」被打回的场景）', () => {
+  const st = mkSync({ workorders: [{ code: 'LL-1', status: '部分执行', execQty: [{ matCode: 'X', qty: 2 }] }] });
+  const remote = { workorders: [{ code: 'LL-1', status: '未执行', execQty: [] }] };
+  // 不加保护：飞书的旧值会把「部分执行」打回「未执行」
+  const st2 = mkSync({ workorders: [{ code: 'LL-1', status: '部分执行', execQty: [{ matCode: 'X', qty: 2 }] }] });
+  Core.mergeRemote(st2, remote, { syncedKeys: { workorders: ['LL-1'] } });
+  assert.equal(st2.workorders[0].status, '未执行', '（对照）没有保护时确实会被打回');
+  assert.deepEqual(st2.workorders[0].execQty, []);
+  // 加了保护：本地为准
+  const r = Core.mergeRemote(st, remote, { syncedKeys: { workorders: ['LL-1'] }, protect: { workorders: { 'LL-1': ['status', 'execQty'] } } });
+  assert.equal(st.workorders[0].status, '部分执行', '受保护字段必须以本地为准');
+  assert.deepEqual(st.workorders[0].execQty, [{ matCode: 'X', qty: 2 }]);
+  assert.equal(r.protected, 1);
+});
+
+test('合并：流水按 seq 去重合并、新的在前、txnSeq 单调递增', () => {
+  const st = mkSync({
+    transactions: [{ seq: 1, matCode: 'A', delta: -1 }, { seq: 3, matCode: 'A', delta: -3 }],
+    txnSeq: 3
+  });
+  const r = Core.mergeRemote(st, {
+    transactions: [{ seq: 1, matCode: 'A', delta: -1 }, { seq: 2, matCode: 'A', delta: -2 }, { seq: 3, matCode: 'A', delta: -3 }]
+  }, { syncedKeys: { transactions: [1, 3] } });
+  assert.deepEqual(st.transactions.map(t => t.seq), [3, 2, 1], '新的在前');
+  assert.equal(st.transactions.length, 3, 'seq=3 不能重复');
+  assert.equal(st.txnSeq, 3);
+  assert.equal(r.created, 1);
+});
+
+test('合并：流水被飞书侧删除时同样同步删除', () => {
+  const st = mkSync({ transactions: [{ seq: 1 }, { seq: 2 }], txnSeq: 2 });
+  Core.mergeRemote(st, { transactions: [{ seq: 1 }] }, { syncedKeys: { transactions: [1, 2] } });
+  assert.deepEqual(st.transactions.map(t => t.seq), [1]);
+});
+
+test('合并：记录本次飞书键集合，供下次判断「删除」用', () => {
+  const st = mkSync();
+  const r = Core.mergeRemote(st, { materials: [{ code: 'A' }, { code: 'B' }], members: [{ code: 'MB-1' }] }, {});
+  assert.deepEqual(r.syncedKeys.materials.sort(), ['A', 'B']);
+  assert.deepEqual(r.syncedKeys.members, ['MB-1']);
+  assert.deepEqual(st.__syncedKeys.materials.sort(), ['A', 'B']);
+});
+
+test('合并【回归】幂等：同一份 remote 连续合并两次，第二次不再产生任何变更', () => {
+  const st = mkSync({ materials: [{ code: 'A', name: '本地', qty: 1 }] });
+  const remote = { materials: [{ code: 'A', name: '甲', qty: 2 }, { code: 'B', name: '乙', qty: 3 }] };
+  const r1 = Core.mergeRemote(st, remote, { syncedKeys: {} });
+  const snap = JSON.stringify(st.materials);
+  const r2 = Core.mergeRemote(st, remote, { syncedKeys: st.__syncedKeys });
+  assert.ok(r1.created + r1.updated > 0);
+  assert.equal(r2.created, 0, '第二次不应再新建');
+  assert.equal(r2.updated, 0, '第二次不应再更新');
+  assert.equal(r2.deleted, 0, '第二次不应删除');
+  assert.equal(JSON.stringify(st.materials), snap, '结果必须稳定');
+});
+
+test('合并【端到端】飞书删一条、改一条、加一条，本地三种结果同时正确', () => {
+  const st = mkSync({
+    members: [
+      { code: 'MB-001', name: '陈曦' },        // 飞书侧已删除
+      { code: 'MB-004', name: '旧名' },        // 飞书侧改名
+      { code: 'MB-099', name: '本地新建' }     // 还没推上去
+    ]
+  });
+  // syncedKeys = 上次同步时飞书有哪些键。MB-099 是本地新建、还没推上去，所以不在基线里。
+  const r = Core.mergeRemote(st, {
+    members: [{ code: 'MB-004', name: '卢玉淳' }, { code: 'MB-500', name: '飞书新增' }]
+  }, { syncedKeys: { members: ['MB-001', 'MB-004'] } });
+  const by = Object.fromEntries(st.members.map(m => [m.code, m]));
+  assert.equal(by['MB-001'], undefined, '飞书删了 → 本地也删');
+  assert.equal(by['MB-004'].name, '卢玉淳', '飞书改了 → 本地更新');
+  assert.equal(by['MB-500'].name, '飞书新增', '飞书加了 → 本地加入');
+  assert.equal(by['MB-099'].name, '本地新建', '本地新建还没推 → 保留');
+  assert.deepEqual(r.pending.map(p => p.id), ['MB-099']);
+  assert.equal(r.deleted, 1);
+});

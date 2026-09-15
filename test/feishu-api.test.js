@@ -399,11 +399,16 @@ test('飞书写：写完后回放读到的余量与库存一致', async (t) => {
 
 /* ================= 通用增删改查（8 张表共用） ================= */
 
+/* 这份定义**逐列对齐生产库的真实表结构**（含它的缺口），不是理想结构：
+     物料台账没有「模块区」、人员没有「PIN码」、工单记录没有执行/冲销四列；
+     库位「类型」是单选[货架|工位|站点]（没有「模块区」「空地」）；
+     工单「状态」是单选[未执行|已执行]（没有「部分执行」「已取消」）。
+   缺列/缺选项正是「网页端改了飞书没变」的根因，所以必须照着生产来测。 */
 const ALL_TABLE_TYPES = {
   tblMAT: [{ name: '物料码', type: 1 }, { name: '名称', type: 1 }, { name: '规格型号', type: 1 }, { name: '闲鱼XY编号', type: 1 }, { name: '当前库位码', type: 1 }, { name: '容器码', type: 1 }, { name: '库存数量', type: 2 }, { name: '安全库存', type: 2 }, { name: '成本', type: 2 }],
-  tblLOC: [{ name: '库位码', type: 1 }, { name: '类型', type: 1 }, { name: '说明', type: 1 }, { name: '授权人员', type: 1 }],
-  tblCTN: [{ name: '容器码', type: 1 }, { name: '容器类型', type: 1 }, { name: '规格', type: 1 }, { name: '当前库位码', type: 1 }],
-  tblMBR: [{ name: '编号', type: 1 }, { name: '姓名', type: 1 }, { name: '学号', type: 1 }, { name: '部门/SIG', type: 1 }, { name: '职务', type: 1 }, { name: '电话', type: 1 }, { name: '备注', type: 1 }, { name: '标签', type: 1 }, { name: 'PIN码', type: 1 }],
+  tblLOC: [{ name: '库位码', type: 1 }, { name: '类型', type: 3, options: ['货架', '工位', '站点'] }, { name: '说明', type: 1 }, { name: '授权人员', type: 1 }],
+  tblCTN: [{ name: '容器码', type: 1 }, { name: '容器类型', type: 3, options: ['A4四抽收纳盒', '三连格文件盒', '斜口零件盒', '6040周转箱'] }, { name: '规格', type: 1 }, { name: '当前库位码', type: 1 }],
+  tblMBR: [{ name: '编号', type: 1 }, { name: '姓名', type: 1 }, { name: '学号', type: 1 }, { name: '部门/SIG', type: 1 }, { name: '职务', type: 3, options: ['负责人', '成员', '本科生'] }, { name: '电话', type: 13 }, { name: '备注', type: 1 }, { name: '标签', type: 1 }],
   tblITM: [{ name: '物品码', type: 1 }, { name: '名称', type: 1 }, { name: '规格型号', type: 1 }, { name: '库位码', type: 1 }],
   tblMAN: [{ name: '手册码', type: 1 }, { name: '名称', type: 1 }, { name: '版本', type: 1 }, { name: '库位码', type: 1 }],
   tblWIP: [{ name: '工单号', type: 1 }, { name: '类型', type: 3, options: ['LL 领料', 'BH 补货', 'JH 拣货', 'TL 退料'] }, { name: '日期', type: 5 }, { name: '明细', type: 1 }, { name: '状态', type: 3, options: ['未执行', '已执行'] }, { name: '执行时间', type: 5 }],
@@ -475,7 +480,12 @@ test('通用 upsert【关键】表里没有的列被丢弃并回报，而不是�
   }]);
   assert.equal(r.created, 1, '写入应成功，不能因为缺列而整体失败');
   assert.ok(mock.tables.tblWIP.rows[0]['工单号'] === 'LL-TEST-2', '已有列必须写进去');
-  assert.ok(r.dropped.includes('执行数量') && r.dropped.includes('执行批次') && r.dropped.includes('冲销记录'), '应回报被丢掉的列：' + JSON.stringify(r.dropped));
+  const joined = r.dropped.join('|');
+  assert.ok(/执行数量/.test(joined) && /执行批次/.test(joined) && /冲销记录/.test(joined), '应回报被丢掉的列：' + JSON.stringify(r.dropped));
+  // droppedColumns 说明「为什么丢」，blocked 回报「哪条记录的哪些本地字段没写进去」——
+  // 前端拿 blocked 做保护名单，避免飞书旧值在下一次合并时把本地真值覆盖掉
+  assert.match(r.droppedColumns['执行批次'], /表里没有这一列/);
+  assert.deepEqual(r.blocked['LL-TEST-2'].sort(), ['cancelInfo', 'execBatches', 'execQty', 'reverseInfo'].sort());
 });
 
 test('通用 upsert：补上列之后，执行明细自动开始同步', async (t) => {
@@ -582,7 +592,8 @@ test('类型转换：表里没有的列直接丢弃', (t) => {
   const C = require('../lib/feishu-api.js');
   const r = C.coerceFields([{ name: '编号', typeName: '文本' }], { '编号': 'A', 'PIN码': '1234' });
   assert.deepEqual(r.fields, { '编号': 'A' });
-  assert.deepEqual(r.dropped, ['PIN码']);
+  assert.match(r.dropped[0], /^PIN码（表里没有这一列）$/);
+  assert.equal(r.droppedColumns['PIN码'], '表里没有这一列');
 });
 
 test('类型转换端到端【回归】人员与工单现在能真的写进 mock 飞书', async (t) => {
@@ -602,4 +613,141 @@ test('类型转换端到端【回归】人员与工单现在能真的写进 mock
   assert.equal(typeof mock.tables.tblWIP.rows[0]['日期'], 'number', '日期必须是时间戳');
   assert.equal(mock.tables.tblWIP.rows[0]['类型'], 'LL 领料');
   assert.equal(mock.tables.tblWIP.rows[0]['状态'], '未执行');
+});
+
+/* ================= 8 张表全量「增 → 查 → 改 → 查 → 删 → 查」往返 =================
+   这是「网页端与飞书对齐」的底线契约：任何一张表在任何一步断了，
+   网页端就会出现「改了自己这边变了、飞书没变」或「删了又回来」。
+   用 mock 跑满 8 张表，离线、无凭据、可重复。 */
+
+const CRUD_CASES = [
+  ['materials', 'code', { code: 'ZZ-MAT-1', name: '哨兵物料', spec: 'S1', qty: 7, minQty: 2, cost: 1.5 }, { name: '哨兵物料-改' }, '物料码'],
+  ['locations', 'code', { code: 'ZZ-LOC-1', kind: '货架', desc: '哨兵库位' }, { desc: '哨兵库位-改' }, '库位码'],
+  ['containers', 'code', { code: 'ZZ-CTN-1', type: '斜口零件盒', spec: 'S2', loc: '' }, { spec: 'S2-改' }, '容器码'],
+  ['members', 'code', { code: 'ZZ-MB-1', name: '哨兵', sid: 'SID1', dept: 'D1', role: '成员', phone: '13800138000', note: 'n', group: 'g' }, { name: '哨兵-改' }, '编号'],
+  ['items', 'code', { code: 'ZZ-ITM-1', name: '哨兵物品', spec: 'S3', loc: '' }, { name: '哨兵物品-改' }, '物品码'],
+  ['manuals', 'code', { code: 'ZZ-MAN-1', name: '哨兵手册', ver: 'v1', loc: '' }, { ver: 'v2' }, '手册码'],
+  ['workorders', 'code', { code: 'ZZ-WO-1', type: 'LL', date: '2026-09-15', items: [{ matCode: 'X', qty: 1 }], status: '未执行' }, { status: '已执行' }, '工单号'],
+  ['transactions', 'seq', { seq: 900001, ts: '2026-09-15T02:00:00Z', operator: '哨兵', type: '测试', matCode: 'ZZ-MAT-1', delta: 0, balance: 0, ref: '', reason: '哨兵' }, { reason: '哨兵-改' }, '流水号']
+];
+
+test('8 表 CRUD【核心】增删改查在每一张表上都能往返', async (t) => {
+  const mock = await startAllMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+
+  const findIn = (st, tbl, key, v) => (st[tbl] || []).find(x => String(x[key]) === String(v));
+
+  /* ---- 增 ---- */
+  for (const [tbl, key, rec] of CRUD_CASES) {
+    const r = await lib.upsertRecords(tbl, [rec]);
+    assert.equal(r.created, 1, tbl + ' 新建应成功：' + JSON.stringify(r));
+    assert.equal(r.updated, 0, tbl + ' 不应误判为更新');
+  }
+  let st = await lib.pullState();
+  for (const [tbl, key, rec, , col] of CRUD_CASES) {
+    const got = findIn(st, tbl, key, rec[key]);
+    assert.ok(got, tbl + ' 新建后应能读回（列 ' + col + '）');
+    assert.equal(String(got[key]), String(rec[key]));
+  }
+  // 读回来的内容也要对，而不只是主键对
+  assert.equal(findIn(st, 'materials', 'code', 'ZZ-MAT-1').qty, 7);
+  assert.equal(findIn(st, 'members', 'code', 'ZZ-MB-1').name, '哨兵');
+  assert.equal(findIn(st, 'workorders', 'code', 'ZZ-WO-1').type, 'LL', '类型要能还原成内部码');
+  assert.deepEqual(findIn(st, 'workorders', 'code', 'ZZ-WO-1').items, [{ matCode: 'X', qty: 1 }]);
+  assert.equal(findIn(st, 'transactions', 'seq', 900001).seq, 900001, '流水号 #900001 → seq 900001');
+
+  /* ---- 改 ---- */
+  for (const [tbl, key, rec, patch] of CRUD_CASES) {
+    const merged = Object.assign({}, rec, patch);
+    const r = await lib.upsertRecords(tbl, [merged]);
+    assert.equal(r.updated, 1, tbl + ' 改动应命中已有记录：' + JSON.stringify(r));
+    assert.equal(r.created, 0, tbl + ' 不应重复新建');
+  }
+  st = await lib.pullState();
+  for (const [tbl, key, rec, patch] of CRUD_CASES) {
+    const got = findIn(st, tbl, key, rec[key]);
+    const pk = Object.keys(patch)[0];
+    assert.deepEqual(got[pk], patch[pk], tbl + ' 的 ' + pk + ' 应已更新为 ' + JSON.stringify(patch[pk]));
+  }
+
+  /* ---- 删 ---- */
+  for (const [tbl, key, rec] of CRUD_CASES) {
+    // 传本地键（流水是数字 seq，不是 '#000005'）——删除必须自己归一
+    const r = await lib.deleteRecords(tbl, [rec[key]]);
+    assert.equal(r.deleted, 1, tbl + ' 删除应命中 1 条：' + JSON.stringify(r));
+  }
+  st = await lib.pullState();
+  for (const [tbl, key, rec] of CRUD_CASES) {
+    assert.ok(!findIn(st, tbl, key, rec[key]), tbl + ' 删除后不应再读到');
+  }
+});
+
+test('删除键归一【回归】流水用数字 seq 删得掉飞书的「#000005」', async (t) => {
+  const mock = await startAllMock();
+  mock.tables.tblTXN.rows.push({ '流水号': '#000005', '物料码': 'A' }, { '流水号': '#000006', '物料码': 'B' });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+
+  const r = await lib.deleteRecords('transactions', [5]);
+  assert.equal(r.deleted, 1, '传 5 应删掉 #000005');
+  assert.equal(mock.tables.tblTXN.rows.length, 1);
+  assert.equal(mock.tables.tblTXN.rows[0]['流水号'], '#000006', '只删目标，不能误删别的');
+  // 也接受直接传 '#000006' 和传整条本地记录
+  assert.equal((await lib.deleteRecords('transactions', ['#000006'])).deleted, 1);
+});
+
+test('pullState【核心】飞书没有的列不产出本地键，回读不会把本地真值清成空', async (t) => {
+  const mock = await startAllMock();
+  // 物料表没有「模块区」列（生产就是这么建的）
+  mock.tables.tblMAT.rows.push({ '物料码': 'A-1', '名称': '螺丝刀', '库存数量': 5 });
+  // 库位「类型」列存在但值为空（本地的「模块区」写不进去时就是这个样子）
+  mock.tables.tblLOC.rows.push({ '库位码': 'M-01', '类型': '', '说明': '电控模块区' });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+
+  const st = await lib.pullState();
+  assert.ok(!('zone' in st.materials[0]), '物料表没有「模块区」列 → 不能产出 zone 键，否则合并时会用它清掉本地的模块区');
+  assert.equal(st.locations[0].kind, '', '列存在但为空 → 照常产出空值（交给合并阶段决定是否覆盖）');
+  assert.ok(Array.isArray(st.columns.materials) && st.columns.materials.indexOf('模块区') < 0, 'state.columns 要回报真实存在的列名');
+});
+
+test('reconcile【只读】回报缺列、缺选项和两侧差异，且不写任何数据', async (t) => {
+  const mock = await startAllMock();
+  mock.tables.tblMAT.rows.push({ '物料码': 'A-1', '名称': '本地也有' });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+
+  const before = JSON.stringify(mock.tables);
+  const rep = await lib.reconcile({
+    materials: [{ code: 'A-1' }, { code: 'ONLY-LOCAL' }],
+    locations: [{ code: 'L-1', kind: '模块区' }],
+    workorders: [{ code: 'W-1', status: '部分执行' }]
+  });
+  assert.equal(JSON.stringify(mock.tables), before, 'reconcile 绝不能写数据');
+
+  assert.ok(rep.tables.materials.missingColumns.indexOf('模块区') >= 0, '物料台账缺「模块区」应被报出来');
+  assert.deepEqual(rep.tables.materials.localOnly, ['ONLY-LOCAL']);
+  assert.deepEqual(rep.tables.materials.remoteOnly, []);
+  assert.equal(rep.tables.materials.localOnlyCount, 1);
+
+  const locOpt = rep.tables.locations.missingOptions;
+  assert.equal(locOpt.length, 1);
+  assert.deepEqual(locOpt[0].usedButMissing, ['模块区'], '库位单选没有「模块区」选项');
+  const wipOpt = rep.tables.workorders.missingOptions;
+  assert.deepEqual(wipOpt[0].usedButMissing, ['部分执行'], '工单单选没有「部分执行」选项');
+  assert.ok(rep.summary.missingColumns > 0 && rep.summary.missingOptions >= 2);
+});
+
+test('upsert dryRun：只回报会做什么，不落任何数据', async (t) => {
+  const mock = await startAllMock();
+  mock.tables.tblMAT.rows.push({ '物料码': 'A-1', '名称': '已有' });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+
+  const r = await lib.upsertRecords('materials', [{ code: 'A-1', name: '改' }, { code: 'B-1', name: '新' }], { dryRun: true });
+  assert.equal(r.wouldUpdate, 1);
+  assert.equal(r.wouldCreate, 1);
+  assert.equal(mock.tables.tblMAT.rows.length, 1, 'dryRun 不能写入');
+  assert.equal(mock.tables.tblMAT.rows[0]['名称'], '已有', 'dryRun 不能改动');
 });

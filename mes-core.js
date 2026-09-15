@@ -957,6 +957,152 @@
     return stat;
   }
 
+  /* ================= 云端合并（飞书为真源） =================
+     与「导入合并」（mergePackage：只加不删）语义不同，云端同步必须能把飞书侧的
+     删除也带下来，否则网页端会永远留着飞书里已经删掉的记录 —— 这是「两边对不上」
+     最主要的来源。判断依据是 syncedKeys（上次同步时飞书有哪些键）：
+
+       飞书有、本地没有              → 加入（created）
+       两边都有                      → 飞书覆盖（updated）；但飞书为空的列不覆盖本地非空值（keptLocal）
+       本地有、飞书没有、syncedKeys 有 → 飞书侧删掉了 → 本地也删（deleted）
+       本地有、飞书没有、syncedKeys 无 → 本地新建还没推上去 → 保留（pending）
+
+     另一处必须挡住的是「推不上去的字段反过来被飞书旧值覆盖」：
+     工单状态「部分执行」在飞书单选项里不存在，推送时被丢列，飞书仍是「未执行」；
+     下一次同步如果照搬飞书值，本地的「部分执行」就被打回「未执行」。
+     所以 opts.protect（{ 表: { 业务键: [本地字段] } }）里的字段一律以本地为准。
+  */
+  var MERGE_TABLES = [
+    { key: 'materials', id: 'code' },
+    { key: 'locations', id: 'code' },
+    { key: 'containers', id: 'code' },
+    { key: 'members', id: 'code' },
+    { key: 'items', id: 'code' },
+    { key: 'manuals', id: 'code' },
+    { key: 'workorders', id: 'code' },
+    { key: 'transactions', id: 'seq' }
+  ];
+
+  function keySet(list, id) {
+    var s = Object.create(null);
+    (list || []).forEach(function (r) {
+      var v = r ? r[id] : null;
+      if (v !== undefined && v !== null && v !== '') s[String(v)] = true;
+    });
+    return s;
+  }
+  function isBlank(v) { return v === '' || v === null || v === undefined; }
+
+  /**
+   * 把飞书拉回来的 remote 合并进 state（原地修改 state）。
+   * @param {object} state 网页端 state
+   * @param {object} remote pullState() 的结果；某张表不是数组表示「这次没拉到」，那张表整个不动
+   * @param {object} [opts] { syncedKeys, protect, txnCap }
+   * @returns {{created,updated,unchanged,deleted,keptLocal,pending,changes,tables,syncedKeys}}
+   */
+  function mergeRemote(state, remote, opts) {
+    opts = opts || {};
+    if (!state || typeof state !== 'object') throw new Error('mergeRemote: state 不可用');
+    if (!remote || typeof remote !== 'object') throw new Error('mergeRemote: remote 不可用');
+
+    var synced = opts.syncedKeys || state.__syncedKeys || {};
+    var protect = opts.protect || state.__pushBlocked || {};
+    var nextSynced = {};
+    var stat = { created: 0, updated: 0, unchanged: 0, deleted: 0, keptLocal: 0, protected: 0, pending: [], changes: [], tables: {} };
+
+    MERGE_TABLES.forEach(function (tbl) {
+      var remoteArr = remote[tbl.key];
+      if (!Array.isArray(remoteArr)) return;                 // 本次没拉到这张表 → 完全不碰本地
+
+      var remoteKeys = keySet(remoteArr, tbl.id);
+      nextSynced[tbl.key] = Object.keys(remoteKeys);
+      var wasSynced = null;
+      if (Array.isArray(synced[tbl.key])) {
+        wasSynced = Object.create(null);
+        synced[tbl.key].forEach(function (k) { wasSynced[String(k)] = true; });
+      }
+      var protTbl = protect[tbl.key] || {};
+
+      if (!Array.isArray(state[tbl.key])) state[tbl.key] = [];
+      var localArr = state[tbl.key];
+      var byKey = Object.create(null);
+      localArr.forEach(function (r) {
+        var v = r ? r[tbl.id] : null;
+        if (v !== undefined && v !== null && v !== '') byKey[String(v)] = r;
+      });
+
+      var t = { created: 0, updated: 0, unchanged: 0, deleted: 0, keptLocal: 0, protected: 0, pending: [] };
+
+      /* 1) 飞书 → 本地 */
+      remoteArr.forEach(function (r) {
+        if (!r) return;
+        var v = r[tbl.id];
+        if (v === undefined || v === null || v === '') return;
+        var k = String(v);
+        var local = byKey[k];
+        if (!local) {
+          localArr.push(r); byKey[k] = r; t.created++;
+          stat.changes.push({ table: tbl.key, id: k, kind: 'create' });
+          return;
+        }
+        var guarded = Object.create(null);
+        (protTbl[k] || []).forEach(function (f) { guarded[f] = true; });
+        var changed = [], kept = 0, held = 0;
+        Object.keys(r).forEach(function (f) {
+          var rv = r[f], lv = local[f];
+          if (guarded[f]) { held++; return; }                  // 这个字段上次没推上去 → 以本地为准
+          if (isBlank(rv) && !isBlank(lv)) { kept++; return; } // 飞书这列是空的 → 不覆盖本地已有值
+          if (rv === lv) return;
+          if (typeof rv === 'number' && typeof lv === 'number' && Math.abs(rv - lv) < EPS) return;
+          local[f] = rv; changed.push(f);
+        });
+        if (changed.length) { t.updated++; stat.changes.push({ table: tbl.key, id: k, kind: 'update', fields: changed }); }
+        else t.unchanged++;
+        if (kept) t.keptLocal++;
+        if (held) t.protected++;
+      });
+
+      /* 2) 本地多余 → 飞书删了 还是 本地还没推 */
+      var alive = [];
+      localArr.forEach(function (r) {
+        var v = r ? r[tbl.id] : null;
+        var k = (v === undefined || v === null || v === '') ? null : String(v);
+        if (k && !remoteKeys[k]) {
+          if (wasSynced && wasSynced[k]) {
+            t.deleted++; stat.changes.push({ table: tbl.key, id: k, kind: 'delete', reason: '飞书侧已删除' });
+            return;
+          }
+          t.pending.push(r);
+          stat.pending.push({ table: tbl.key, id: k });
+          alive.push(r);
+          return;
+        }
+        alive.push(r);
+      });
+      state[tbl.key] = alive;
+
+      stat.created += t.created; stat.updated += t.updated; stat.unchanged += t.unchanged;
+      stat.deleted += t.deleted; stat.keptLocal += t.keptLocal; stat.protected += t.protected;
+      stat.tables[tbl.key] = t;
+    });
+
+    /* 3) 流水：新的在前 + 序号单调递增（防换浏览器撞号） */
+    if (Array.isArray(state.transactions)) {
+      var withSeq = state.transactions.filter(function (x) { return x && x.seq != null; });
+      var noSeq = state.transactions.filter(function (x) { return !x || x.seq == null; });
+      withSeq.sort(function (a, b) { return (b.seq || 0) - (a.seq || 0); });
+      state.transactions = withSeq.concat(noSeq).slice(0, opts.txnCap || 2000);
+      var mx = state.txnSeq || 0;
+      state.transactions.forEach(function (x) { if ((x.seq || 0) > mx) mx = x.seq || 0; });
+      state.txnSeq = mx;
+    }
+
+    state.__syncedKeys = nextSynced;
+    if (opts.protect) state.__pushBlocked = opts.protect;
+    stat.syncedKeys = nextSynced;
+    return stat;
+  }
+
   return {
     WIP_NAMES: WIP_NAMES,
     STATUS: STATUS,
@@ -1007,6 +1153,8 @@
     pickXianyu: pickXianyu,
     normalizeXianyuRow: normalizeXianyuRow,
     mergeXianyu: mergeXianyu,
+    mergeRemote: mergeRemote,
+    MERGE_TABLES: MERGE_TABLES,
     round6: round6
   };
 });
