@@ -1202,13 +1202,17 @@ function renderMemberTagBar() {
   const bar = document.getElementById('memberTagBar');
   if (!bar) return;
   const tags = [...new Set(state.members.map(m => (m.group || '').trim()).filter(Boolean))];
+  // 当前筛选的标签已不存在（被改名或删光）时回到「全部」，否则会筛出空列表且看不懂原因
+  if (memberTag && !tags.includes(memberTag)) memberTag = '';
   const chip = (label, val, count) =>
     '<button type="button" class="btn small ' + (memberTag === val ? '' : 'ghost') + '" data-tag="' + esc(val) + '"' +
     (memberTag === val ? ' style="pointer-events:auto"' : '') + '>' + esc(label) + (count != null ? ' <b>' + count + '</b>' : '') + '</button>';
   bar.innerHTML = tags.length
     ? '<span class="hint" style="align-self:center">🏷 标签筛选：</span>' + chip('全部', '', state.members.length) +
       tags.map(t => chip(t, t, state.members.filter(m => (m.group || '').trim() === t).length)).join('')
-    : '';
+    : '<span class="hint" style="align-self:center">🏷 标签筛选：</span>' +
+      '<button type="button" class="btn small" data-tag="">全部 <b>' + state.members.length + '</b></button>' +
+      '<span class="hint" style="align-self:center">（暂无标签 —— 在下方「标签」列填写后，这里会自动出现筛选按钮，如「天权1楼实验台」「416整理」）</span>';
   bar.querySelectorAll('button[data-tag]').forEach(b => b.addEventListener('click', () => { memberTag = b.dataset.tag; renderMemberTagBar(); renderMembers(); }));
 }
 function refreshMemberDatalist() {
@@ -1290,10 +1294,19 @@ document.getElementById('fileImport').addEventListener('change', e => {
       const KNOWN_SHEETS = ['物料台账', '库位', '容器', '人员', '物品', '手册', '工单记录', 'NEC工单', '库存流水', '填表说明'];
       const ignoredSheets = wb.SheetNames.filter(n => !KNOWN_SHEETS.includes(n));
       let skippedRows = 0;
-      const bodyRows = s => {   // 数据行：缺编码（第1列空）的行跳过并计数
+      /* 数据行过滤：判断「这行有没有编码」必须用**编码列的实际下标**，不能假定它在第 1 列 ——
+         Excel 列顺序被调整过时（例如把 PIN码 挪到最前），按第 1 列判断会把正常行整行丢掉。 */
+      const codeIdx = (sheetName, ...names) => {
+        const sh = sheet(sheetName);
+        const h = {};
+        ((sh && sh[0]) || []).forEach((x, i) => { h[String(x).trim()] = i; });
+        for (const n of names) if (h[n] != null) return h[n];
+        return 0;   // 旧模板无表头：退回第 1 列
+      };
+      const bodyRows = (s, ci = 0) => {
         const out = [];
         (s || []).slice(1).forEach(r => {
-          if (r && r[0]) out.push(r);
+          if (r && r[ci]) out.push(r);
           else if (r && r.some(c => c !== undefined && c !== null && String(c).trim() !== '')) skippedRows++;
         });
         return out;
@@ -1302,24 +1315,47 @@ document.getElementById('fileImport').addEventListener('change', e => {
       if (!ms) throw new Error('找不到「物料台账」sheet');
       const hIdx = {}; (ms[0] || []).forEach((h, i) => { hIdx[String(h).trim()] = i; });   // 表头驱动，兼容旧版列序
       const col = (r, n) => (hIdx[n] != null && r[hIdx[n]] != null ? r[hIdx[n]] : '');
+      /* 其它 sheet 的表头驱动取值：优先按列名找；列名不存在时退回旧版列序（老模板仍可导入）。
+         原先这些 sheet 按固定下标读，一旦有人调整 Excel 列顺序就会静默错位
+         （把电话读成标签之类），这里统一成表头驱动。 */
+      const sheetCol = name => {
+        const sh = sheet(name);
+        const h = {};
+        ((sh && sh[0]) || []).forEach((x, i) => { h[String(x).trim()] = i; });
+        return (r, colName, fallbackIdx) => {
+          if (h[colName] != null) { const v = r[h[colName]]; return v == null ? '' : v; }
+          const v2 = r[fallbackIdx]; return v2 == null ? '' : v2;   // 旧模板（无此列名）回退到原下标
+        };
+      };
       const normCat = v => { const c = String(v || '').trim().split(/[\s　]/)[0].toUpperCase(); return MAT_CATS[c] ? c : 'QT'; };
       // 替换台账前记下旧库存：没有流水 sheet 的导入要据此补写审计流水
       const oldQty = {};
       state.materials.forEach(m => { oldQty[m.code] = m.qty; });
-      state.materials = bodyRows(ms).map(r => ({ code: String(col(r, '物料码')), cat: normCat(col(r, '分类')), name: col(r, '名称') || '', spec: col(r, '规格型号') || '', xy: col(r, '闲鱼XY编号') || '', loc: col(r, '当前库位码') || '', container: col(r, '容器码') || '', zone: col(r, '模块区') || '', qty: parseFloat(col(r, '库存数量')) || 0, minQty: parseFloat(col(r, '安全库存')) || 0, cost: parseFloat(col(r, '成本')) || 0, img: col(r, '图片链接') || '' }));
-      const ls = sheet('库位'); if (ls) state.locations = bodyRows(ls).map(r => ({ code: String(r[0]), kind: r[1] || '', desc: r[2] || '' }));
-      const cs = sheet('容器'); if (cs) state.containers = bodyRows(cs).map(r => ({ code: String(r[0]), type: r[1] || '', spec: r[2] || '', loc: r[3] || '' }));
-      const ws = sheet('工单记录'); if (ws) state.workorders = bodyRows(ws).map(r => normalizeOrder({
-        code: String(r[0]), type: r[1] || 'LL', date: r[2] || '', status: r[4] || '未执行', execTime: r[5] || '',
-        items: String(r[3] || '').split(';').map(s => s.trim()).filter(Boolean).map(s => { const m = s.match(/^(.+?)[x×](\d+(?:\.\d+)?)$/); return m ? { matCode: m[1], qty: +m[2] } : null; }).filter(Boolean)
+      state.materials = bodyRows(ms, codeIdx('物料台账', '物料码')).map(r => ({ code: String(col(r, '物料码')), cat: normCat(col(r, '分类')), name: col(r, '名称') || '', spec: col(r, '规格型号') || '', xy: col(r, '闲鱼XY编号') || '', loc: col(r, '当前库位码') || '', container: col(r, '容器码') || '', zone: col(r, '模块区') || '', qty: parseFloat(col(r, '库存数量')) || 0, minQty: parseFloat(col(r, '安全库存')) || 0, cost: parseFloat(col(r, '成本')) || 0, img: col(r, '图片链接') || '' }));
+      const lcol = sheetCol('库位');
+      const ls = sheet('库位'); if (ls) state.locations = bodyRows(ls, codeIdx('库位', '库位码')).map(r => ({ code: String(lcol(r, '库位码', 0)), kind: lcol(r, '类型', 1) || '', desc: lcol(r, '说明', 2) || '' }));
+      const ccol = sheetCol('容器');
+      const cs = sheet('容器'); if (cs) state.containers = bodyRows(cs, codeIdx('容器', '容器码')).map(r => ({ code: String(ccol(r, '容器码', 0)), type: ccol(r, '容器类型', 1) || '', spec: ccol(r, '规格', 2) || '', loc: ccol(r, '当前库位码', 3) || '' }));
+      const wcol = sheetCol('工单记录');
+      const ws = sheet('工单记录'); if (ws) state.workorders = bodyRows(ws, codeIdx('工单记录', '工单号')).map(r => normalizeOrder({
+        code: String(wcol(r, '工单号', 0)), type: wcol(r, '类型', 1) || 'LL', date: wcol(r, '日期', 2) || '',
+        status: wcol(r, '状态', 4) || '未执行', execTime: wcol(r, '执行时间', 5) || '',
+        items: String(wcol(r, '明细', 3) || '').split(';').map(s => s.trim()).filter(Boolean).map(s => { const m = s.match(/^(.+?)[x×](\d+(?:\.\d+)?)$/); return m ? { matCode: m[1], qty: +m[2] } : null; }).filter(Boolean)
       }));
-      const ppl = sheet('人员'); if (ppl) state.members = bodyRows(ppl).map(r => ({ code: String(r[0]), name: r[1] || '', sid: String(r[2] || ''), dept: r[3] || '', role: r[4] || '成员', phone: String(r[5] || ''), note: r[6] || '', group: r[7] || '', pin: String(r[8] || '') }));
-      const is2 = sheet('物品'); if (is2) state.items = bodyRows(is2).map(r => ({ code: String(r[0]), name: r[1] || '', spec: r[2] || '', loc: r[3] || '' }));
-      const ms2 = sheet('手册'); if (ms2) state.manuals = bodyRows(ms2).map(r => ({ code: String(r[0]), name: r[1] || '', ver: r[2] || '', loc: r[3] || '' }));
-      const ns = sheet('NEC工单'); if (ns) state.necOrders = bodyRows(ns).map(r => ({
-        code: String(r[0]), title: r[1] || '', type: r[2] || 'RW', owner: r[3] || '', priority: r[4] || '中',
-        due: r[5] || '', status: r[6] || '待处理', materials: r[7] || '', note: r[8] || '', createdAt: r[9] || '', doneAt: r[10] || ''
+      const pcol = sheetCol('人员');
+      const ppl = sheet('人员'); if (ppl) state.members = bodyRows(ppl, codeIdx('人员', '编号')).map(r => ({
+        code: String(pcol(r, '编号', 0)), name: pcol(r, '姓名', 1) || '', sid: String(pcol(r, '学号', 2) || ''),
+        dept: pcol(r, '部门/SIG', 3) || '', role: pcol(r, '职务', 4) || '成员',
+        phone: String(pcol(r, '电话', 5) || ''), note: pcol(r, '备注', 6) || '',
+        group: pcol(r, '标签', 7) || '', pin: String(pcol(r, 'PIN码', 8) || '')
       }));
+      const is2 = sheet('物品'); if (is2) { const icol = sheetCol('物品'); state.items = bodyRows(is2, codeIdx('物品', '物品码')).map(r => ({ code: String(icol(r, '物品码', 0)), name: icol(r, '名称', 1) || '', spec: icol(r, '规格型号', 2) || '', loc: icol(r, '库位码', 3) || '' })); }
+      const ms2 = sheet('手册'); if (ms2) { const mcol = sheetCol('手册'); state.manuals = bodyRows(ms2, codeIdx('手册', '手册码')).map(r => ({ code: String(mcol(r, '手册码', 0)), name: mcol(r, '名称', 1) || '', ver: mcol(r, '版本', 2) || '', loc: mcol(r, '库位码', 3) || '' })); }
+      const ns = sheet('NEC工单'); if (ns) { const ncol = sheetCol('NEC工单'); state.necOrders = bodyRows(ns, codeIdx('NEC工单', '编码', '编号')).map(r => ({
+        code: String(ncol(r, '编码', 0)), title: ncol(r, '标题', 1) || '', type: ncol(r, '类型', 2) || 'RW', owner: ncol(r, '负责人', 3) || '', priority: ncol(r, '优先级', 4) || '中',
+        due: ncol(r, '截止', 5) || '', status: ncol(r, '状态', 6) || '待处理', materials: ncol(r, '关联物料', 7) || '', note: ncol(r, '备注', 8) || '',
+        createdAt: ncol(r, '创建时间', 9) || '', doneAt: ncol(r, '完成时间', 10) || ''
+      })); }
 
       /* ---------- 库存流水 sheet：有则原样恢复，保证「导出什么样、导入就什么样」 ---------- */
       const txs = sheet('库存流水');
