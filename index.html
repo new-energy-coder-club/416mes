@@ -1786,8 +1786,11 @@ document.getElementById('btnDelRec').addEventListener('click', () => {
     const zidx = [...sel.zone].sort((a, b) => b - a);
     if (!zidx.length || !confirm('从台账删除勾选的 ' + zidx.length + ' 条模块区记录？')) return;
     const zones = recordsOf('zone');
+    const delZoneCodes = zidx.map(i => zones[i] && zones[i].code).filter(Boolean);
     zidx.forEach(i => { const zi = state.locations.findIndex(l => l.code === zones[i].code); if (zi >= 0) state.locations.splice(zi, 1); });
-    sel.zone.clear(); save(); renderLabelTab(); return;
+    sel.zone.clear(); save(); renderLabelTab();
+    fsPushDelete('locations', delZoneCodes);   // 模块区删除同步到飞书
+    return;
   }
   const idx = [...sel[curType]].sort((a, b) => b - a);
   if (!idx.length || !confirm('从台账删除勾选的 ' + idx.length + ' 条' + TYPES[curType].name + '记录？')) return;
