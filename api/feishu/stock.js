@@ -23,6 +23,7 @@ module.exports = async (req, res) => {
     if (!p.matCode) { res.status(400).json({ ok: false, error: '缺 matCode' }); return; }
     if (typeof p.qty !== 'number' || !isFinite(p.qty)) { res.status(400).json({ ok: false, error: '缺 qty（必须是数字）' }); return; }
 
+    // dryRun=true 时只按表结构校验格式、不写任何数据（飞书没有 dry-run 接口，这里自己校验）
     const r = await writeStock(p);
     res.status(r.ok ? 200 : 400).json(r);
   } catch (e) {

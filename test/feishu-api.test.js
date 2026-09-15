@@ -20,6 +20,15 @@ function startMock(opts = {}) {
     tblTXN: { fields: ['流水号', '时间', '操作人', '类型', '物料码', '变动', '余量', '关联单', '原因/备注'], rows: [] }
   };
   const calls = { created: [], updated: [], deny: false, denyOn: opts.denyOn || null };
+  // 字段类型定义：type 数字对应飞书字段类型码（1 文本 / 2 数字 / 3 单选 / 5 日期）
+  const fieldTypes = opts.fieldTypes || {
+    tblMAT: [{ name: '物料码', type: 1 }, { name: '名称', type: 1 }, { name: '库存数量', type: 2 }],
+    tblTXN: [
+      { name: '流水号', type: 1 }, { name: '时间', type: 5 }, { name: '操作人', type: 1 },
+      { name: '类型', type: 1 }, { name: '物料码', type: 1 }, { name: '变动', type: 2 },
+      { name: '余量', type: 2 }, { name: '关联单', type: 1 }, { name: '原因/备注', type: 1 }
+    ]
+  };
   const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', c => body += c);
@@ -30,6 +39,15 @@ function startMock(opts = {}) {
       if (url.pathname.endsWith('/auth/v3/tenant_access_token/internal')) {
         if (opts.badAuth) return json({ code: 10003, msg: 'app_id or app_secret invalid' });
         return json({ code: 0, tenant_access_token: 't-fake' });
+      }
+      // 表结构（dry-run 校验用）
+      const fm = url.pathname.match(/\/tables\/([^/]+)\/fields$/);
+      if (fm) {
+        const ft = fieldTypes[fm[1]];
+        if (!ft) return json({ code: 1254005, msg: 'table not found: ' + fm[1] });
+        return json({ code: 0, data: { items: ft.map(f => ({
+          field_name: f.name, type: f.type, property: f.options ? { options: f.options.map(o => ({ name: o })) } : undefined
+        })) } });
       }
       // 表 ID 从路径里取：.../tables/<id>/records[...]
       const m = url.pathname.match(/\/tables\/([^/]+)\/records(\/[a-z_]+)?/);
@@ -50,7 +68,7 @@ function startMock(opts = {}) {
         } });
       }
       if (action === 'batch_create') {
-        if (opts.denyWrite) return json({ code: 99991672, msg: 'Forbidden: no permission to write' });
+        if (opts.denyWrite || opts.denyCreate) return json({ code: 99991672, msg: 'Forbidden: no permission to write' });
         const b = JSON.parse(body || '{}');
         (b.records || []).forEach(r => { calls.created.push(r.fields); t.rows.push(r.fields); });
         return json({ code: 0, data: { records: (b.records || []).map((_, i) => ({ record_id: 'new_' + i })) } });
@@ -70,7 +88,7 @@ function startMock(opts = {}) {
   });
   return new Promise(resolve => {
     server.listen(0, '127.0.0.1', () => {
-      resolve({ server, port: server.address().port, tables, calls });
+      resolve({ server, port: server.address().port, tables, calls, fieldTypes });
     });
   });
 }
@@ -165,9 +183,9 @@ test('飞书写【核心】改物料库存 + 追加流水（seq 自动递增）'
   assert.equal(txn['类型'], '领料工单');
   assert.equal(txn['操作人'], '管理员');
   assert.equal(txn['关联单'], 'W-1');
-  // 时间必须是中文 24 小时制（Vercel 运行时是 en-US，不能依赖 toLocaleString）
-  assert.match(txn['时间'], /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
-  assert.doesNotMatch(txn['时间'], /[AP]M/);
+  // 时间列是「日期」类型 → 必须传毫秒时间戳（传字符串会报 DatetimeFieldConvFail）
+  assert.equal(typeof txn['时间'], 'number', '时间必须是数字时间戳');
+  assert.ok(txn['时间'] > 1e12 && txn['时间'] < 1e13, '应是毫秒级时间戳');
 });
 
 test('飞书写：seq 取现有最大值 + 1（不是从 1 重来）', async (t) => {
@@ -213,17 +231,121 @@ test('飞书写：权限不足时明确提示去开权限', async (t) => {
   assert.match(r.error, /读写\*\*权限|创建版本并发布/);
 });
 
-test('飞书写【重要】库存改了但流水写失败时，必须如实报告而不能假装成功', async (t) => {
-  // 让 batch_create 失败（表 ID 指到一个不存在的表）
+test('飞书写【重要】流水表读不到时，干脆不动库存（避免账实与流水脱节）', async (t) => {
   const mock = await startMock();
   t.after(() => { mock.server.close(); cleanupEnv(); });
   const lib = loadLib(mock.port, { FEISHU_TABLES: JSON.stringify({ materials: 'tblMAT', transactions: 'tblNOPE' }) });
   const r = await lib.writeStock({ matCode: 'A-1', qty: 3, delta: -2 });
   assert.equal(r.ok, false, '不能返回成功');
+  assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 5, '库存必须保持原值，不能被改成 3');
+  assert.equal(mock.calls.updated.length, 0, '不应产生任何写入');
+});
+
+test('飞书写【重要】流水写入失败时，必须如实报告「库存已改」而不能假装成功', async (t) => {
+  // 读得到流水表，但 batch_create 被拒
+  const mock = await startMock({ denyCreate: true });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  const r = await lib.writeStock({ matCode: 'A-1', qty: 3, delta: -2 });
+  assert.equal(r.ok, false, '不能返回成功');
   assert.equal(r.warning, 'stock_written_txn_failed');
   assert.match(r.error, /库存已改为 3，但流水写入失败/);
-  // 库存确实被改了 —— 这正是必须报告的原因
+  // 库存确实被改了 —— 这正是必须明确告知的原因
   assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 3);
+  assert.equal(mock.calls.created.length, 0);
+});
+
+/* ================= dry-run 校验（不写数据） ================= */
+
+test('飞书 dry-run：格式正确时通过，且不产生任何写入', async (t) => {
+  const mock = await startMock({
+    tables: {
+      tblMAT: { fields: ['物料码', '库存数量'], rows: [{ '物料码': 'A-1', '库存数量': 5 }] },
+      tblTXN: { fields: ['流水号', '时间', '操作人', '类型', '物料码', '变动', '余量', '关联单', '原因/备注'], rows: [] }
+    }
+  });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  const r = await lib.writeStock({ matCode: 'A-1', qty: 3, delta: -2, operator: '甲', type: '领料工单', ref: 'W-1', dryRun: true });
+  assert.equal(r.ok, true, JSON.stringify(r.problems));
+  assert.equal(r.dryRun, true);
+  assert.equal(r.target.currentQty, 5);
+  assert.equal(r.target.newQty, 3);
+  assert.equal(r.target.seq, 1);
+  assert.equal(typeof r.payload['时间'], 'number', '日期列必须是时间戳');
+  assert.equal(mock.calls.updated.length, 0, 'dry-run 不得写入');
+  assert.equal(mock.calls.created.length, 0, 'dry-run 不得写入');
+  assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 5, '库存不得变化');
+});
+
+test('飞书 dry-run：日期列收到字符串时报出具体问题', async (t) => {
+  const mock = await startMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  const problems = await lib.validateFields('t', 'tblTXN', { '时间': '2026-09-15 10:00:00' }, '库存流水');
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /列「时间」是\[日期\]/);
+  assert.match(problems[0], /收到的却是 string/);
+});
+
+test('飞书 dry-run：写到表里不存在的列时报出来', async (t) => {
+  const mock = await startMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  const problems = await lib.validateFields('t', 'tblTXN', { '不存在的列': 1 }, '库存流水');
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /表里没有「不存在的列」这一列/);
+});
+
+test('飞书 dry-run【关键】状态列是单选时，「部分执行」不在选项里会被提前拦下', async (t) => {
+  const mock = await startMock({
+    fieldTypes: {
+      tblMAT: [{ name: '物料码', type: 1 }, { name: '库存数量', type: 2 }],
+      tblTXN: [{ name: '状态', type: 3, options: ['未执行', '已执行'] }]
+    }
+  });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  const bad = await lib.validateFields('t', 'tblTXN', { '状态': '部分执行' }, '工单记录');
+  assert.equal(bad.length, 1);
+  assert.match(bad[0], /没有「部分执行」这个选项/);
+  assert.match(bad[0], /现有：未执行\/已执行/);
+  const good = await lib.validateFields('t', 'tblTXN', { '状态': '已执行' }, '工单记录');
+  assert.deepEqual(good, []);
+});
+
+test('飞书 dry-run：单选列的值不在选项里时能报出来', async (t) => {
+  const mock = await startMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  // 直接构造字段定义，验证校验函数的判定
+  const fakeDefs = [{ name: '状态', typeName: '单选', options: ['未执行', '已执行'] }, { name: '数量', typeName: '数字' }];
+  const check = (fields) => {
+    const problems = [];
+    Object.entries(fields).forEach(([name, v]) => {
+      const def = fakeDefs.find(d => d.name === name);
+      if (!def) { problems.push('没有这一列: ' + name); return; }
+      const okType = { '文本': typeof v === 'string', '数字': typeof v === 'number', '日期': typeof v === 'number', '单选': typeof v === 'string' }[def.typeName];
+      if (okType === false) problems.push(name + ' 类型不符');
+      if (def.typeName === '单选' && def.options && !def.options.includes(v)) problems.push(name + ' 选项不存在: ' + v);
+    });
+    return problems;
+  };
+  assert.deepEqual(check({ '状态': '未执行', '数量': 3 }), []);
+  assert.equal(check({ '状态': '部分执行' }).length, 1, '部分执行 不在选项里应报错');
+  assert.equal(check({ '数量': '3' }).length, 1, '数字列收到字符串应报错');
+});
+
+test('飞书读：time 是中文 24 小时制，不是英文 12 小时制', async (t) => {
+  const mock = await startMock();
+  mock.tables.tblTXN.rows.push({ '流水号': '#000001', '时间': Date.UTC(2026, 8, 15, 2, 30, 0), '物料码': 'A-1', '变动': -1, '余量': 4, '操作人': '甲', '类型': '盘点' });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  const st = await lib.pullState();
+  const tx = st.transactions[0];
+  assert.equal(tx.seq, 1);
+  assert.match(tx.time, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, '应为 yyyy-MM-dd HH:mm:ss，实际 ' + tx.time);
+  assert.doesNotMatch(tx.time, /[AP]M/, '不能是英文 12 小时制');
 });
 
 test('飞书写：写完后回放读到的余量与库存一致', async (t) => {
