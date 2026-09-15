@@ -1160,6 +1160,10 @@ function renderLedger() {
     m[k] = (k === 'cost' || k === 'minQty') ? (parseFloat(inp.value) || 0) : inp.value.trim();
     save();
     if (k === 'minQty') renderLedger();   // 安全库存变化影响预警底色
+    // 同步到飞书（按「物料码」upsert，幂等）。
+    // 这一步很关键：新建的物料必须先写进飞书，否则之后改库存会因「物料不存在」被拒，
+    // 而重试永远失败 —— 离线队列会只增不减。
+    if (m.code) fsPushRecord('materials', [m]);
   }));
   if (typeof refreshMatDatalist === 'function') refreshMatDatalist();
   const zl = document.getElementById('zoneList');
@@ -1191,7 +1195,10 @@ document.getElementById('btnAutoCode').addEventListener('click', () => {
 document.getElementById('btnDelMat').addEventListener('click', () => {
   const idx = [...document.querySelectorAll('.matSel:checked')].map(c => +c.dataset.i).sort((a, b) => b - a);
   if (!idx.length || !confirm('删除勾选的 ' + idx.length + ' 行物料？（标签编码作废规则：仅物理报废才作废）')) return;
-  idx.forEach(i => state.materials.splice(i, 1)); save(); renderLedger();
+  const delCodes = idx.map(i => state.materials[i] && state.materials[i].code).filter(Boolean);
+  idx.forEach(i => state.materials.splice(i, 1));
+  save(); renderLedger();
+  fsPushDelete('materials', delCodes);   // 飞书侧同步删除
 });
 document.getElementById('matCheckAll').addEventListener('change', e =>
   document.querySelectorAll('.matSel').forEach(c => c.checked = e.target.checked));
@@ -1239,19 +1246,24 @@ function renderMembers() {
     save();
     if (k === 'name') { renderOperators(); refreshMemberDatalist(); }
     if (k === 'group') renderMemberTagBar();
+    fsPushRecord('members', [m]);   // 人员改动同样写回飞书
   }));
 }
 document.getElementById('memberSearch').addEventListener('input', e => { memberFilter = e.target.value; renderMembers(); });
 document.getElementById('btnAddMember').addEventListener('click', () => {
-  state.members.push({ code: nextCode(state.members, 'MB'), name: '', sid: '', dept: '', role: '成员', group: memberTag || '', phone: '', note: '' });
+  const newMember = { code: nextCode(state.members, 'MB'), name: '', sid: '', dept: '', role: '成员', group: memberTag || '', phone: '', note: '' };
+  state.members.push(newMember);
+  fsPushRecord('members', [newMember]);   // 编号已生成，可直接建档到飞书
   save(); renderMembers(); renderMemberTagBar();
   const tb = document.querySelector('#memberTable tbody'); tb.lastElementChild && tb.lastElementChild.scrollIntoView();
 });
 document.getElementById('btnDelMember').addEventListener('click', () => {
   const idx = [...document.querySelectorAll('.memberSel:checked')].map(c => +c.dataset.i).sort((a, b) => b - a);
   if (!idx.length || !confirm('删除勾选的 ' + idx.length + ' 行人员？')) return;
+  const delCodes = idx.map(i => state.members[i] && state.members[i].code).filter(Boolean);
   idx.forEach(i => state.members.splice(i, 1));
   save(); renderMembers(); renderMemberTagBar(); renderOperators(); refreshMemberDatalist();
+  fsPushDelete('members', delCodes);   // 飞书侧同步删除
 });
 document.getElementById('memberCheckAll').addEventListener('change', e =>
   document.querySelectorAll('.memberSel').forEach(c => c.checked = e.target.checked));
@@ -1788,7 +1800,15 @@ document.getElementById('btnPrint').addEventListener('click', () => {
 });
 
 /* ================= ③ 编码生成 ================= */
-function addUnique(arr, items, key) { let n = 0; const has = new Set(arr.map(x => x[key])); items.forEach(it => { if (!has.has(it[key])) { arr.push(it); n++; } }); save(); return n; }
+function addUnique(arr, items, key, table) {
+  let n = 0; const added = [];
+  const has = new Set(arr.map(x => x[key]));
+  items.forEach(it => { if (!has.has(it[key])) { arr.push(it); added.push(it); n++; } });
+  save();
+  // 批量新增的库位/容器同步写回飞书（按业务键 upsert，重复执行也安全）
+  if (table && added.length) fsPushRecord(table, added);
+  return n;
+}
 document.getElementById('btnGenShelf').addEventListener('click', () => {
   const rg = document.getElementById('gLocRegion').value.trim().toUpperCase() || 'B';
   const SITE_NAMES = { TQ: '天权楼', YH: '玉衡A416', K401: '401开放空地', B: 'B区' };
@@ -1796,7 +1816,7 @@ document.getElementById('btnGenShelf').addEventListener('click', () => {
   const items = [];
   for (let s = 1; s <= ns; s++) for (let l = 1; l <= nl; l++) for (let p = 1; p <= np; p++)
     items.push({ code: rg + '-' + pad(s, 2) + '-' + pad(l, 2) + '-' + pad(p, 2), kind: '货架', desc: (SITE_NAMES[rg] || rg + '区') + ' ' + s + '号货架 第' + l + '层 第' + p + '位' });
-  alert('新增 ' + addUnique(state.locations, items, 'code') + ' 个货架库位（重复自动跳过）');
+  alert('新增 ' + addUnique(state.locations, items, 'code', 'locations') + ' 个货架库位（重复自动跳过）');
 });
 document.getElementById('btnGenOpen').addEventListener('click', () => {
   const SITE_NAMES = { TQ: '天权楼', YH: '玉衡A416', K401: '401开放空地', B: 'B区' };
@@ -1809,20 +1829,20 @@ document.getElementById('btnGenOpen').addEventListener('click', () => {
     const ch = String.fromCharCode(a);
     items.push({ code: site + '-' + ch + pad(p, 2), kind: '空地', desc: (SITE_NAMES[site] || site) + ' ' + ch + '通道 ' + p + '号块位' });
   }
-  alert('新增 ' + addUnique(state.locations, items, 'code') + ' 个开放区块位码（重复自动跳过）');
+  alert('新增 ' + addUnique(state.locations, items, 'code', 'locations') + ' 个开放区块位码（重复自动跳过）');
 });
 document.getElementById('btnGenWs').addEventListener('click', () => {
   const a = +document.getElementById('gWsFrom').value, b = +document.getElementById('gWsTo').value, g = +document.getElementById('gWsGrid').value;
   const items = [];
   for (let w = a; w <= b; w++) for (let i = 1; i <= g; i++)
     items.push({ code: 'W' + pad(w, 2) + '-G' + pad(i, 2), kind: '工位', desc: w + '号工位 第' + i + '格收纳' });
-  alert('新增 ' + addUnique(state.locations, items, 'code') + ' 个工位库位（重复自动跳过）');
+  alert('新增 ' + addUnique(state.locations, items, 'code', 'locations') + ' 个工位库位（重复自动跳过）');
 });
 document.getElementById('btnGenCtn').addEventListener('click', () => {
   const [pre, type, spec] = document.getElementById('gCtnType').value.split('|');
   const from = +document.getElementById('gCtnFrom').value, n = +document.getElementById('gCtnCount').value;
   const items = []; for (let i = from; i < from + n; i++) items.push({ code: pre + '-' + pad(i, 3), type, spec, loc: '' });
-  alert('新增 ' + addUnique(state.containers, items, 'code') + ' 个容器码（重复自动跳过）');
+  alert('新增 ' + addUnique(state.containers, items, 'code', 'containers') + ' 个容器码（重复自动跳过）');
 });
 /* ---- 模块区（A4 大卡） ---- */
 document.getElementById('btnGenZone').addEventListener('click', () => {
@@ -1832,6 +1852,7 @@ document.getElementById('btnGenZone').addEventListener('click', () => {
   state.locations.forEach(l => { const m = String(l.code).match(/^M-(\d+)$/); if (m) max = Math.max(max, +m[1]); });
   const code = 'M-' + pad(max + 1, 2);
   state.locations.push({ code, kind: '模块区', desc: name });
+  fsPushRecord('locations', [{ code, kind: '模块区', desc: name }]);
   save();
   document.getElementById('gZoneName').value = '';
   if (confirm('已生成模块区 ' + code + '（' + name + '），与库位码同台账、同导出。\n是否立即去打印 A4 区卡？')) {
@@ -1851,7 +1872,9 @@ document.getElementById('btnGenItm').addEventListener('click', () => {
   const name = document.getElementById('gItmName').value.trim();
   if (!name) { alert('请填写物品名称'); return; }
   const code = nextCode(state.items, 'WP');
-  state.items.push({ code, name, spec: document.getElementById('gItmSpec').value.trim(), loc: document.getElementById('gItmLoc').value.trim() });
+  const newItem = { code, name, spec: document.getElementById('gItmSpec').value.trim(), loc: document.getElementById('gItmLoc').value.trim() };
+  state.items.push(newItem);
+  fsPushRecord('items', [newItem]);
   save();
   if (confirm('已生成物品标签 ' + code + '（' + name + '）。' + '\n' + '是否立即去打印？')) {
     curType = 'itm'; sel.itm.clear(); sel.itm.add(state.items.length - 1);
@@ -1862,7 +1885,9 @@ document.getElementById('btnGenMan').addEventListener('click', () => {
   const name = document.getElementById('gManName').value.trim();
   if (!name) { alert('请填写手册名称'); return; }
   const code = nextCode(state.manuals, 'SC');
-  state.manuals.push({ code, name, ver: document.getElementById('gManVer').value.trim(), loc: document.getElementById('gManLoc').value.trim() });
+  const newManual = { code, name, ver: document.getElementById('gManVer').value.trim(), loc: document.getElementById('gManLoc').value.trim() };
+  state.manuals.push(newManual);
+  fsPushRecord('manuals', [newManual]);
   save();
   if (confirm('已生成手册标签 ' + code + '（' + name + '）。' + '\n' + '是否立即去打印？')) {
     curType = 'man'; sel.man.clear(); sel.man.add(state.manuals.length - 1);
@@ -1914,6 +1939,7 @@ document.getElementById('btnGenWip').addEventListener('click', () => {
   const r = CORE.createOrder(state, { type, date, code, items: rows });
   if (!r.ok) { alert('无法生成工单：\n' + r.errors.join('\n')); return; }
   state.serials[key] = nextSerial;
+  fsPushRecord('workorders', [r.order]);   // 工单记录写回飞书
   const merged = r.merged || [];
   const dropped = r.dropped || [];
   document.querySelector('#wipItemTable tbody').innerHTML = '';
@@ -2061,6 +2087,7 @@ function showWipDetail(code) {
     if (reason === null) return;
     const r = CORE.cancelOrder(state, w, { reason, operator: state.operator });
     if (!r.ok) { alert('取消失败：' + r.error); return; }
+    fsPushRecord('workorders', [w]);   // 已取消状态写回飞书
     save(); renderWip(); showWipDetail(code);
     log('取消工单 ' + w.code + (reason ? '（' + reason + '）' : '') + '｜操作人 ' + state.operator);
   });
@@ -2075,6 +2102,7 @@ function showWipDetail(code) {
     r.applied.forEach(a => { invPush(a.matCode, a.balance); fsPushStock(a.matCode, a.balance, a.delta, '冲销', reason || ('冲销 ' + w.code), w.code); });
     save(); renderLedger(); renderTxns(); renderWip(); showWipDetail(code);
     log('冲销工单 ' + w.code + '：' + r.applied.map(a => a.matCode + (a.delta > 0 ? '+' : '') + a.delta).join('，') + '｜操作人 ' + state.operator);
+    fsPushRecord('workorders', [w]);   // 冲销记录 + 已取消状态写回飞书
   });
   document.getElementById('btnWipClose').addEventListener('click', () => { panel.style.display = 'none'; wipDetailCode = ''; });
 }
@@ -2371,6 +2399,7 @@ function scanWip(code, box) {
     const r = CORE.executeOrder(state, w, { execQtyByCode, operator: state.operator });
     if (!r.ok) { alert('无法执行：\n' + r.errors.join('\n')); return; }
     r.applied.forEach(a => { invPush(a.matCode, a.balance); fsPushStock(a.matCode, a.balance, a.delta, WIP_NAMES[w.type] || w.type, '', w.code); });
+    fsPushRecord('workorders', [w]);   // 工单状态（未执行/部分执行/已执行）写回飞书
     save(); renderLedger(); renderTxns(); renderWip();
     log('执行工单 ' + w.code + '（' + WIP_NAMES[w.type] + '）：' + r.applied.map(a => a.matCode + (a.delta < 0 ? '' : '+') + a.delta).join('，') +
       '｜状态 ' + CORE.statusLabel(w.status) + '｜操作人 ' + state.operator);
@@ -2593,33 +2622,128 @@ function fsMerge(remote) {
     state.txnSeq = Math.max(...state.transactions.map(t => t.seq || 0), state.txnSeq || 0);
   }
 }
-async function fsPushStock(matCode, qty, delta, type, reason, ref) {
-  if (!fsOnline) { fsQueueSave([...fsQueue(), { matCode, qty, delta, type, reason, ref, operator: state.operator }]); return; }
-  try {
-    const r = await fetch(fsBase + '/api/feishu/stock', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ matCode, qty, delta, operator: state.operator, type, reason, ref }) });
-    const d = await r.json();
-    if (!d.ok) throw new Error(d.error || 'HTTP ' + r.status);
-    log('☁️ 飞书台账已同步 ' + matCode + ' → ' + qty);
-  } catch (e) {
-    fsQueueSave([...fsQueue(), { matCode, qty, delta, type, reason, ref, operator: state.operator }]);
-    log('⚠️ 飞书写入失败（已入离线队列）' + matCode + '：' + e.message);
+/* ================= 飞书写回（8 张表共用一套） =================
+   队列项支持三种操作（旧数据没有 op 字段 → 按 stock 处理）：
+     { op:'stock',  matCode, qty, delta, type, reason, ref }   库存（改数量 + 追加流水）
+     { op:'upsert', table, records:[…] }                        任意表按业务键新建/修改
+     { op:'delete', table, keys:[…] }                           任意表按业务键删除
+   table 取值：materials / locations / containers / members / items / manuals / workorders / transactions */
+
+const QUEUE_MAX_TRIES = 5;   // 连续失败这么多次就移出队列，避免「永远重试」把队列堆爆
+
+/** 统一 POST；非 2xx 或 ok:false 一律抛错，让调用方决定入队 */
+async function fsPost(path, body) {
+  const r = await fetch(fsBase + path, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  });
+  let d = {};
+  try { d = await r.json(); } catch { /* 非 JSON 响应 */ }
+  if (!d.ok) throw new Error(d.error || ('HTTP ' + r.status));
+  return d;
+}
+
+/** 入队（并把「永久失败」的条目剔除后告警，避免无限重试） */
+function fsEnqueue(item) {
+  const q = fsQueue();
+  const same = x => (x.op || 'stock') === (item.op || 'stock')
+    && JSON.stringify(Object.assign({}, x, { tries: 0, lastError: '' }))
+       === JSON.stringify(Object.assign({}, item, { tries: 0, lastError: '' }));
+  if (!q.some(same)) q.push(item);     // 同一操作不重复入队
+  fsQueueSave(q);
+}
+/** 记录一次失败；超过上限就丢弃并告警 */
+function fsQueueFail(item, err) {
+  const q = fsQueue().map(x => x === item ? Object.assign({}, x, { tries: (x.tries || 0) + 1, lastError: err }) : x);
+  const keep = [];
+  let dropped = 0;
+  q.forEach(x => {
+    if ((x.tries || 0) >= QUEUE_MAX_TRIES) {
+      dropped++;
+      log('❌ 放弃同步（连续失败 ' + x.tries + ' 次）：' + ((x.op === 'upsert' || x.op === 'delete') ? (x.table + ' ' + JSON.stringify((x.records || x.keys || []).map(r => r.code || r))) : x.matCode) + '　原因：' + (x.lastError || '未知'));
+    } else keep.push(x);
+  });
+  fsQueueSave(keep);
+  return dropped;
+}
+
+/** 执行一条队列项（也用于直写） */
+async function fsExecItem(item) {
+  const op = item.op || 'stock';
+  if (op === 'stock') {
+    const d = await fsPost('/api/feishu/stock', {
+      matCode: item.matCode, qty: item.qty, delta: item.delta,
+      operator: item.operator || state.operator, type: item.type, reason: item.reason, ref: item.ref
+    });
+    log('☁️ 飞书台账已同步 ' + item.matCode + ' → ' + item.qty);
+    return d;
+  }
+  if (op === 'upsert') {
+    const d = await fsPost('/api/feishu/upsert', { table: item.table, records: item.records });
+    if (d.dropped && d.dropped.length) log('ℹ️ ' + item.table + ' 有 ' + d.dropped.length + ' 个字段飞书表里没有，已跳过：' + d.dropped.join('、') + '（补列后会自动同步）');
+    log('☁️ 飞书 ' + item.table + ' 已同步：新建 ' + d.created + ' / 更新 ' + d.updated);
+    return d;
+  }
+  if (op === 'delete') {
+    const d = await fsPost('/api/feishu/delete', { table: item.table, keys: item.keys });
+    log('☁️ 飞书 ' + item.table + ' 已删除 ' + d.deleted + ' 条');
+    return d;
+  }
+  throw new Error('未知的队列操作：' + op);
+}
+
+/** 写库：在线直写，失败入队（不再无限重试） */
+async function fsPush(item) {
+  if (!fsOnline) { fsEnqueue(item); return; }
+  try { await fsExecItem(item); }
+  catch (e) {
+    log('⚠️ 飞书写入失败（已入离线队列）：' + (item.matCode || item.table || '') + '　' + e.message);
+    fsEnqueue(item);
   }
 }
+
+/** 库存写入（改数量 + 追加流水），保持原有调用签名 */
+function fsPushStock(matCode, qty, delta, type, reason, ref) {
+  return fsPush({ op: 'stock', matCode, qty, delta, type, reason, ref, operator: state.operator });
+}
+/** 任意表的新建/修改 */
+function fsPushRecord(table, records) {
+  const list = (Array.isArray(records) ? records : [records]).filter(Boolean);
+  if (!list.length) return Promise.resolve();
+  return fsPush({ op: 'upsert', table, records: list });
+}
+/** 任意表的删除 */
+function fsPushDelete(table, keys) {
+  const list = (Array.isArray(keys) ? keys : [keys]).filter(k => k != null && k !== '');
+  if (!list.length) return Promise.resolve();
+  return fsPush({ op: 'delete', table, keys: list });
+}
+
+/** 冲刷离线队列 */
+async function fsFlushQueue() {
+  const q = fsQueue();
+  if (!q.length) return;
+  let ok = 0;
+  // 逐条处理：成功的从队列移除，失败的累计次数
+  for (const item of q) {
+    try {
+      await fsExecItem(item);
+      fsQueueSave(fsQueue().filter(x => x !== item));
+      ok++;
+    } catch (e) {
+      fsQueueFail(item, e.message);
+    }
+  }
+  if (ok) log('☁️ 离线队列冲刷成功 ' + ok + ' 条，剩余 ' + fsQueue().length + ' 条');
+}
+
 async function fsBoot() {
   try {
     const remote = await fsPullState();
     fsOnline = true;
     fsMerge(remote);
     save(); renderLedger(); renderTxns(); renderOperators();
-    // 冲刷离线队列
-    const q = fsQueue();
-    if (q.length) {
-      fsQueueSave([]);
-      for (const it of q) await fsPushStock(it.matCode, it.qty, it.delta, it.type, it.reason, it.ref);
-      log('☁️ 离线队列冲刷 ' + q.length + ' 条');
-    }
-    fsOnline = true; refreshStatusHint();
+    await fsFlushQueue();          // 网络恢复后先把积压的写入补上
+    refreshStatusHint();
   } catch (e) {
     fsOnline = false; refreshStatusHint();
     // 真源服务（feishu-server / 隧道）不可达时，退回云端只读接口 —— 同一份飞书数据。
@@ -2627,6 +2751,7 @@ async function fsBoot() {
     cloudSync({ silent: true });
   }
 }
+
 
 /* ---------- 启动 ---------- */
 document.getElementById('gWipDate').value = today();
