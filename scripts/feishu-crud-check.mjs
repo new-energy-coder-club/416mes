@@ -199,8 +199,26 @@ async function main() {
       else fail(tbl, '无残留', `${n} 条，开始时 ${baseCount[tbl]} 条`);
     }
 
-    /* ---- 6) 只读核对：飞书缺列 / 缺选项 ---- */
-    const rec = await post('/api/feishu/reconcile', { state: { materials: [], locations: [{ code: 'X', kind: '模块区' }], workorders: [{ code: 'X', status: '部分执行' }] } });
+    /* ---- 6) 只读核对：飞书缺列 / 缺选项 ----
+       探针只带「本地真的会用到、且飞书可能没有」的取值。容器类型从出厂布局文件里读，
+       免得把类型名写死在脚本里。网页端台账页顶部那块「对齐面板」用的是同一份数据、
+       但带的是完整本地 state，是最权威的一份。 */
+    let ctnTypes = ['A4四抽收纳盒', '斜角零件盒', '开放式收纳格', '四层四格牛皮纸收纳盒'];
+    try {
+      const fsmod = await import('node:fs');
+      const layout = JSON.parse(fsmod.readFileSync(new URL('../布局导入_C区角钢货架.json', import.meta.url), 'utf8'));
+      const seen = new Set([...(layout.containers || []), ...(layout.state?.containers || [])].map(c => c.type).filter(Boolean));
+      if (seen.size) ctnTypes = [...seen];
+    } catch { /* 没有布局文件就用上面的默认值 */ }
+    const rec = await post('/api/feishu/reconcile', {
+      state: {
+        materials: [{ code: 'X', zone: 'M-01' }],
+        locations: [{ code: 'X', kind: '模块区' }, { code: 'Y', kind: '空地' }],
+        containers: ctnTypes.map((t, i) => ({ code: 'C' + i, type: t })),
+        members: [{ code: 'X', role: '成员' }],
+        workorders: [{ code: 'X', type: 'LL', status: '部分执行' }]
+      }
+    });
     if (rec.status === 200 && rec.d?.ok) {
       const t = rec.d.report.tables;
       const cols = Object.entries(t).flatMap(([k, v]) => v.missingColumns.map(c => LABEL[k] + '·' + c));
