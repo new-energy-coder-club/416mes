@@ -19,7 +19,7 @@ function startMock(opts = {}) {
     tblMAT: { fields: ['物料码', '名称', '库存数量'], rows: [{ '物料码': 'A-1', '名称': '螺丝刀', '库存数量': 5 }] },
     tblTXN: { fields: ['流水号', '时间', '操作人', '类型', '物料码', '变动', '余量', '关联单', '原因/备注'], rows: [] }
   };
-  const calls = { created: [], updated: [], deny: false, denyOn: opts.denyOn || null };
+  const calls = { created: [], updated: [], deleted: [], deny: false, denyOn: opts.denyOn || null };
   // 字段类型定义：type 数字对应飞书字段类型码（1 文本 / 2 数字 / 3 单选 / 5 日期）
   const fieldTypes = opts.fieldTypes || {
     tblMAT: [{ name: '物料码', type: 1 }, { name: '名称', type: 1 }, { name: '库存数量', type: 2 }],
@@ -72,6 +72,15 @@ function startMock(opts = {}) {
         const b = JSON.parse(body || '{}');
         (b.records || []).forEach(r => { calls.created.push(r.fields); t.rows.push(r.fields); });
         return json({ code: 0, data: { records: (b.records || []).map((_, i) => ({ record_id: 'new_' + i })) } });
+      }
+      if (action === 'batch_delete') {
+        if (opts.denyWrite) return json({ code: 99991672, msg: 'Forbidden: no permission to write' });
+        const b = JSON.parse(body || '{}');
+        const want = new Set(b.records || []);
+        const keep = [];
+        t.rows.forEach((r, i) => { if (!want.has('rec_' + i)) keep.push(r); else calls.deleted.push('rec_' + i); });
+        t.rows.length = 0; keep.forEach(r => t.rows.push(r));
+        return json({ code: 0, data: { records: (b.records || []).map(id => ({ record_id: id, deleted: true })) } });
       }
       if (action === 'batch_update') {
         if (opts.denyWrite) return json({ code: 99991672, msg: 'Forbidden: no permission to write' });
@@ -363,4 +372,141 @@ test('飞书写：写完后回放读到的余量与库存一致', async (t) => {
   const newest = st.transactions[0];
   assert.equal(newest.balance, 6);
   assert.equal(newest.delta, -2);
+});
+
+/* ================= 通用增删改查（8 张表共用） ================= */
+
+const ALL_TABLE_TYPES = {
+  tblMAT: [{ name: '物料码', type: 1 }, { name: '名称', type: 1 }, { name: '规格型号', type: 1 }, { name: '闲鱼XY编号', type: 1 }, { name: '当前库位码', type: 1 }, { name: '容器码', type: 1 }, { name: '库存数量', type: 2 }, { name: '安全库存', type: 2 }, { name: '成本', type: 2 }],
+  tblLOC: [{ name: '库位码', type: 1 }, { name: '类型', type: 1 }, { name: '说明', type: 1 }, { name: '授权人员', type: 1 }],
+  tblCTN: [{ name: '容器码', type: 1 }, { name: '容器类型', type: 1 }, { name: '规格', type: 1 }, { name: '当前库位码', type: 1 }],
+  tblMBR: [{ name: '编号', type: 1 }, { name: '姓名', type: 1 }, { name: '学号', type: 1 }, { name: '部门/SIG', type: 1 }, { name: '职务', type: 1 }, { name: '电话', type: 1 }, { name: '备注', type: 1 }, { name: '标签', type: 1 }, { name: 'PIN码', type: 1 }],
+  tblITM: [{ name: '物品码', type: 1 }, { name: '名称', type: 1 }, { name: '规格型号', type: 1 }, { name: '库位码', type: 1 }],
+  tblMAN: [{ name: '手册码', type: 1 }, { name: '名称', type: 1 }, { name: '版本', type: 1 }, { name: '库位码', type: 1 }],
+  tblWIP: [{ name: '工单号', type: 1 }, { name: '类型', type: 3, options: ['LL 领料', 'BH 补货', 'JH 拣货', 'TL 退料'] }, { name: '日期', type: 5 }, { name: '明细', type: 1 }, { name: '状态', type: 3, options: ['未执行', '已执行'] }, { name: '执行时间', type: 5 }],
+  tblTXN: [{ name: '流水号', type: 1 }, { name: '时间', type: 5 }, { name: '操作人', type: 1 }, { name: '类型', type: 1 }, { name: '物料码', type: 1 }, { name: '变动', type: 2 }, { name: '余量', type: 2 }, { name: '关联单', type: 1 }, { name: '原因/备注', type: 1 }]
+};
+const ALL_TABLES = JSON.stringify({
+  materials: 'tblMAT', locations: 'tblLOC', containers: 'tblCTN', members: 'tblMBR',
+  items: 'tblITM', manuals: 'tblMAN', workorders: 'tblWIP', transactions: 'tblTXN'
+});
+
+function startAllMock(opts = {}) {
+  const tables = {};
+  Object.keys(ALL_TABLE_TYPES).forEach(id => { tables[id] = { fields: ALL_TABLE_TYPES[id].map(f => f.name), rows: [] }; });
+  return startMock(Object.assign({ tables, fieldTypes: ALL_TABLE_TYPES }, opts));
+}
+
+test('通用 upsert：新建 8 张表各自一条记录', async (t) => {
+  const mock = await startAllMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+
+  const cases = [
+    ['materials', { code: 'JG-001', name: '狂徒', spec: 'AK47', qty: 1, minQty: 0, cost: 0 }],
+    ['locations', { code: 'B-09-01-01', kind: '货架', desc: '测试位' }],
+    ['containers', { code: 'XK-999', type: '斜口零件盒', spec: '中号', loc: 'B-09-01-01' }],
+    ['members', { code: 'MB-099', name: '测试员', sid: '2026999', dept: '电控', role: '成员', group: '天权1楼实验台' }],
+    ['items', { code: 'WP-099', name: '电烙铁', spec: '60W', loc: 'W01-G01' }],
+    ['manuals', { code: 'SC-099', name: '手册', ver: 'V1.0', loc: 'B-01-01-02' }],
+    ['workorders', { code: 'LL-TEST-1', type: 'LL', date: '2026-09-15', items: [{ matCode: 'JG-001', qty: 2 }], status: '未执行' }],
+    ['transactions', { seq: 1, ts: '2026-09-15T02:00:00Z', operator: '甲', type: '手工调整', matCode: 'JG-001', delta: 1, balance: 1, ref: '', reason: '' }]
+  ];
+  for (const [tbl, rec] of cases) {
+    const r = await lib.upsertRecords(tbl, [rec]);
+    assert.equal(r.created, 1, tbl + ' 应新建 1 条，实际 ' + JSON.stringify(r));
+    assert.equal(r.updated, 0);
+  }
+  // 逐表核对主键是否真写进去了
+  assert.equal(mock.tables.tblMAT.rows[0]['物料码'], 'JG-001');
+  assert.equal(mock.tables.tblMBR.rows[0]['姓名'], '测试员');
+  assert.equal(mock.tables.tblMBR.rows[0]['标签'], '天权1楼实验台');
+  assert.equal(mock.tables.tblWIP.rows[0]['工单号'], 'LL-TEST-1');
+  assert.equal(mock.tables.tblTXN.rows[0]['流水号'], '#000001');
+  assert.equal(typeof mock.tables.tblWIP.rows[0]['执行时间'] !== 'string', true, '日期列不能是字符串');
+});
+
+test('通用 upsert：已存在的按业务键更新，不重复建', async (t) => {
+  const mock = await startAllMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+
+  await lib.upsertRecords('materials', [{ code: 'JG-001', name: '旧名', qty: 1 }]);
+  const r = await lib.upsertRecords('materials', [{ code: 'JG-001', name: '新名', qty: 5 }]);
+  assert.equal(r.created, 0);
+  assert.equal(r.updated, 1);
+  assert.equal(mock.tables.tblMAT.rows.length, 1, '不应产生重复行');
+  assert.equal(mock.tables.tblMAT.rows[0]['名称'], '新名');
+  assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 5);
+});
+
+test('通用 upsert【关键】表里没有的列被丢弃并回报，而不是整批失败', async (t) => {
+  const mock = await startAllMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+
+  // 工单表当前只有 6 列；带 Phase 3 的执行字段去写
+  const r = await lib.upsertRecords('workorders', [{
+    code: 'LL-TEST-2', type: 'LL', date: '2026-09-15', items: [{ matCode: 'X', qty: 1 }], status: '未执行',
+    execQty: [{ matCode: 'X', qty: 1 }], execBatches: [{ at: 't', items: [] }], reverseInfo: { at: 't' }, cancelInfo: { at: 't' }
+  }]);
+  assert.equal(r.created, 1, '写入应成功，不能因为缺列而整体失败');
+  assert.ok(mock.tables.tblWIP.rows[0]['工单号'] === 'LL-TEST-2', '已有列必须写进去');
+  assert.ok(r.dropped.includes('执行数量') && r.dropped.includes('执行批次') && r.dropped.includes('冲销记录'), '应回报被丢掉的列：' + JSON.stringify(r.dropped));
+});
+
+test('通用 upsert：补上列之后，执行明细自动开始同步', async (t) => {
+  const types = JSON.parse(JSON.stringify(ALL_TABLE_TYPES));
+  types.tblWIP.push({ name: '执行数量', type: 1 }, { name: '执行批次', type: 1 }, { name: '冲销记录', type: 1 }, { name: '取消记录', type: 1 });
+  const mock = await startAllMock({ fieldTypes: types });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+
+  const r = await lib.upsertRecords('workorders', [{
+    code: 'LL-PART', type: 'LL', date: '2026-09-15', items: [{ matCode: 'X', qty: 4 }], status: '未执行',
+    execQty: [{ matCode: 'X', qty: 2 }], execBatches: [{ at: 't1', items: [{ matCode: 'X', qty: 2, delta: -2 }] }]
+  }]);
+  assert.equal(r.created, 1);
+  assert.deepEqual(r.dropped, [], '补列后不应再丢字段');
+  assert.equal(mock.tables.tblWIP.rows[0]['执行数量'], 'X=2');
+  assert.match(mock.tables.tblWIP.rows[0]['执行批次'], /"qty":2/);
+});
+
+test('通用 upsert：没有业务键的记录被跳过', async (t) => {
+  const mock = await startAllMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+  const r = await lib.upsertRecords('materials', [{ code: '', name: '没有编码' }, { code: 'OK-1', name: '正常' }]);
+  assert.equal(r.created, 1);
+  assert.equal(mock.tables.tblMAT.rows.length, 1);
+});
+
+test('通用 upsert：未知的表名给出明确报错', async (t) => {
+  const mock = await startAllMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+  const r = await lib.upsertRecords('nosuchtable', [{ code: 'X' }]);
+  assert.match(r.error, /未知的表/);
+});
+
+test('通用 delete：按业务键删除', async (t) => {
+  const mock = await startAllMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+
+  await lib.upsertRecords('materials', [{ code: 'A', name: '1' }, { code: 'B', name: '2' }, { code: 'C', name: '3' }]);
+  assert.equal(mock.tables.tblMAT.rows.length, 3);
+
+  const r = await lib.deleteRecords('materials', ['A', 'C']);
+  assert.equal(r.deleted, 2);
+  assert.equal(mock.tables.tblMAT.rows.length, 1);
+  assert.equal(mock.tables.tblMAT.rows[0]['物料码'], 'B');
+});
+
+test('通用 delete：键不存在时删 0 条且不报错', async (t) => {
+  const mock = await startAllMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+  const r = await lib.deleteRecords('members', ['NOT-THERE']);
+  assert.equal(r.deleted, 0);
 });

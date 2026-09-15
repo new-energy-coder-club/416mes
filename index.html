@@ -1555,7 +1555,8 @@ function mergeStatText(stat) {
 }
 
 /* ---------- 云端实时同步（飞书后端 → 本机，经 /api/feishu-sync） ---------- */
-const CLOUD_SYNC_API = location.protocol.startsWith('http') ? 'api/feishu-sync' : 'https://mes.newenergycoder.club/api/feishu-sync';
+// 统一走 /api/feishu/state（与 fsBoot 同源同接口，不再有两个功能重复的读接口）
+const CLOUD_SYNC_API = location.protocol.startsWith('http') ? 'api/feishu/state' : 'https://mes.newenergycoder.club/api/feishu/state';
 async function cloudSync({ silent = false } = {}) {
   const btn = document.getElementById('btnCloudSync');
   if (btn) { btn.disabled = true; btn.textContent = '☁️ 同步中…'; }
