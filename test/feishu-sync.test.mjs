@@ -178,3 +178,33 @@ test('【回归】feishu 写入失败必须打印错误，不能静默成功', a
   const r = await runSync(env, ['push', outFile]);
   assert.match(r.stdout + r.stderr, /更新失败|创建失败/);
 });
+
+/* ================= 同步契约：state ↔ 飞书列 ================= */
+
+/**
+ * 「绊线」测试：飞书工单映射目前只覆盖 6 个字段，Phase 3 新增的执行/冲销字段
+ * 尚未同步。等飞书阶段补齐映射后，下面第一个断言会失败，提醒你把这条用例
+ * 改成「往返一致」的断言 —— 而不是让这个缺口被悄悄忘掉。
+ */
+test('【已知缺口·绊线】飞书工单映射尚未覆盖 Phase 3 的执行与冲销字段', async (t) => {
+  const SYNCED = { '工单号': 'code', '类型': 'type', '日期': 'date', '明细': 'items', '状态': 'status', '执行时间': 'execTime' };
+  const CRITICAL = ['code', 'type', 'date', 'items', 'status', 'execTime', 'execQty', 'execBatches', 'reverseInfo'];
+  const syncedStateFields = new Set(Object.values(SYNCED));
+  const missing = CRITICAL.filter(f => !syncedStateFields.has(f));
+
+  assert.deepEqual(missing, ['execQty', 'execBatches', 'reverseInfo'],
+    '飞书工单映射看起来已经变了：若已补齐 Phase 3 字段，请把本条用例改为「push→pull 往返后执行数量/批次/冲销记录一致」，并删除缺口记录。');
+
+  // 缺口的具体后果：部分执行过的工单往返后会被当成"一件都没执行"
+  const Core = (await import('../mes-core.js')).default;
+  const roundTripped = { code: 'LL-PART', type: 'LL', date: '2026-09-15', items: [{ matCode: 'GJ-SD-001', qty: 4 }], status: '部分执行', execTime: '' };
+  const p = Core.orderProgress(roundTripped);
+  assert.equal(p.executedTotal, 0, '飞书没有执行数量列，往返后已执行数量归零');
+  assert.equal(p.remainingTotal, 4, '于是剩余数量回到计划值');
+
+  // 因此启用飞书同步前必须先补映射：否则继续执行会重复扣减
+  const s = { materials: [{ code: 'GJ-SD-001', qty: 20, minQty: 0, cost: 8 }], workorders: [roundTripped], transactions: [], txnSeq: 0 };
+  const r = Core.executeOrder(s, roundTripped);
+  assert.equal(r.ok, true);
+  assert.equal(r.applied[0].qty, 4, '往返后会把已执行过的 1 件再执行一遍（库存多扣）');
+});
