@@ -2625,8 +2625,10 @@ function renderDataStoreHint() {
     '<p class="hint" style="margin:6px 0">本地址（<b>' + esc(origin) + '</b>）下没有历史数据，已载入出厂种子数据。' +
     '如果你之前用过 416MES 且数据「不见了」，很可能是在<b>另一个地址</b>下打开的 —— localStorage 按地址隔离：' +
     '<code>http://localhost:8000</code>、<code>http://192.168.x.x:8000</code>、<code>file://</code> 是三套互不相通的数据。</p>' +
-    '<p class="hint" style="margin:6px 0">找回方法：用<b>原来那个地址</b>在<b>同一个浏览器</b>打开 → 「导出备份 JSON」→ 回到这里点「导入合并」。' +
-    '也可以直接「导入合并」已有的备份文件（如项目里的 <code>人员导入-416在册人员.json</code>）。</p>' +
+    '<p class="hint" style="margin:6px 0">找回方法（按顺序试）：' +
+    '<b>①</b> 点工具栏「☁️ 云端同步」——台账/人员/工单都存在飞书多维表里，联网就能拉回来；' +
+    '<b>②</b> 用<b>原来那个地址</b>在<b>同一个浏览器</b>打开 → 「导出备份 JSON」→ 回到这里「导入合并」；' +
+    '<b>③</b> 导入你自己之前导出的备份 JSON。</p>' +
     '<div class="toolbar"><button class="btn small ghost" id="btnFreshSeedClose">知道了，关闭提示</button></div>';
   const main = document.querySelector('main');
   if (main && main.firstChild) main.insertBefore(box, main.firstChild);
