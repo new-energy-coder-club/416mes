@@ -533,12 +533,13 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 <script src="nec-gallery.js"></script>
 <script src="jsqr.min.js"></script>
 <script src="mes-core.js"></script>
+<script src="lib/outbox.js"></script>
 <script>
 /* ================= 416MES 应用逻辑 ================= */
 'use strict';
 
 /* 应用版本：改到用户看得见的行为时手动 +1，页脚会显示，方便确认线上跑的是哪一版 */
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 
 /* ---------- 标签类型配置 ---------- */
 const TYPES = {
@@ -558,6 +559,14 @@ if (!CORE) {
   document.body.insertAdjacentHTML('afterbegin',
     '<div style="background:#d33a2c;color:#fff;padding:12px 20px;font-size:14px">⚠️ 缺少 mes-core.js，核心库存逻辑无法加载。请把 mes-core.js 与 index.html 放在同一目录后刷新。</div>');
   throw new Error('缺少 mes-core.js（核心库存模块）');
+}
+/* 离线队列模块（lib/outbox.js）：同样是可单测的纯逻辑。
+   缺了它「离线期间的改动」就无处存放，宁可当场报错也不要静默丢数据。 */
+const OUTBOX = window.Outbox;
+if (!OUTBOX) {
+  document.body.insertAdjacentHTML('afterbegin',
+    '<div style="background:#d33a2c;color:#fff;padding:12px 20px;font-size:14px">⚠️ 缺少 lib/outbox.js，离线队列无法工作（离线期间的改动会丢）。请确认 lib/outbox.js 与 index.html 一起部署后刷新。</div>');
+  throw new Error('缺少 lib/outbox.js（离线队列模块）');
 }
 const NEC_TYPE_NAMES = { RW: '任务', LL: '领料', CG: '采购', WX: '维修', HD: '活动', QT: '其他' };
 const NEC_STATUS = ['待处理', '进行中', '已完成', '已取消'];
@@ -2618,7 +2627,31 @@ let fsBase = '';   // 真源服务基地址：同源优先，其次隧道域名
    旧版固定用 fsBase，于是 file:// 打开时写请求会打到已经废弃的隧道域名上，
    离线队列只进不出。现在任何一条通路可用就写它，两条都不可用才入队。 */
 let fsWriteBase = '';
-function fsQueue() { try { return JSON.parse(localStorage.getItem(FS_QUEUE_LS) || '[]'); } catch { return []; } }
+
+/* ---------- 离线队列（outbox）----------
+   存储与去重逻辑搬到了 lib/outbox.js（UMD，Node 可单测）。
+   这里只做薄封装：Phase 1 要求**行为不变**，所以仍用旧键 mes416_fs_queue，
+   条目结构也兼容旧格式（读出来会自动补 id）。换新键 + 迁移旧数据是 Phase 2。 */
+let _outbox = null;
+function fsOutbox() {
+  if (!_outbox) _outbox = OUTBOX.create({ key: FS_QUEUE_LS, maxTries: QUEUE_MAX_TRIES });
+  return _outbox;
+}
+function fsQueue() { return fsOutbox().list(); }
+/** 顶部离线队列角标：待冲刷条数常驻显示 */
+function fsQueueChip() {
+  const q = fsQueue();
+  const chip = document.getElementById('fsQueueChip');
+  if (chip) {
+    chip.textContent = q.length ? ('☁️ 离线队列 ' + q.length + ' 条') : '';
+    chip.style.display = q.length ? 'inline-block' : 'none';
+  }
+  return q.length;
+}
+function fsQueueSave(q) {
+  fsOutbox().save(q);
+  fsQueueChip();
+}
 /* 顶部状态按优先级统一渲染：真源服务 > 云端只读 > 离线。
    两条通路（fsBoot 与 cloudSync）各自的成败都会调用它，因此最终显示与谁先返回无关。 */
 function refreshStatusHint() {
@@ -2626,25 +2659,11 @@ function refreshStatusHint() {
   else if (cloudOnline) fsStatusHint('已连接飞书云端（只读同步）', true);
   else fsStatusHint('离线模式 · 本机数据', false);
 }
-function fsQueueSave(q) {
-  localStorage.setItem(FS_QUEUE_LS, JSON.stringify(q));
-  const chip = document.getElementById('fsQueueChip');
-  if (chip) {
-    chip.textContent = q.length ? ('☁️ 离线队列 ' + q.length + ' 条') : '';
-    chip.style.display = q.length ? 'inline-block' : 'none';
-  }
-}
 function fsStatusHint(msg, ok) {
   const el = document.querySelector('header .sub');
   if (el) el.textContent = el.textContent.replace(/（.*）/, '') + '（' + (ok ? '🟢 ' : '⚪ ') + msg + '）';
   if (el) el.style.color = ok ? '#7be3a8' : '#e8a87c';
-  // 顶部离线队列入口：有待冲刷记录时常驻显示条数
-  const q = fsQueue();
-  const chip = document.getElementById('fsQueueChip');
-  if (chip) {
-    chip.textContent = q.length ? ('☁️ 离线队列 ' + q.length + ' 条') : '';
-    chip.style.display = q.length ? 'inline-block' : 'none';
-  }
+  fsQueueChip();   // 顶部离线队列入口：有待冲刷记录时常驻显示条数
 }
 async function fsPullState() {
   const tryBase = async base => {
@@ -2942,28 +2961,31 @@ function fsSerialize(key, fn) {
   return next;
 }
 
-/** 入队（并把「永久失败」的条目剔除后告警，避免无限重试） */
-function fsEnqueue(item) {
-  const q = fsQueue();
-  const same = x => (x.op || 'stock') === (item.op || 'stock')
-    && JSON.stringify(Object.assign({}, x, { tries: 0, lastError: '' }))
-       === JSON.stringify(Object.assign({}, item, { tries: 0, lastError: '' }));
-  if (!q.some(same)) q.push(item);     // 同一操作不重复入队
-  fsQueueSave(q);
+/** 队列条目的可读描述（告警用） */
+function fsDescribeItem(x) {
+  if (x.op === 'upsert' || x.op === 'delete') {
+    return x.table + ' ' + JSON.stringify((x.records || x.keys || []).map(r => (r && r.code) || r));
+  }
+  return x.matCode || '（无物料码）';
 }
-/** 记录一次失败；超过上限就丢弃并告警 */
+
+/** 入队；同一操作重复入队只保留一条（去重与存储都在 lib/outbox.js 里，可单测） */
+function fsEnqueue(item) {
+  fsOutbox().append(item);
+  fsQueueChip();
+}
+/**
+ * 记录一次失败；超过上限才剔除并告警。
+ * 注意「剔除」是被显式审计的行为：prune() 把被丢弃的条目交回来，这里逐条打日志，
+ * 绝不静默消失。
+ */
 function fsQueueFail(item, err) {
-  const q = fsQueue().map(x => x === item ? Object.assign({}, x, { tries: (x.tries || 0) + 1, lastError: err }) : x);
-  const keep = [];
-  let dropped = 0;
-  q.forEach(x => {
-    if ((x.tries || 0) >= QUEUE_MAX_TRIES) {
-      dropped++;
-      log('❌ 放弃同步（连续失败 ' + x.tries + ' 次）：' + ((x.op === 'upsert' || x.op === 'delete') ? (x.table + ' ' + JSON.stringify((x.records || x.keys || []).map(r => r.code || r))) : x.matCode) + '　原因：' + (x.lastError || '未知'));
-    } else keep.push(x);
-  });
-  fsQueueSave(keep);
-  return dropped;
+  const ob = fsOutbox();
+  ob.markAttempt(item.id, err);
+  const r = ob.prune();
+  r.dropped.forEach(x => log('❌ 放弃同步（连续失败 ' + x.tries + ' 次）：' + fsDescribeItem(x) + '　原因：' + (x.lastError || '未知')));
+  if (r.dropped.length) fsQueueChip();
+  return r.dropped.length;
 }
 
 /** 执行一条队列项（也用于直写） */
