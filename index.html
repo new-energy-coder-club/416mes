@@ -2913,6 +2913,20 @@ async function fsPost(path, body) {
   return d;
 }
 
+/* 写请求按「表」串行化。
+   为什么必需：在台账里连续填「物料码 → 名称 → 规格」会连发三次 upsert，而每次
+   upsert 都要先读表再决定是新建还是更新。并发时三次都读到"还没有这条"，
+   于是建出三条同码记录 —— 实测踩过，飞书里直接多出两条重复物料。
+   串行之后第二次就能读到第一次建好的记录，正确转成更新；删除同理。 */
+const _fsChains = Object.create(null);
+function fsChainKey(item) { return item.table || ('stock:' + (item.matCode || '')); }
+function fsSerialize(key, fn) {
+  const prev = _fsChains[key] || Promise.resolve();
+  const next = prev.then(fn, fn);       // 上一条失败也要继续跑下一条
+  _fsChains[key] = next.then(() => {}, () => {});
+  return next;
+}
+
 /** 入队（并把「永久失败」的条目剔除后告警，避免无限重试） */
 function fsEnqueue(item) {
   const q = fsQueue();
@@ -2975,14 +2989,16 @@ async function fsExecItem(item) {
   throw new Error('未知的队列操作：' + op);
 }
 
-/** 写库：任一通路可用就直写，都不可用才入队（不再无限重试） */
+/** 写库：任一通路可用就直写，都不可用才入队（不再无限重试）；同一张表串行 */
 async function fsPush(item) {
   if (!fsOnline && !cloudOnline) { fsEnqueue(item); return; }
-  try { await fsExecItem(item); save(); }
-  catch (e) {
-    log('⚠️ 飞书写入失败（已入离线队列）：' + (item.matCode || item.table || '') + '　' + e.message);
-    fsEnqueue(item);
-  }
+  return fsSerialize(fsChainKey(item), async () => {
+    try { await fsExecItem(item); save(); }
+    catch (e) {
+      log('⚠️ 飞书写入失败（已入离线队列）：' + (item.matCode || item.table || '') + '　' + e.message);
+      fsEnqueue(item);
+    }
+  });
 }
 
 /** 库存写入（改数量 + 追加流水），保持原有调用签名 */
@@ -3007,10 +3023,10 @@ async function fsFlushQueue() {
   const q = fsQueue();
   if (!q.length) return 0;
   let ok = 0;
-  // 逐条处理：成功的从队列移除，失败的累计次数
+  // 逐条处理：成功的从队列移除，失败的累计次数。同样走串行链，避免和正在进行的用户写入打架。
   for (const item of q) {
     try {
-      await fsExecItem(item);
+      await fsSerialize(fsChainKey(item), () => fsExecItem(item));
       fsQueueSave(fsQueue().filter(x => x !== item));
       ok++;
     } catch (e) {

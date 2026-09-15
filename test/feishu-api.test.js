@@ -751,3 +751,39 @@ test('upsert dryRun：只回报会做什么，不落任何数据', async (t) => 
   assert.equal(mock.tables.tblMAT.rows.length, 1, 'dryRun 不能写入');
   assert.equal(mock.tables.tblMAT.rows[0]['名称'], '已有', 'dryRun 不能改动');
 });
+
+test('reconcile【回归】单选选项按「转换后的值」比对，工单类型 LL 不算缺选项', async (t) => {
+  const mock = await startAllMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+
+  const rep = await lib.reconcile({
+    workorders: [
+      { code: 'A', type: 'LL', status: '已执行' },                 // 'LL' 写出去是 'LL 领料'，选项里有
+      { code: 'B', type: 'BH', status: '部分执行' }                // 状态确实缺选项
+    ],
+    containers: [{ code: 'C', type: '开放式收纳格' }]              // 容器类型确实缺选项
+  });
+  const wip = rep.tables.workorders.missingOptions;
+  assert.equal(wip.length, 1, '只有「状态」应被报为缺选项：' + JSON.stringify(wip));
+  assert.equal(wip[0].column, '状态');
+  assert.deepEqual(wip[0].usedButMissing, ['部分执行']);
+  assert.deepEqual(rep.tables.containers.missingOptions[0].usedButMissing, ['开放式收纳格']);
+});
+
+test('通用 upsert【回归】同一批里同业务键只建一条，不产生重复记录', async (t) => {
+  const mock = await startAllMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+
+  // 页面上快速连填「物料码 → 名称 → 规格」时会连发几次 upsert；
+  // 如果一次请求里带了同码的多条，必须合并而不是建出多条（实测在飞书里多出过两条重复物料）
+  const r = await lib.upsertRecords('materials', [
+    { code: 'DUP-1', name: '甲' },
+    { code: 'DUP-1', name: '甲', spec: 'S1' }
+  ]);
+  assert.equal(r.created, 1, '同业务键只能建一条，实际 ' + JSON.stringify(r));
+  assert.equal(mock.tables.tblMAT.rows.length, 1);
+  assert.equal(mock.tables.tblMAT.rows[0]['名称'], '甲');
+  assert.equal(mock.tables.tblMAT.rows[0]['规格型号'], 'S1', '后一条的字段要并进同一条');
+});
