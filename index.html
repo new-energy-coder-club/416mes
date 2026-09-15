@@ -484,6 +484,7 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 </script>
 <script src="nec-gallery.js"></script>
 <script src="jsqr.min.js"></script>
+<script src="mes-core.js"></script>
 <script>
 /* ================= 416MES 应用逻辑 ================= */
 'use strict';
@@ -500,6 +501,13 @@ const TYPES = {
   zone: { name: '模块区卡', color: '#22a9f0', prefix: 'LOC:' }
 };
 const WIP_NAMES = { LL: '领料工单', BH: '补货工单', JH: '拣货工单', TL: '退料工单' };
+/* 核心库存规则模块（mes-core.js）：可单测的纯逻辑，页面只做渲染与交互 */
+const CORE = window.MesCore;
+if (!CORE) {
+  document.body.insertAdjacentHTML('afterbegin',
+    '<div style="background:#d33a2c;color:#fff;padding:12px 20px;font-size:14px">⚠️ 缺少 mes-core.js，核心库存逻辑无法加载。请把 mes-core.js 与 index.html 放在同一目录后刷新。</div>');
+  throw new Error('缺少 mes-core.js（核心库存模块）');
+}
 const NEC_TYPE_NAMES = { RW: '任务', LL: '领料', CG: '采购', WX: '维修', HD: '活动', QT: '其他' };
 const NEC_STATUS = ['待处理', '进行中', '已完成', '已取消'];
 const LS_KEY = 'mes416_state_v1';
@@ -786,44 +794,38 @@ function load() {
 }
 function save() { localStorage.setItem(LS_KEY, JSON.stringify(state)); }
 
+/* 工单数据归一化（Excel 导入 / 备份合并 / 云端同步共用）：
+   同一物料多行 → 合并为一行，避免历史脏数据在执行时被重复扣减 */
+function normalizeOrder(w) {
+  if (!w || typeof w !== 'object') return w;
+  if (Array.isArray(w.items)) {
+    w.items = CORE.normalizeItems(w.items).items.map(e => ({ matCode: e.matCode, qty: e.qty }));
+  }
+  if (!Array.isArray(w.execQty)) w.execQty = [];
+  if (!Array.isArray(w.execBatches)) w.execBatches = [];
+  return w;
+}
+
 /* ---------- 库存事务流水（不可变审计日志：追加写、只增不改、可回放） ---------- */
+/* 唯一写入口在 mes-core.js：recordTransaction 只追加，applyStockChange 改数量+写流水不可分离 */
 function recordTxn(type, matCode, delta, ref, reason) {
-  const m = state.materials.find(x => x.code === matCode);
-  state.txnSeq = (state.txnSeq || 0) + 1;
-  state.transactions.unshift({
-    seq: state.txnSeq, ts: new Date().toISOString(), device: state.deviceId,
-    time: new Date().toLocaleString(), operator: state.operator, type, matCode, delta, ref: ref || '', balance: m ? m.qty : '', reason: reason || ''
-  });
+  return CORE.recordTransaction(state, { type, matCode, delta, ref, reason });
 }
-/* 全量流水按时间正序（旧数据无 seq：数组内新的在前，反转置前；新数据按 seq 排序） */
-function orderedTxns() {
-  const legacy = state.transactions.filter(t => t.seq == null).slice().reverse();
-  const seqd = state.transactions.filter(t => t.seq != null).slice().sort((a, b) => (a.seq - b.seq) || String(a.device).localeCompare(String(b.device)));
-  return legacy.concat(seqd);
-}
+/* 全量流水按时间正序 */
+function orderedTxns() { return CORE.orderedTransactions(state); }
 /* 回放校验：从首条余量反推期初，逐条重算链式余量，与记录值比对，定位篡改/丢数 */
 function replayAudit() {
-  const ord = orderedTxns();
-  const byMat = {};
-  ord.forEach(t => { (byMat[t.matCode] = byMat[t.matCode] || []).push(t); });
-  const bad = [];
-  let compared = 0;
-  Object.entries(byMat).forEach(([code, list]) => {
-    let run = null;
-    list.forEach(t => {
-      if (run == null && typeof t.balance === 'number') run = t.balance - t.delta;
-      if (run == null) return;
-      run += t.delta; compared++;
-      if (typeof t.balance === 'number' && t.balance !== run)
-        bad.push('#' + (t.seq || '旧') + ' ' + code + ' ' + t.type + ' 应为' + run + ' 实为' + t.balance + '（' + t.time + '）');
-    });
-  });
-  const lines = ['回放校验完成：物料 ' + Object.keys(byMat).length + ' 个，流水 ' + ord.length + ' 条，比对 ' + compared + ' 条。'];
-  if (bad.length) lines.push('⚠ 发现 ' + bad.length + ' 条链式余量不一致：', ...bad.slice(0, 10), bad.length > 10 ? '…共 ' + bad.length + ' 条' : '');
-  else lines.push('✅ 链式余量全部一致，审计日志完整可信。');
+  const rep = CORE.replayAudit(state);
+  const bad = rep.mismatches;
+  const lines = ['回放校验完成：物料 ' + rep.materials + ' 个，流水 ' + rep.transactions + ' 条，比对 ' + rep.compared + ' 条。'];
+  if (bad.length) {
+    lines.push('⚠ 发现 ' + bad.length + ' 条链式余量不一致：',
+      ...bad.slice(0, 10).map(b => '#' + b.seq + ' ' + b.matCode + ' ' + b.type + ' 应为' + b.expected + ' 实为' + b.actual + '（' + b.time + '）'),
+      bad.length > 10 ? '…共 ' + bad.length + ' 条' : '');
+  } else lines.push('✅ 链式余量全部一致，审计日志完整可信。');
   alert(lines.filter(Boolean).join('\n'));
-  log('回放校验：' + ord.length + ' 条流水，' + (bad.length ? '发现 ' + bad.length + ' 条不一致' : '全部一致'));
-  return bad;
+  log('回放校验：' + rep.transactions + ' 条流水，' + (bad.length ? '发现 ' + bad.length + ' 条不一致' : '全部一致'));
+  return bad.map(b => '#' + b.seq + ' ' + b.matCode + ' ' + b.type + ' 应为' + b.expected + ' 实为' + b.actual);
 }
 function renderTxns() {
   const tb = document.querySelector('#txnTable tbody');
@@ -1034,17 +1036,18 @@ function renderLedger() {
   tb.querySelectorAll('[data-k]').forEach(inp => inp.addEventListener('change', () => {
     const i = +inp.dataset.i, k = inp.dataset.k, m = state.materials[i];
     if (k === 'qty') {
-      const v = parseFloat(inp.value) || 0;
+      const raw = inp.value;
+      const v = parseFloat(raw) || 0;
       if (v === m.qty) return;
       const reason = prompt('库存调整原因（必填，将写入库存流水）：\n' + m.code + ' ' + m.name + '　' + m.qty + ' → ' + v, '');
       if (reason === null) { inp.value = m.qty; return; }   // 取消 → 还原原值
-      const delta = v - m.qty;
-      m.qty = v;
-      recordTxn('手工调整', m.code, delta, '', reason || '（未填）');
-      invPush(m.code, v);   // InvenTree 实时同步
-      fsPushStock(m.code, v, delta, '手工调整', reason || '', '');   // 飞书真源直写
+      // 统一写入口：改数量 + 写流水（mes-core 内保证二者不可分离）
+      const r = CORE.applyManualAdjust(state, m.code, v, { reason: reason || '（未填）' });
+      if (!r.ok) { alert('调整失败：' + r.error); inp.value = m.qty; return; }
+      invPush(m.code, r.balance);   // InvenTree 实时同步
+      fsPushStock(m.code, r.balance, r.delta, '手工调整', reason || '', '');   // 飞书真源直写
       save(); renderLedger(); renderTxns();
-      log('手工调整 ' + m.code + ' ' + (delta > 0 ? '+' : '') + delta + '（' + (reason || '未填原因') + '）｜操作人 ' + state.operator);
+      log('手工调整 ' + m.code + ' ' + (r.delta > 0 ? '+' : '') + r.delta + '（' + (reason || '未填原因') + '）｜操作人 ' + state.operator);
       return;
     }
     m[k] = (k === 'cost' || k === 'minQty') ? (parseFloat(inp.value) || 0) : inp.value.trim();
@@ -1198,7 +1201,7 @@ document.getElementById('fileImport').addEventListener('change', e => {
       state.materials = bodyRows(ms).map(r => ({ code: String(col(r, '物料码')), cat: normCat(col(r, '分类')), name: col(r, '名称') || '', spec: col(r, '规格型号') || '', xy: col(r, '闲鱼XY编号') || '', loc: col(r, '当前库位码') || '', container: col(r, '容器码') || '', zone: col(r, '模块区') || '', qty: parseFloat(col(r, '库存数量')) || 0, minQty: parseFloat(col(r, '安全库存')) || 0, cost: parseFloat(col(r, '成本')) || 0, img: col(r, '图片链接') || '' }));
       const ls = sheet('库位'); if (ls) state.locations = bodyRows(ls).map(r => ({ code: String(r[0]), kind: r[1] || '', desc: r[2] || '' }));
       const cs = sheet('容器'); if (cs) state.containers = bodyRows(cs).map(r => ({ code: String(r[0]), type: r[1] || '', spec: r[2] || '', loc: r[3] || '' }));
-      const ws = sheet('工单记录'); if (ws) state.workorders = bodyRows(ws).map(r => ({
+      const ws = sheet('工单记录'); if (ws) state.workorders = bodyRows(ws).map(r => normalizeOrder({
         code: String(r[0]), type: r[1] || 'LL', date: r[2] || '', status: r[4] || '未执行', execTime: r[5] || '',
         items: String(r[3] || '').split(';').map(s => s.trim()).filter(Boolean).map(s => { const m = s.match(/^(.+?)[x×](\d+(?:\.\d+)?)$/); return m ? { matCode: m[1], qty: +m[2] } : null; }).filter(Boolean)
       }));
@@ -1289,7 +1292,7 @@ function mergePackage(pkg, { from = '备份文件', upsertMembers = false } = {}
     else if (upsertMembers) { Object.assign(old, m); stat.mbrUpd++; }   // 云端同步：人员主数据以云为准，同编号覆盖
   });
   (inc.manuals || []).forEach(m => { if (!byCode(state.manuals, m.code)) { state.manuals.push(m); stat.man++; } });
-  (inc.workorders || []).forEach(w => { if (!byCode(state.workorders, w.code)) { state.workorders.push(w); stat.wip++; } });
+  (inc.workorders || []).forEach(w => { if (!byCode(state.workorders, w.code)) { state.workorders.push(normalizeOrder(w)); stat.wip++; } });
   (inc.necOrders || []).forEach(o => {
     const old = byCode(state.necOrders, o.code);
     if (!old) { state.necOrders.push(o); stat.nec++; }
@@ -1639,17 +1642,25 @@ document.getElementById('btnWipAddItem').addEventListener('click', () => documen
 document.getElementById('btnGenWip').addEventListener('click', () => {
   const type = document.getElementById('gWipType').value;
   const date = document.getElementById('gWipDate').value || today();
-  const items = [...document.querySelectorAll('#wipItemTable tbody tr')].map(tr => ({
-    matCode: tr.querySelector('.wiMat').value.trim(), qty: +tr.querySelector('.wiQty').value || 0
-  })).filter(it => it.matCode && it.qty > 0);
-  if (!items.length) { alert('请至少添加一行有效明细（物料码+数量）'); return; }
+  const rows = [...document.querySelectorAll('#wipItemTable tbody tr')].map(tr => ({
+    matCode: tr.querySelector('.wiMat').value.trim(), qty: tr.querySelector('.wiQty').value
+  })).filter(it => it.matCode);   // 数量校验交给 mes-core，避免 '|| 0' 静默吞掉非法值
   const key = type + ymdCompact(date);
-  state.serials[key] = (state.serials[key] || 0) + 1;
-  const code = key + pad(state.serials[key], 3);
-  state.workorders.push({ code, type, date, items, status: '未执行', execTime: '' });
+  const nextSerial = (state.serials[key] || 0) + 1;
+  const code = key + pad(nextSerial, 3);
+  // 创建工单：mes-core 负责物料存在性校验 + 同一物料多行自动合并
+  const r = CORE.createOrder(state, { type, date, code, items: rows });
+  if (!r.ok) { alert('无法生成工单：\n' + r.errors.join('\n')); return; }
+  state.serials[key] = nextSerial;
+  const merged = r.merged || [];
+  const dropped = r.dropped || [];
   document.querySelector('#wipItemTable tbody').innerHTML = '';
   save();
-  if (confirm('已生成工单 ' + code + '（' + WIP_NAMES[type] + '，明细 ' + items.length + ' 项）。\n是否立即去打印标签？')) {
+  const notes = [];
+  if (merged.length) notes.push('同一物料多行已自动合并：' + merged.join('、'));
+  if (dropped.length) notes.push('已忽略 ' + dropped.length + ' 行无效明细（' + dropped.map(d => d.reason).join('；') + '）');
+  alert('已生成工单 ' + code + '（' + WIP_NAMES[type] + '，明细 ' + r.order.items.length + ' 项）' + (notes.length ? '\n\n' + notes.join('\n') : ''));
+  if (confirm('是否立即去打印标签？')) {
     curType = 'wip'; sel.wip.clear(); sel.wip.add(state.workorders.length - 1);
     document.querySelector('nav.tabs button[data-tab=label]').click();
   }
@@ -1729,14 +1740,13 @@ function scanMat(code, box) {
       '<div class="toolbar" style="margin-top:10px"><label style="font-size:13px">实盘数量 <input type="number" id="stocktakeQty" value="' + m.qty + '" min="0" style="width:90px;border:1px solid var(--line);border-radius:4px;padding:5px 8px;font-size:14px"></label>' +
       '<button class="btn" id="btnStocktake">确认盘点</button><span class="hint">差异自动写入库存流水</span></div>';
     document.getElementById('btnStocktake').addEventListener('click', () => {
-      const real = parseFloat(document.getElementById('stocktakeQty').value) || 0;
-      const delta = real - m.qty;
-      m.qty = real;
-      recordTxn('盘点', m.code, delta, '', delta === 0 ? '账实相符' : '盘点差异');
-      invPush(m.code, real);   // InvenTree 实时同步
-      fsPushStock(m.code, real, delta, '盘点', delta === 0 ? '账实相符' : '盘点差异', '');   // 飞书真源直写
+      // 严格校验实盘数量：空 / 非数字 / 负数一律拒绝，绝不静默转 0
+      const r = CORE.applyStocktake(state, m.code, document.getElementById('stocktakeQty').value);
+      if (!r.ok) { alert('盘点失败：' + r.error); return; }
+      invPush(m.code, r.balance);   // InvenTree 实时同步
+      fsPushStock(m.code, r.balance, r.delta, '盘点', r.txn.reason, '');   // 飞书真源直写
       save(); renderLedger(); renderTxns();
-      log('盘点 ' + m.code + '：' + (delta === 0 ? '账实相符（' + real + '）' : '差异 ' + (delta > 0 ? '+' : '') + delta + '，实盘 ' + real) + '｜操作人 ' + state.operator);
+      log('盘点 ' + m.code + '：' + (r.delta === 0 ? '账实相符（' + r.balance + '）' : '差异 ' + (r.delta > 0 ? '+' : '') + r.delta + '，实盘 ' + r.balance) + '｜操作人 ' + state.operator);
       scanMat(code, box);
     });
     log('盘点扫码 ' + code);
@@ -1761,31 +1771,34 @@ function scanWhere(kind, code, box) {
 function scanWip(code, box) {
   const w = state.workorders.find(x => x.code === code);
   if (!w) { box.className = 'scan-result panel flash-bad'; box.innerHTML = '未找到工单：' + esc(code) + '（请先在「编码生成」创建）'; log('未命中工单 ' + code); return; }
-  const done = w.status === '已执行';
-  const verb = (w.type === 'LL' || w.type === 'JH') ? '扣减库存' : '增加库存';
+  const done = CORE.isOrderExecuted(w);
+  const verb = CORE.signOf(w.type) < 0 ? '扣减库存' : '增加库存';
+  // 明细按物料合并展示：旧数据里同一物料多行时，页面显示的就是实际执行口径（合计数量）
+  const norm = CORE.normalizeItems(w.items);
+  const lines = norm.items;
+  const didMerge = lines.length !== w.items.length;
   box.className = 'scan-result panel ' + (done ? '' : 'flash-ok');
   box.innerHTML = '<div class="kv"><b>工单号</b>' + esc(w.code) + '　<span class="badge" style="background:' + (done ? '#8892a2' : '#d33a2c') + '">' + esc(w.status) + '</span>' +
     '<br><b>类型</b>' + esc(WIP_NAMES[w.type] || w.type) + '（' + verb + '）　<b>日期</b>' + esc(w.date) + '</div>' +
+    (didMerge ? '<p class="hint" style="margin:6px 0 0">ℹ️ 本工单存在同一物料多行，已合并为一行按<b>合计数量</b>校验与执行。</p>' : '') +
     '<table class="grid" style="margin-top:8px"><thead><tr><th>物料码</th><th>名称</th><th style="width:90px">数量</th><th>执行后库存</th></tr></thead><tbody>' +
-    w.items.map((it, i) => { const m = findMat(it.matCode); return '<tr><td>' + esc(it.matCode) + '</td><td>' + esc(m ? m.name : '⚠未建档') + '</td>' +
-      '<td><input type="number" class="execQty" data-i="' + i + '" value="' + it.qty + '" min="0"' + (done ? ' disabled' : '') + '></td>' +
-      '<td>' + (m ? m.qty : '—') + '</td></tr>'; }).join('') + '</tbody></table>' +
+    lines.map((it, i) => { const m = findMat(it.matCode); const sign = CORE.signOf(w.type);
+      let after = '—';
+      if (m) { const proj = sign < 0 ? m.qty - it.qty : m.qty + it.qty; after = proj < 0 ? '<span style="color:#d33a2c;font-weight:bold">⚠ 不足（将 -' + Math.abs(proj) + '）</span>' : proj; }
+      return '<tr><td>' + esc(it.matCode) + '</td><td>' + esc(m ? m.name : '⚠未建档') + (it.lines > 1 ? ' <span class="hint">（合并 ' + it.lines + ' 行）</span>' : '') + '</td>' +
+      '<td><input type="number" class="execQty" data-code="' + esc(it.matCode) + '" value="' + it.qty + '" min="0"' + (done ? ' disabled' : '') + '></td>' +
+      '<td>' + after + '</td></tr>'; }).join('') + '</tbody></table>' +
     (done ? '<p class="hint" style="margin-top:8px">执行时间：' + esc(w.execTime || '—') + '。工单已闭环，不可重复执行。</p>'
       : '<div class="toolbar" style="margin-top:10px"><button class="btn" id="btnExec">确认执行（' + verb + '）</button><span class="hint">执行后写入工单记录，不可撤销</span></div>');
   if (!done) document.getElementById('btnExec').addEventListener('click', () => {
-    const sign = (w.type === 'LL' || w.type === 'JH') ? -1 : 1;
-    const problems = [];
-    box.querySelectorAll('.execQty').forEach(inp => {
-      const it = w.items[+inp.dataset.i]; it.qty = +inp.value || 0;
-      const m = findMat(it.matCode);
-      if (!m) { problems.push(it.matCode + ' 未建档'); return; }
-      if (sign < 0 && m.qty < it.qty) problems.push(it.matCode + ' 库存不足（现 ' + m.qty + '，需 ' + it.qty + '）');
-    });
-    if (problems.length) { alert('无法执行：\n' + problems.join('\n')); return; }
-    w.items.forEach(it => { const m = findMat(it.matCode); if (m) { m.qty += sign * it.qty; recordTxn(WIP_NAMES[w.type] || w.type, it.matCode, sign * it.qty, w.code, ''); invPush(m.code, m.qty); fsPushStock(m.code, m.qty, sign * it.qty, WIP_NAMES[w.type] || w.type, '', w.code); } });
-    w.status = '已执行'; w.execTime = new Date().toLocaleString();
+    // 收集执行数量（按物料）→ 交给 mes-core 汇总校验并执行
+    const execQtyByCode = {};
+    box.querySelectorAll('.execQty').forEach(inp => { execQtyByCode[inp.dataset.code] = inp.value; });
+    const r = CORE.executeOrder(state, w, { execQtyByCode, operator: state.operator });
+    if (!r.ok) { alert('无法执行：\n' + r.errors.join('\n')); return; }
+    r.applied.forEach(a => { invPush(a.matCode, a.balance); fsPushStock(a.matCode, a.balance, a.delta, WIP_NAMES[w.type] || w.type, '', w.code); });
     save(); renderLedger(); renderTxns();
-    log('执行工单 ' + w.code + '（' + WIP_NAMES[w.type] + '）：' + w.items.map(it => it.matCode + (sign < 0 ? '-' : '+') + it.qty).join('，') + '｜操作人 ' + state.operator);
+    log('执行工单 ' + w.code + '（' + WIP_NAMES[w.type] + '）：' + r.applied.map(a => a.matCode + (a.delta < 0 ? '' : '+') + a.delta).join('，') + '｜操作人 ' + state.operator);
     scanWip(code, box);
   });
   log('扫描工单 ' + code + '（' + w.status + '）');

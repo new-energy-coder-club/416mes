@@ -7,8 +7,8 @@
     "dev": "node feishu-server.mjs",
     "serve": "node feishu-server.mjs",
     "serve:static": "node scripts/static-server.mjs",
-    "check": "node --check scripts/static-server.mjs && node --check feishu-server.mjs && node --check feishu-import.mjs && node --check feishu-sync.mjs && node --check inventree-sync.mjs && node --check nec-sync.mjs && node --check api/feishu-sync.js",
-    "test": "npm run check"
+    "check": "node --check scripts/static-server.mjs && node --check mes-core.js && node --check feishu-server.mjs && node --check feishu-import.mjs && node --check feishu-sync.mjs && node --check inventree-sync.mjs && node --check nec-sync.mjs && node --check api/feishu-sync.js",
+    "test": "npm run check && node --test test/*.test.js"
   },
   "keywords": [],
   "author": "",

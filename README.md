@@ -1,28 +1,54 @@
 # 416MES 仓储管理系统（单机离线版）
 
-单文件网页应用：`index.html` 双击即用，无需安装、无需联网。适配汉印 N41 热敏打印机 + 60×40mm 三防标签纸。
+单页应用：`index.html` 双击即用，无需安装、无需联网（需与 `mes-core.js` 等同目录文件一起拷贝）。适配汉印 N41 热敏打印机 + 60×40mm 三防标签纸。
 
-> 注意：「排版工具」页签依赖 `typesetting/` 文件夹和 `nec-gallery.js`（NEC 图库清单），拷贝本系统时请一起复制。
+> 注意：「排版工具」页签依赖 `typesetting/` 文件夹和 `nec-gallery.js`（NEC 图库清单）；库存规则依赖 `mes-core.js`；摄像头扫码依赖 `jsqr.min.js`。拷贝本系统时请整目录复制。
 
 ## 快速开始
 
 1. 门户首页 `home.html`（双击或访问 http://localhost:8000/home.html ）：五个模块入口 + InvenTree 集成入口 + 在线状态自检
-2. 作业端 `index.html` 双击即用，无需安装、无需联网。适配汉印 N41 热敏打印机 + 60×40mm 三防标签纸
-2. 首次打开自动载入种子数据：64 个货架库位码（B区 2货架×4层×8位）+ 12 个工位格码 + 40 个容器码 + 2 条示例物料
-3. 「标签打印」页勾选 → 预览 → 打印（纸张可选 **60×40 标签纸** 或 **A4 整版** 3×7=21 张/页；色彩可选 **高对比纯黑 / 彩色主视觉**；属性文字 **自动占满空白**（8.5–18pt 自适应），编码自动填满左栏，字号 70%–120% 可微调）
-4. 定期点「导出备份 JSON」（全量含流水）或「导出 Excel 台账」备份（数据存在浏览器 localStorage，换浏览器/清缓存会丢）
+2. 作业端 `index.html` 双击即用（同目录需有 `mes-core.js` / `jsqr.min.js` / `nec-gallery.js`），无需安装、无需联网
+3. 首次打开自动载入种子数据：64 个货架库位码（B区 2货架×4层×8位）+ 12 个工位格码 + 40 个容器码 + 2 条示例物料
+4. 「标签打印」页勾选 → 预览 → 打印（纸张可选 **60×40 标签纸** 或 **A4 整版** 3×7=21 张/页；色彩可选 **高对比纯黑 / 彩色主视觉**；属性文字 **自动占满空白**（8.5–18pt 自适应），编码自动填满左栏，字号 70%–120% 可微调）
+5. 定期点「导出备份 JSON」（全量含流水）或「导出 Excel 台账」备份（数据存在浏览器 localStorage，换浏览器/清缓存会丢）
 
-## 开发命令（Phase 0 统一入口）
+## 开发命令
 
 ```bash
 npm install          # 安装依赖（仅 xlsx）
 npm run dev          # 启动真源服务（静态页 + /api/feishu/* 代理），http://localhost:8000
 npm run serve:static # 无飞书配置时只想开静态页：scripts/static-server.mjs
 npm run check        # 全量脚本语法检查（node --check）
-npm test             # 当前 = npm run check
+npm test             # 语法检查 + 核心库存规则单元测试
 ```
 
 `npm run dev` 在缺少 `feishu-backend.config.json` 时自动降级为纯静态服务（页面顶部显示「⚪ 离线模式 · 本机数据」），不会因为没配密钥而启动失败。
+
+## 项目结构（Phase 1 起）
+
+| 文件 | 说明 |
+|---|---|
+| `index.html` | 作业端页面：UI 渲染与交互，库存规则全部委托给 `mes-core.js` |
+| `mes-core.js` | **核心库存规则（纯逻辑）**：明细合并、工单创建/执行校验、统一库存写入口、盘点校验、回放校验。无 DOM / 无网络 / 无 localStorage，可单测 |
+| `test/mes-core.test.js` | 核心规则单元测试（`node --test`） |
+| `feishu-server.mjs` | 飞书真源服务（静态页 + `/api/feishu/*` 代理） |
+| `feishu-sync.mjs` / `nec-sync.mjs` / `inventree-sync.mjs` | 各外部系统同步脚本 |
+| `api/feishu-sync.js` | Vercel Serverless 只读接口 |
+
+> ⚠️ `index.html` 不再是「单文件」：它依赖同目录下的 `mes-core.js`（以及 `jsqr.min.js`、`nec-gallery.js`）。拷贝部署时请整目录复制，缺少 `mes-core.js` 时页面会显示红色提示而不是静默出错。
+
+### 核心库存规则（mes-core.js）
+
+`mes-core.js` 是库存数字的唯一权威来源，页面只调用不重复实现：
+
+- **`applyStockChange()`** — 库存数量的**唯一写入口**：改数量与写流水在同一函数内完成，二者不可分离；默认拒绝把库存改成负数。
+- **`recordTransaction()`** — 流水的**唯一写入口**：只追加、`seq` 单调递增、`balance` 记录写入后的真实库存。
+- **`normalizeItems()` / `createOrder()`** — 工单创建时校验物料存在性，并把**同一物料多行自动合并**为一行（数量相加）。
+- **`validateExecution()` / `executeOrder()`** — 执行前把明细**按物料汇总后再校验库存**，因此「同一物料多行、合计超库存」会被拦截，不会扣成负库存；`item.qty` 保留**计划数量**，实际执行数量记在 `order.execQty` 与 `order.execBatches`。
+- **`parseStocktakeInput()` / `applyStocktake()`** — 盘点输入严格校验，空值 / 非数字 / 负数一律拒绝，**绝不静默转 0**（显式输入 `0` 表示确认无货，合法）。
+- **`replayAudit()`** — 从首条余量反推期初、逐条重算链式余量，定位篡改或丢数；兼容无 `seq` 的旧数据。
+
+改任何库存相关逻辑时，请先改 `mes-core.js` 并补 `test/mes-core.test.js`，再让 `index.html` 调用。
 
 ## 本地配置（不进入版本库）
 
