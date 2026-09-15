@@ -1274,8 +1274,18 @@ document.getElementById('btnExport').addEventListener('click', () => {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ['手册码', '名称', '版本', '库位码'], ...state.manuals.map(m => [m.code, m.name, m.ver, m.loc])]), '手册');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-    ['工单号', '类型', '日期', '明细(物料码x数量)', '状态', '执行时间'],
-    ...state.workorders.map(w => [w.code, w.type, w.date, w.items.map(it => it.matCode + 'x' + it.qty).join('; '), w.status, w.execTime || ''])]), '工单记录');
+    ['工单号', '类型', '日期', '明细(物料码x数量)', '状态', '执行时间', '执行数量', '执行批次', '冲销记录', '取消记录'],
+    ...state.workorders.map(w => [
+      w.code, w.type, w.date,
+      w.items.map(it => it.matCode + 'x' + it.qty).join('; '),
+      w.status, w.execTime || '',
+      // 执行数量/批次/冲销/取消：不导出这些列，工单经 Excel 往返后会丢掉执行进度，
+      // 「部分执行」的工单回来会变成「已执行=0、剩余=计划」，再执行就会把已发的料重复扣一遍。
+      (w.execQty || []).map(e => e.matCode + '=' + e.qty).join('; '),
+      (w.execBatches && w.execBatches.length) ? JSON.stringify(w.execBatches) : '',
+      w.reverseInfo ? JSON.stringify(w.reverseInfo) : '',
+      w.cancelInfo ? JSON.stringify(w.cancelInfo) : ''
+    ])]), '工单记录');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ['工单号', '标题', '类型', '负责人', '优先级', '截止日期', '状态', '关联物料', '备注', '创建时间', '完成时间'],
     ...state.necOrders.map(o => [o.code, o.title, o.type, o.owner, o.priority, o.due, o.status, o.materials, o.note, o.createdAt, o.doneAt || ''])]), 'NEC工单');
@@ -1339,10 +1349,19 @@ document.getElementById('fileImport').addEventListener('change', e => {
       const ccol = sheetCol('容器');
       const cs = sheet('容器'); if (cs) state.containers = bodyRows(cs, codeIdx('容器', '容器码')).map(r => ({ code: String(ccol(r, '容器码', 0)), type: ccol(r, '容器类型', 1) || '', spec: ccol(r, '规格', 2) || '', loc: ccol(r, '当前库位码', 3) || '' }));
       const wcol = sheetCol('工单记录');
+      // 明细列名可能是「明细」或「明细(物料码x数量)」，两者都认
+      const wItems = r => { const a = wcol(r, '明细(物料码x数量)', 3), b = wcol(r, '明细', 3); return String(a || b || ''); };
+      const jparse = v => { if (!v) return undefined; try { const j = JSON.parse(String(v)); return (j && typeof j === 'object') ? j : undefined; } catch { return undefined; } };
       const ws = sheet('工单记录'); if (ws) state.workorders = bodyRows(ws, codeIdx('工单记录', '工单号')).map(r => normalizeOrder({
         code: String(wcol(r, '工单号', 0)), type: wcol(r, '类型', 1) || 'LL', date: wcol(r, '日期', 2) || '',
         status: wcol(r, '状态', 4) || '未执行', execTime: wcol(r, '执行时间', 5) || '',
-        items: String(wcol(r, '明细', 3) || '').split(';').map(s => s.trim()).filter(Boolean).map(s => { const m = s.match(/^(.+?)[x×](\d+(?:\.\d+)?)$/); return m ? { matCode: m[1], qty: +m[2] } : null; }).filter(Boolean)
+        items: wItems(r).split(';').map(s => s.trim()).filter(Boolean).map(s => { const m = s.match(/^(.+?)[x×](\d+(?:\.\d+)?)$/); return m ? { matCode: m[1], qty: +m[2] } : null; }).filter(Boolean),
+        // 执行进度：老模板没有这些列，解析为空数组/undefined，等于保持「未执行」语义
+        execQty: String(wcol(r, '执行数量', 6) || '').split(';').map(s => s.trim()).filter(Boolean)
+          .map(s => { const m = s.match(/^(.+?)=(\d+(?:\.\d+)?)$/); return m ? { matCode: m[1], qty: +m[2] } : null; }).filter(Boolean),
+        execBatches: jparse(wcol(r, '执行批次', 7)) || [],
+        reverseInfo: jparse(wcol(r, '冲销记录', 8)),
+        cancelInfo: jparse(wcol(r, '取消记录', 9))
       }));
       const pcol = sheetCol('人员');
       const ppl = sheet('人员'); if (ppl) state.members = bodyRows(ppl, codeIdx('人员', '编号')).map(r => ({
