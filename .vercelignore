@@ -1,0 +1,16 @@
+node_modules/
+inventree-data/
+backups/
+.build/
+*.config.json
+416MES_台账_*.xlsx
+nec-wip-export.json
+package.json
+package-lock.json
+*.ps1
+*.md
+*.pptx
+nec-wip-import.json
+人员导入-*.json
+人员导入*
+*-feishu.json
