@@ -399,30 +399,42 @@ test('飞书写：写完后回放读到的余量与库存一致', async (t) => {
 
 /* ================= 通用增删改查（8 张表共用） ================= */
 
-/* 这份定义**逐列对齐生产库的真实表结构**（含它的缺口），不是理想结构：
-     物料台账没有「模块区」、人员没有「PIN码」、工单记录没有执行/冲销四列；
-     库位「类型」是单选[货架|工位|站点]（没有「模块区」「空地」）；
-     工单「状态」是单选[未执行|已执行]（没有「部分执行」「已取消」）。
-   缺列/缺选项正是「网页端改了飞书没变」的根因，所以必须照着生产来测。 */
+/* 这份定义**逐列对齐生产库的真实表结构**（2026-09 现状：列和选项都已补齐）。
+   需要验证「飞书缺列/缺选项」时的行为，用下面的 typesWithGaps() 显式造一份缺的 ——
+   把缺口写成显式的，比依赖「mock 恰好没建那列」可靠，也不会随着生产补列而悄悄失效。 */
 const ALL_TABLE_TYPES = {
-  tblMAT: [{ name: '物料码', type: 1 }, { name: '名称', type: 1 }, { name: '规格型号', type: 1 }, { name: '闲鱼XY编号', type: 1 }, { name: '当前库位码', type: 1 }, { name: '容器码', type: 1 }, { name: '库存数量', type: 2 }, { name: '安全库存', type: 2 }, { name: '成本', type: 2 }],
-  tblLOC: [{ name: '库位码', type: 1 }, { name: '类型', type: 3, options: ['货架', '工位', '站点'] }, { name: '说明', type: 1 }, { name: '授权人员', type: 1 }],
-  tblCTN: [{ name: '容器码', type: 1 }, { name: '容器类型', type: 3, options: ['A4四抽收纳盒', '三连格文件盒', '斜口零件盒', '6040周转箱'] }, { name: '规格', type: 1 }, { name: '当前库位码', type: 1 }],
-  tblMBR: [{ name: '编号', type: 1 }, { name: '姓名', type: 1 }, { name: '学号', type: 1 }, { name: '部门/SIG', type: 1 }, { name: '职务', type: 3, options: ['负责人', '成员', '本科生'] }, { name: '电话', type: 13 }, { name: '备注', type: 1 }, { name: '标签', type: 1 }],
+  tblMAT: [{ name: '物料码', type: 1 }, { name: '名称', type: 1 }, { name: '规格型号', type: 1 }, { name: '闲鱼XY编号', type: 1 }, { name: '当前库位码', type: 1 }, { name: '容器码', type: 1 }, { name: '库存数量', type: 2 }, { name: '安全库存', type: 2 }, { name: '成本', type: 2 }, { name: '模块区', type: 1 }],
+  tblLOC: [{ name: '库位码', type: 1 }, { name: '类型', type: 3, options: ['货架', '工位', '站点', '模块区', '空地'] }, { name: '说明', type: 1 }, { name: '授权人员', type: 1 }],
+  tblCTN: [{ name: '容器码', type: 1 }, { name: '容器类型', type: 3, options: ['A4四抽收纳盒', '三连格文件盒', '斜口零件盒', '6040周转箱', '四层四格牛皮纸收纳盒', '开放式收纳格'] }, { name: '规格', type: 1 }, { name: '当前库位码', type: 1 }],
+  tblMBR: [{ name: '编号', type: 1 }, { name: '姓名', type: 1 }, { name: '学号', type: 1 }, { name: '部门/SIG', type: 1 }, { name: '职务', type: 3, options: ['负责人', '成员', '本科生'] }, { name: '电话', type: 13 }, { name: '备注', type: 1 }, { name: '标签', type: 1 }, { name: 'PIN码', type: 1 }],
   tblITM: [{ name: '物品码', type: 1 }, { name: '名称', type: 1 }, { name: '规格型号', type: 1 }, { name: '库位码', type: 1 }],
   tblMAN: [{ name: '手册码', type: 1 }, { name: '名称', type: 1 }, { name: '版本', type: 1 }, { name: '库位码', type: 1 }],
-  tblWIP: [{ name: '工单号', type: 1 }, { name: '类型', type: 3, options: ['LL 领料', 'BH 补货', 'JH 拣货', 'TL 退料'] }, { name: '日期', type: 5 }, { name: '明细', type: 1 }, { name: '状态', type: 3, options: ['未执行', '已执行'] }, { name: '执行时间', type: 5 }],
+  tblWIP: [{ name: '工单号', type: 1 }, { name: '类型', type: 3, options: ['LL 领料', 'BH 补货', 'JH 拣货', 'TL 退料'] }, { name: '日期', type: 5 }, { name: '明细', type: 1 }, { name: '状态', type: 3, options: ['未执行', '已执行', '部分执行', '已取消'] }, { name: '执行时间', type: 5 }, { name: '执行数量', type: 1 }, { name: '执行批次', type: 1 }, { name: '冲销记录', type: 1 }, { name: '取消记录', type: 1 }],
   tblTXN: [{ name: '流水号', type: 1 }, { name: '时间', type: 5 }, { name: '操作人', type: 1 }, { name: '类型', type: 1 }, { name: '物料码', type: 1 }, { name: '变动', type: 2 }, { name: '余量', type: 2 }, { name: '关联单', type: 1 }, { name: '原因/备注', type: 1 }]
 };
+
+/** 造一份「还缺东西」的表结构，专门验证缺列 / 缺选项的处理路径 */
+function typesWithGaps() {
+  const t = JSON.parse(JSON.stringify(ALL_TABLE_TYPES));
+  const strip = (id, names) => { t[id] = t[id].filter(f => names.indexOf(f.name) < 0); };
+  strip('tblMAT', ['模块区']);
+  strip('tblMBR', ['PIN码']);
+  strip('tblWIP', ['执行数量', '执行批次', '冲销记录', '取消记录']);
+  t.tblLOC.find(f => f.name === '类型').options = ['货架', '工位', '站点'];
+  t.tblWIP.find(f => f.name === '状态').options = ['未执行', '已执行'];
+  t.tblCTN.find(f => f.name === '容器类型').options = ['A4四抽收纳盒', '三连格文件盒', '斜口零件盒', '6040周转箱'];
+  return t;
+}
 const ALL_TABLES = JSON.stringify({
   materials: 'tblMAT', locations: 'tblLOC', containers: 'tblCTN', members: 'tblMBR',
   items: 'tblITM', manuals: 'tblMAN', workorders: 'tblWIP', transactions: 'tblTXN'
 });
 
 function startAllMock(opts = {}) {
+  const ft = opts.fieldTypes || ALL_TABLE_TYPES;
   const tables = {};
-  Object.keys(ALL_TABLE_TYPES).forEach(id => { tables[id] = { fields: ALL_TABLE_TYPES[id].map(f => f.name), rows: [] }; });
-  return startMock(Object.assign({ tables, fieldTypes: ALL_TABLE_TYPES }, opts));
+  Object.keys(ft).forEach(id => { tables[id] = { fields: ft[id].map(f => f.name), rows: [] }; });
+  return startMock(Object.assign({ tables, fieldTypes: ft }, opts));
 }
 
 test('通用 upsert：新建 8 张表各自一条记录', async (t) => {
@@ -469,7 +481,7 @@ test('通用 upsert：已存在的按业务键更新，不重复建', async (t) 
 });
 
 test('通用 upsert【关键】表里没有的列被丢弃并回报，而不是整批失败', async (t) => {
-  const mock = await startAllMock();
+  const mock = await startAllMock({ fieldTypes: typesWithGaps() });
   t.after(() => { mock.server.close(); cleanupEnv(); });
   const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
 
@@ -488,10 +500,8 @@ test('通用 upsert【关键】表里没有的列被丢弃并回报，而不是�
   assert.deepEqual(r.blocked['LL-TEST-2'].sort(), ['cancelInfo', 'execBatches', 'execQty', 'reverseInfo'].sort());
 });
 
-test('通用 upsert：补上列之后，执行明细自动开始同步', async (t) => {
-  const types = JSON.parse(JSON.stringify(ALL_TABLE_TYPES));
-  types.tblWIP.push({ name: '执行数量', type: 1 }, { name: '执行批次', type: 1 }, { name: '冲销记录', type: 1 }, { name: '取消记录', type: 1 });
-  const mock = await startAllMock({ fieldTypes: types });
+test('通用 upsert：生产表结构（列已补齐）下执行明细直接同步，不再丢列', async (t) => {
+  const mock = await startAllMock();
   t.after(() => { mock.server.close(); cleanupEnv(); });
   const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
 
@@ -698,7 +708,7 @@ test('删除键归一【回归】流水用数字 seq 删得掉飞书的「#00000
 });
 
 test('pullState【核心】飞书没有的列不产出本地键，回读不会把本地真值清成空', async (t) => {
-  const mock = await startAllMock();
+  const mock = await startAllMock({ fieldTypes: typesWithGaps() });
   // 物料表没有「模块区」列（生产就是这么建的）
   mock.tables.tblMAT.rows.push({ '物料码': 'A-1', '名称': '螺丝刀', '库存数量': 5 });
   // 库位「类型」列存在但值为空（本地的「模块区」写不进去时就是这个样子）
@@ -713,7 +723,7 @@ test('pullState【核心】飞书没有的列不产出本地键，回读不会�
 });
 
 test('reconcile【只读】回报缺列、缺选项和两侧差异，且不写任何数据', async (t) => {
-  const mock = await startAllMock();
+  const mock = await startAllMock({ fieldTypes: typesWithGaps() });
   mock.tables.tblMAT.rows.push({ '物料码': 'A-1', '名称': '本地也有' });
   t.after(() => { mock.server.close(); cleanupEnv(); });
   const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
@@ -753,7 +763,7 @@ test('upsert dryRun：只回报会做什么，不落任何数据', async (t) => 
 });
 
 test('reconcile【回归】单选选项按「转换后的值」比对，工单类型 LL 不算缺选项', async (t) => {
-  const mock = await startAllMock();
+  const mock = await startAllMock({ fieldTypes: typesWithGaps() });
   t.after(() => { mock.server.close(); cleanupEnv(); });
   const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
 
@@ -786,4 +796,36 @@ test('通用 upsert【回归】同一批里同业务键只建一条，不产生�
   assert.equal(mock.tables.tblMAT.rows.length, 1);
   assert.equal(mock.tables.tblMAT.rows[0]['名称'], '甲');
   assert.equal(mock.tables.tblMAT.rows[0]['规格型号'], 'S1', '后一条的字段要并进同一条');
+});
+
+test('类型转换【关键回归】空电话是「正常跳过」，不能进 blocked 保护名单', async (t) => {
+  const mock = await startAllMock({ fieldTypes: typesWithGaps() });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+
+  // 24 个人员都没填电话（生产就是这个状态）
+  const r = await lib.upsertRecords('members', [
+    { code: 'MB-1', name: '甲', phone: '' },
+    { code: 'MB-2', name: '乙', phone: '' }
+  ]);
+  assert.equal(r.created, 2);
+  assert.equal(r.droppedColumns['电话'], undefined, '空电话不是「列有问题」');
+  assert.equal(Object.keys(r.blocked).length, 0, '不能把空电话当成推不上去的字段');
+
+  // 反向证明：一旦进了 blocked，飞书里后填的电话就同步不下来了
+  const st = await lib.pullState();
+  assert.equal(st.members.find(m => m.code === 'MB-1').phone, '', '空电话不写、回读也是空');
+
+  // 真正的「推不上去」仍然要报（缺列）
+  const r2 = await lib.upsertRecords('members', [{ code: 'MB-3', name: '丙', pin: '1234' }]);
+  assert.equal(r2.droppedColumns['PIN码'], '表里没有这一列', '表里没有的列必须照常报出来');
+});
+
+test('类型转换：dropped 保留完整清单（含正常跳过），供日志显示', (t) => {
+  const C = require('../lib/feishu-api.js');
+  const defs = [{ name: '编号', typeName: '文本' }, { name: '电话', typeName: '电话' }];
+  const r = C.coerceFields(defs, { '编号': 'MB-1', '电话': '' });
+  assert.deepEqual(r.fields, { '编号': 'MB-1' });
+  assert.ok(r.dropped.some(d => /电话/.test(d)), '日志里仍要能看到跳过了电话列');
+  assert.equal(Object.keys(r.droppedColumns).length, 0, '但不算问题');
 });
