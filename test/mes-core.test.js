@@ -1346,11 +1346,11 @@ test('合并【端到端】飞书删一条、改一条、加一条，本地三�
   });
   // syncedKeys = 上次同步时飞书有哪些键。MB-099 是本地新建、还没推上去，所以不在基线里。
   const r = Core.mergeRemote(st, {
-    members: [{ code: 'MB-004', name: '卢玉淳' }, { code: 'MB-500', name: '飞书新增' }]
+    members: [{ code: 'MB-004', name: '卢王淳' }, { code: 'MB-500', name: '飞书新增' }]
   }, { syncedKeys: { members: ['MB-001', 'MB-004'] } });
   const by = Object.fromEntries(st.members.map(m => [m.code, m]));
   assert.equal(by['MB-001'], undefined, '飞书删了 → 本地也删');
-  assert.equal(by['MB-004'].name, '卢玉淳', '飞书改了 → 本地更新');
+  assert.equal(by['MB-004'].name, '卢王淳', '飞书改了 → 本地更新');
   assert.equal(by['MB-500'].name, '飞书新增', '飞书加了 → 本地加入');
   assert.equal(by['MB-099'].name, '本地新建', '本地新建还没推 → 保留');
   assert.deepEqual(r.pending.map(p => p.id), ['MB-099']);

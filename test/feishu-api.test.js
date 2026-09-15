@@ -612,9 +612,9 @@ test('类型转换端到端【回归】人员与工单现在能真的写进 mock
   const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
 
   // 人员：电话为空、含不在表里的 PIN码
-  const rm = await lib.upsertRecords('members', [{ code: 'MB-004', name: '卢玉淳', sid: '24220616', dept: '汽车工程学院', role: '本科生', phone: '', group: '天权1楼实验台', pin: '1234' }]);
+  const rm = await lib.upsertRecords('members', [{ code: 'MB-004', name: '卢王淳', sid: '24220616', dept: '汽车工程学院', role: '本科生', phone: '', group: '天权1楼实验台', pin: '1234' }]);
   assert.equal(rm.created, 1, '人员应能写入：' + JSON.stringify(rm));
-  assert.equal(mock.tables.tblMBR.rows[0]['姓名'], '卢玉淳');
+  assert.equal(mock.tables.tblMBR.rows[0]['姓名'], '卢王淳');
   assert.ok(!('电话' in mock.tables.tblMBR.rows[0]) || mock.tables.tblMBR.rows[0]['电话'] !== '', '空电话不应写入');
 
   // 工单：日期是字符串，必须被转成时间戳
