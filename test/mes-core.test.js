@@ -368,12 +368,23 @@ test('计划数量与执行数量分离：执行不修改计划数量', () => {
   assert.equal(o.execBatches[0].items[0].qty, 2);
 });
 
-test('执行数量覆盖：汇总后仍受库存约束', () => {
+test('执行数量覆盖【Phase 3 策略变更】不得超过剩余计划数量', () => {
   const s = mkState();
   const o = Core.createOrder(s, { type: 'LL', code: 'LL-10', items: [{ matCode: 'MAT-A', qty: 2 }] }).order;
   const r = Core.executeOrder(s, o, { execQtyByCode: { 'MAT-A': 9 } });
   assert.equal(r.ok, false);
-  assert.match(r.errors.join('；'), /库存不足（现 5，需 9）/);
+  assert.match(r.errors.join('；'), /超出剩余计划数量（计划 2，已执行 0，剩余 2）/);
+  assert.equal(stockOf(s, 'MAT-A'), 5, '被拒绝时库存不得变化');
+  assert.equal(o.status, '未执行');
+});
+
+test('执行数量在计划内时仍受库存约束', () => {
+  const s = mkState();
+  // 计划 99（数量在计划内），但库存只有 5 → 必须因库存不足被拦
+  const o = Core.createOrder(s, { type: 'LL', code: 'LL-10b', items: [{ matCode: 'MAT-A', qty: 99 }] }).order;
+  const r = Core.executeOrder(s, o, { execQtyByCode: { 'MAT-A': 99 } });
+  assert.equal(r.ok, false);
+  assert.match(r.errors.join('；'), /库存不足（现 5，需 99）/);
   assert.equal(stockOf(s, 'MAT-A'), 5);
 });
 
@@ -549,4 +560,327 @@ test('locateMaterial：位置兜底只认带位置的记录，跳过中间的空
   const L = Core.locateMaterial(s, 'G');
   assert.equal(L.loc, 'B-01-01-01');
   assert.equal(L.lastScan.ts, T2);
+});
+
+/* ================= Phase 3：工单管理增强 ================= */
+
+test('状态模型：待执行/部分执行/已执行/已取消 判定函数', () => {
+  assert.equal(Core.isPending({ status: '未执行' }), true);
+  assert.equal(Core.isPending({ status: '待执行' }), true, '「待执行」与「未执行」等价');
+  assert.equal(Core.isPartiallyExecuted({ status: '部分执行' }), true);
+  assert.equal(Core.isFullyExecuted({ status: '已执行' }), true);
+  assert.equal(Core.isCancelled({ status: '已取消' }), true);
+  assert.equal(Core.isOrderOpen({ status: '未执行' }), true);
+  assert.equal(Core.isOrderOpen({ status: '部分执行' }), true);
+  assert.equal(Core.isOrderOpen({ status: '已执行' }), false);
+  assert.equal(Core.isOrderOpen({ status: '已取消' }), false);
+  assert.equal(Core.statusLabel('未执行'), '待执行');
+  assert.equal(Core.statusLabel('部分执行'), '部分执行');
+});
+
+test('orderProgress：计划 / 已执行 / 剩余 三项数量', () => {
+  const s = mkState();
+  const o = Core.createOrder(s, { type: 'LL', code: 'P1', items: [{ matCode: 'MAT-A', qty: 5 }, { matCode: 'MAT-B', qty: 4 }] }).order;
+  let p = Core.orderProgress(o);
+  assert.deepEqual(p.items, [
+    { matCode: 'MAT-A', planned: 5, executed: 0, remaining: 5 },
+    { matCode: 'MAT-B', planned: 4, executed: 0, remaining: 4 }
+  ]);
+  assert.equal(p.plannedTotal, 9);
+  assert.equal(p.executedTotal, 0);
+  assert.equal(p.remainingTotal, 9);
+  assert.equal(p.percent, 0);
+  assert.equal(p.anyExecuted, false);
+  assert.equal(p.fullyExecuted, false);
+
+  Core.executeOrder(s, o, { execQtyByCode: { 'MAT-A': 2, 'MAT-B': 4 } });
+  p = Core.orderProgress(o);
+  assert.equal(p.items[0].remaining, 3);
+  assert.equal(p.items[1].remaining, 0);
+  assert.equal(p.executedTotal, 6);
+  assert.equal(p.remainingTotal, 3);
+  assert.equal(p.percent, 67);
+  assert.equal(p.fullyExecuted, false);
+});
+
+test('部分执行：第一次只执行一部分 → 状态为「部分执行」，计划数量不变', () => {
+  const s = mkState();
+  const o = Core.createOrder(s, { type: 'LL', code: 'PE-1', items: [{ matCode: 'MAT-A', qty: 4 }] }).order;
+  const r = Core.executeOrder(s, o, { execQtyByCode: { 'MAT-A': 1 } });
+  assert.equal(r.ok, true, r.errors.join('；'));
+  assert.equal(r.partial, true);
+  assert.equal(o.status, '部分执行');
+  assert.deepEqual(o.items, [{ matCode: 'MAT-A', qty: 4 }], '计划数量始终不变');
+  assert.deepEqual(o.execQty, [{ matCode: 'MAT-A', qty: 1 }]);
+  assert.equal(stockOf(s, 'MAT-A'), 4);
+  assert.equal(o.execBatches.length, 1);
+  assert.equal(Core.orderProgress(o).items[0].remaining, 3);
+});
+
+test('部分执行：再次执行剩余部分 → 累计为「已执行」，库存正确', () => {
+  const s = mkState();
+  const o = Core.createOrder(s, { type: 'LL', code: 'PE-2', items: [{ matCode: 'MAT-A', qty: 4 }] }).order;
+  Core.executeOrder(s, o, { execQtyByCode: { 'MAT-A': 1 } });
+  const r2 = Core.executeOrder(s, o, { execQtyByCode: { 'MAT-A': 3 } });
+  assert.equal(r2.ok, true, r2.errors.join('；'));
+  assert.equal(o.status, '已执行');
+  assert.deepEqual(o.execQty, [{ matCode: 'MAT-A', qty: 4 }]);
+  assert.equal(stockOf(s, 'MAT-A'), 1, '5 - 1 - 3 = 1');
+  assert.equal(o.execBatches.length, 2, '应有两批执行记录');
+  assert.equal(Core.orderProgress(o).remainingTotal, 0);
+  assert.equal(Core.orderProgress(o).percent, 100);
+});
+
+test('部分执行：多物料工单分批执行，各物料剩余独立计算', () => {
+  const s = mkState();
+  const o = Core.createOrder(s, { type: 'LL', code: 'PE-3', items: [{ matCode: 'MAT-A', qty: 3 }, { matCode: 'MAT-B', qty: 5 }] }).order;
+  Core.executeOrder(s, o, { execQtyByCode: { 'MAT-A': 3, 'MAT-B': 2 } });
+  assert.equal(o.status, '部分执行');
+  assert.equal(stockOf(s, 'MAT-A'), 2);
+  assert.equal(stockOf(s, 'MAT-B'), 8);
+
+  Core.executeOrder(s, o, { execQtyByCode: { 'MAT-A': 0, 'MAT-B': 3 } });
+  assert.equal(o.status, '已执行');
+  assert.equal(stockOf(s, 'MAT-A'), 2, 'MAT-A 已执行完，不应再变动');
+  assert.equal(stockOf(s, 'MAT-B'), 5);
+  assert.equal(o.execBatches.length, 2);
+});
+
+test('部分执行：已执行满的物料在后续批次中不再重复扣减', () => {
+  const s = mkState();
+  const o = Core.createOrder(s, { type: 'LL', code: 'PE-4', items: [{ matCode: 'MAT-A', qty: 2 }, { matCode: 'MAT-B', qty: 2 }] }).order;
+  Core.executeOrder(s, o, { execQtyByCode: { 'MAT-A': 2, 'MAT-B': 0 } });
+  assert.equal(stockOf(s, 'MAT-A'), 3);
+  // 不传 execQtyByCode → 默认执行全部剩余
+  const r = Core.executeOrder(s, o);
+  assert.equal(r.ok, true, r.errors.join('；'));
+  assert.equal(stockOf(s, 'MAT-A'), 3, 'MAT-A 剩余为 0，不得再扣');
+  assert.equal(stockOf(s, 'MAT-B'), 8);
+  assert.equal(o.status, '已执行');
+});
+
+test('部分执行：超过剩余数量被拒绝', () => {
+  const s = mkState();
+  const o = Core.createOrder(s, { type: 'LL', code: 'PE-5', items: [{ matCode: 'MAT-A', qty: 4 }] }).order;
+  Core.executeOrder(s, o, { execQtyByCode: { 'MAT-A': 3 } });
+  const r = Core.executeOrder(s, o, { execQtyByCode: { 'MAT-A': 2 } });
+  assert.equal(r.ok, false);
+  assert.match(r.errors.join('；'), /超出剩余计划数量（计划 4，已执行 3，剩余 1）/);
+  assert.equal(stockOf(s, 'MAT-A'), 2, '被拒绝时库存不得变化');
+  assert.equal(o.status, '部分执行');
+});
+
+test('取消工单：未执行的工单可取消，状态变「已取消」，库存不变', () => {
+  const s = mkState();
+  const o = Core.createOrder(s, { type: 'LL', code: 'C-1', items: [{ matCode: 'MAT-A', qty: 3 }] }).order;
+  const r = Core.cancelOrder(s, o, { reason: '计划取消', operator: '张三' });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(o.status, '已取消');
+  assert.equal(o.cancelInfo.reason, '计划取消');
+  assert.equal(o.cancelInfo.operator, '张三');
+  assert.equal(stockOf(s, 'MAT-A'), 5, '取消不改库存');
+  assert.equal(s.transactions.length, 0, '取消不写流水');
+});
+
+test('取消工单：已执行的工单不能直接取消，须走冲销', () => {
+  const s = mkState();
+  const o = Core.createOrder(s, { type: 'LL', code: 'C-2', items: [{ matCode: 'MAT-A', qty: 2 }] }).order;
+  Core.executeOrder(s, o);
+  const r = Core.cancelOrder(s, o);
+  assert.equal(r.ok, false);
+  assert.match(r.error, /不能直接取消/);
+  assert.equal(o.status, '已执行');
+});
+
+test('取消工单：部分执行的工单同样不能直接取消', () => {
+  const s = mkState();
+  const o = Core.createOrder(s, { type: 'LL', code: 'C-3', items: [{ matCode: 'MAT-A', qty: 4 }] }).order;
+  Core.executeOrder(s, o, { execQtyByCode: { 'MAT-A': 1 } });
+  assert.equal(Core.cancelOrder(s, o).ok, false);
+  assert.equal(o.status, '部分执行');
+});
+
+test('取消工单：已取消的工单不能重复取消', () => {
+  const s = mkState();
+  const o = Core.createOrder(s, { type: 'LL', code: 'C-4', items: [{ matCode: 'MAT-A', qty: 1 }] }).order;
+  Core.cancelOrder(s, o);
+  const r = Core.cancelOrder(s, o);
+  assert.equal(r.ok, false);
+  assert.match(r.error, /已是「已取消」状态/);
+});
+
+test('冲销工单【核心】出库工单冲销后库存回到执行前', () => {
+  const s = mkState();
+  const before = stockOf(s, 'MAT-A');
+  const o = Core.createOrder(s, { type: 'LL', code: 'R-1', items: [{ matCode: 'MAT-A', qty: 3 }] }).order;
+  Core.executeOrder(s, o);
+  assert.equal(stockOf(s, 'MAT-A'), before - 3);
+
+  const r = Core.reverseOrder(s, o, { reason: '单据作废' });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(stockOf(s, 'MAT-A'), before, '冲销后库存必须回到执行前');
+  assert.equal(o.status, '已取消');
+  assert.ok(o.reverseInfo);
+  assert.equal(o.reverseInfo.reason, '单据作废');
+  // 流水链保持完整：执行 -3，冲销 +3
+  const txns = Core.orderTransactions(s, 'R-1');
+  assert.equal(txns.length, 2);
+  assert.deepEqual(txns.map(t => t.delta), [-3, 3]);
+  assert.equal(txns[1].type, '冲销');
+  assert.equal(Core.replayAudit(s).ok, true, '冲销后回放校验仍须一致');
+});
+
+test('冲销工单：部分执行后冲销，只回退已执行的数量', () => {
+  const s = mkState();
+  const before = stockOf(s, 'MAT-A');
+  const o = Core.createOrder(s, { type: 'LL', code: 'R-2', items: [{ matCode: 'MAT-A', qty: 4 }] }).order;
+  Core.executeOrder(s, o, { execQtyByCode: { 'MAT-A': 2 } });
+  assert.equal(stockOf(s, 'MAT-A'), before - 2);
+
+  const r = Core.reverseOrder(s, o);
+  assert.equal(r.ok, true, r.error);
+  assert.equal(stockOf(s, 'MAT-A'), before, '只回退已执行的 2 件');
+  assert.equal(o.status, '已取消');
+  assert.equal(o.execQty[0].qty, 2, '执行历史保留，便于追溯');
+});
+
+test('冲销工单：入库工单（补货）冲销方向相反', () => {
+  const s = mkState();
+  const before = stockOf(s, 'MAT-A');
+  const o = Core.createOrder(s, { type: 'BH', code: 'R-3', items: [{ matCode: 'MAT-A', qty: 4 }] }).order;
+  Core.executeOrder(s, o);
+  assert.equal(stockOf(s, 'MAT-A'), before + 4);
+  Core.reverseOrder(s, o);
+  assert.equal(stockOf(s, 'MAT-A'), before);
+  assert.deepEqual(Core.orderTransactions(s, 'R-3').map(t => t.delta), [4, -4]);
+});
+
+test('冲销工单：未执行的工单不能冲销', () => {
+  const s = mkState();
+  const o = Core.createOrder(s, { type: 'LL', code: 'R-4', items: [{ matCode: 'MAT-A', qty: 1 }] }).order;
+  const r = Core.reverseOrder(s, o);
+  assert.equal(r.ok, false);
+  assert.match(r.error, /尚未执行/);
+});
+
+test('冲销工单：已冲销（已取消）的工单不能重复冲销', () => {
+  const s = mkState();
+  const o = Core.createOrder(s, { type: 'LL', code: 'R-5', items: [{ matCode: 'MAT-A', qty: 1 }] }).order;
+  Core.executeOrder(s, o);
+  Core.reverseOrder(s, o);
+  const r = Core.reverseOrder(s, o);
+  assert.equal(r.ok, false);
+  assert.match(r.error, /已取消/);
+});
+
+test('冲销工单：多物料工单全部回退', () => {
+  const s = mkState();
+  const a0 = stockOf(s, 'MAT-A'), b0 = stockOf(s, 'MAT-B');
+  const o = Core.createOrder(s, { type: 'LL', code: 'R-6', items: [{ matCode: 'MAT-A', qty: 2 }, { matCode: 'MAT-B', qty: 3 }] }).order;
+  Core.executeOrder(s, o);
+  Core.reverseOrder(s, o);
+  assert.equal(stockOf(s, 'MAT-A'), a0);
+  assert.equal(stockOf(s, 'MAT-B'), b0);
+  assert.equal(Core.replayAudit(s).ok, true);
+});
+
+test('已执行或已取消的工单不能再执行', () => {
+  const s = mkState();
+  const o1 = Core.createOrder(s, { type: 'LL', code: 'B-1', items: [{ matCode: 'MAT-A', qty: 1 }] }).order;
+  Core.executeOrder(s, o1);
+  assert.match(Core.executeOrder(s, o1).errors.join('；'), /不可重复执行/);
+
+  const o2 = Core.createOrder(s, { type: 'LL', code: 'B-2', items: [{ matCode: 'MAT-A', qty: 1 }] }).order;
+  Core.cancelOrder(s, o2);
+  assert.match(Core.executeOrder(s, o2).errors.join('；'), /不可重复执行/);
+});
+
+test('关联流水：orderTransactions 只返回本工单的流水且按时间正序', () => {
+  const s = mkState();
+  const o = Core.createOrder(s, { type: 'LL', code: 'T-1', items: [{ matCode: 'MAT-A', qty: 1 }, { matCode: 'MAT-B', qty: 2 }] }).order;
+  Core.executeOrder(s, o, { now: T0 });
+  Core.applyStocktake(s, 'MAT-B', 99, { now: T1 });      // 与工单无关
+  const other = Core.createOrder(s, { type: 'LL', code: 'T-2', items: [{ matCode: 'MAT-A', qty: 1 }] }).order;
+  Core.executeOrder(s, other, { now: T2 });
+
+  const txns = Core.orderTransactions(s, 'T-1');
+  assert.equal(txns.length, 2, '只包含本工单的两条流水');
+  assert.ok(txns.every(t => t.ref === 'T-1'));
+  assert.ok(txns[0].ts <= txns[1].ts, '按时间正序');
+});
+
+test('执行历史：orderHistory 记录创建与每次执行批次', () => {
+  const s = mkState();
+  const o = Core.createOrder(s, { type: 'LL', code: 'H-1', date: '2026-09-15', items: [{ matCode: 'MAT-A', qty: 4 }] }).order;
+  Core.executeOrder(s, o, { execQtyByCode: { 'MAT-A': 1 }, operator: '甲', now: T0 });
+  Core.executeOrder(s, o, { execQtyByCode: { 'MAT-A': 2 }, operator: '乙', now: T1 });
+
+  const hist = Core.orderHistory(o);
+  assert.equal(hist.length, 3, '1 次创建 + 2 次执行');
+  assert.equal(hist[0].kind, 'create');
+  assert.equal(hist[1].kind, 'execute');
+  assert.equal(hist[1].batch, 1);
+  assert.equal(hist[1].operator, '甲');
+  assert.equal(hist[2].batch, 2);
+  assert.equal(hist[2].operator, '乙');
+  assert.match(hist[2].text, /第 2 次执行/);
+});
+
+test('执行历史：取消与冲销也进入历史', () => {
+  const s = mkState();
+  const o1 = Core.createOrder(s, { type: 'LL', code: 'H-2', items: [{ matCode: 'MAT-A', qty: 1 }] }).order;
+  Core.cancelOrder(s, o1, { reason: '不要了' });
+  const h1 = Core.orderHistory(o1);
+  assert.equal(h1[h1.length - 1].kind, 'cancel');
+  assert.match(h1[h1.length - 1].text, /不要了/);
+
+  const o2 = Core.createOrder(s, { type: 'LL', code: 'H-3', items: [{ matCode: 'MAT-A', qty: 1 }] }).order;
+  Core.executeOrder(s, o2);
+  Core.reverseOrder(s, o2, { reason: '发错货' });
+  const h2 = Core.orderHistory(o2);
+  assert.equal(h2[h2.length - 1].kind, 'reverse');
+  assert.match(h2[h2.length - 1].text, /发错货/);
+});
+
+test('orderSummary：列表页摘要包含进度与批次', () => {
+  const s = mkState();
+  const o = Core.createOrder(s, { type: 'BH', code: 'S-1', date: '2026-09-15', items: [{ matCode: 'MAT-A', qty: 4 }] }).order;
+  Core.executeOrder(s, o, { execQtyByCode: { 'MAT-A': 1 } });
+  const sum = Core.orderSummary(o);
+  assert.equal(sum.code, 'S-1');
+  assert.equal(sum.typeName, '补货工单');
+  assert.equal(sum.statusLabel, '部分执行');
+  assert.equal(sum.plannedTotal, 4);
+  assert.equal(sum.executedTotal, 1);
+  assert.equal(sum.remainingTotal, 3);
+  assert.equal(sum.percent, 25);
+  assert.equal(sum.batchCount, 1);
+});
+
+test('工单完整闭环：创建 → 部分执行 → 再执行 → 冲销，库存与流水全程一致', () => {
+  const s = mkState();
+  const a0 = stockOf(s, 'MAT-A'), b0 = stockOf(s, 'MAT-B');
+  const o = Core.createOrder(s, { type: 'LL', code: 'FULL-1', items: [{ matCode: 'MAT-A', qty: 4 }, { matCode: 'MAT-B', qty: 2 }] }).order;
+
+  Core.executeOrder(s, o, { execQtyByCode: { 'MAT-A': 1, 'MAT-B': 0 } });
+  assert.equal(o.status, '部分执行');
+  Core.executeOrder(s, o, { execQtyByCode: { 'MAT-A': 3, 'MAT-B': 2 } });
+  assert.equal(o.status, '已执行');
+  assert.equal(stockOf(s, 'MAT-A'), a0 - 4);
+  assert.equal(stockOf(s, 'MAT-B'), b0 - 2);
+  assert.equal(o.execBatches.length, 2);
+
+  const rev = Core.reverseOrder(s, o, { reason: '整单作废' });
+  assert.equal(rev.ok, true, rev.error);
+  assert.equal(stockOf(s, 'MAT-A'), a0);
+  assert.equal(stockOf(s, 'MAT-B'), b0);
+  assert.equal(o.status, '已取消');
+
+  // 流水：第 1 批只动 MAT-A，第 2 批动两种，冲销各回退一条 → 1 + 2 + 2 = 5 条
+  const txns = Core.orderTransactions(s, 'FULL-1');
+  assert.equal(txns.length, 5);
+  assert.deepEqual(txns.map(t => t.matCode + ':' + t.delta), ['MAT-A:-1', 'MAT-A:-3', 'MAT-B:-2', 'MAT-A:4', 'MAT-B:2']);
+  assert.equal(Core.replayAudit(s).ok, true, '全流程结束后回放校验仍须一致');
+  // 执行历史完整可查：创建 + 2 批次 + 冲销
+  assert.equal(Core.orderHistory(o).length, 4);
 });

@@ -167,6 +167,7 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
   <button data-tab="member">人员台账</button>
   <button data-tab="label">标签打印</button>
   <button data-tab="gen">编码生成</button>
+  <button data-tab="wip">库存工单</button>
   <button data-tab="nec">NEC小工单</button>
   <button data-tab="design">排版工具</button>
   <button data-tab="scan">扫码出入库</button>
@@ -367,6 +368,40 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         <button class="btn ghost" id="btnSeed">重置为出厂种子数据</button>
         <button class="btn warn" id="btnWipe">清空全部数据</button>
       </div>
+    </div>
+  </section>
+  <!-- ========== 库存工单（Phase 3 管理页） ========== -->
+  <section class="tab" id="tab-wip">
+    <div class="panel">
+      <h2>库存工单管理</h2>
+      <div class="toolbar">
+        <input type="search" id="wipSearch" placeholder="搜索工单号 / 物料码 / 物料名" style="border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:14px;width:250px">
+        <select id="wipFilterStatus" style="border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:14px">
+          <option value="">全部状态</option>
+          <option value="未执行">待执行</option>
+          <option value="部分执行">部分执行</option>
+          <option value="已执行">已执行</option>
+          <option value="已取消">已取消</option>
+        </select>
+        <select id="wipFilterType" style="border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:14px">
+          <option value="">全部类型</option>
+          <option value="LL">LL 领料</option><option value="BH">BH 补货</option>
+          <option value="JH">JH 拣货</option><option value="TL">TL 退料</option>
+        </select>
+        <button class="btn small ghost" id="btnWipRefresh">刷新</button>
+        <span class="hint" id="wipStats"></span>
+      </div>
+      <table class="grid" id="wipTable" style="margin-top:10px">
+        <thead><tr>
+          <th>工单号</th><th style="width:90px">类型</th><th style="width:90px">日期</th>
+          <th style="width:88px">状态</th><th>进度（已执行/计划）</th><th style="width:70px">批次</th><th style="width:130px">操作</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="hint" style="margin-top:8px">点「详情」查看计划/实际/剩余数量、执行历史与关联流水。待执行可「取消」，已执行或部分执行可「冲销」（把库存还回后关闭工单）。</p>
+    </div>
+    <div class="panel" id="wipDetailPanel" style="display:none">
+      <div id="wipDetail"></div>
     </div>
   </section>
   <!-- ========== NEC 小工单 ========== -->
@@ -793,6 +828,7 @@ function load() {
   state.deviceId = state.deviceId || ('dev-' + Math.random().toString(36).slice(2, 8));
   state.materials.forEach(m => { if (m.minQty == null) m.minQty = 0; if (!m.cat) m.cat = 'QT'; if (m.img == null) m.img = ''; });
   state.txnSeq = Math.max(state.txnSeq || 0, ...state.transactions.map(t => t.seq || 0), 0);   // 审计日志序号迁移
+  state.workorders.forEach(normalizeOrder);   // 历史工单补齐 execQty/execBatches 并合并重复物料
   // C区布局内置（缺则补，已有记录不覆盖）
   C_LAYOUT.locations.forEach(l => { if (!state.locations.find(x => x.code === l.code)) state.locations.push(Object.assign({}, l)); });
   C_LAYOUT.containers.forEach(c => { if (!state.containers.find(x => x.code === c.code)) state.containers.push(Object.assign({}, c)); });
@@ -875,6 +911,7 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('cl
   document.querySelectorAll('nav.tabs button').forEach(x => x.classList.toggle('on', x === b));
   document.querySelectorAll('section.tab').forEach(s => s.classList.toggle('on', s.id === 'tab-' + b.dataset.tab));
   if (b.dataset.tab === 'label') renderLabelTab();
+  if (b.dataset.tab === 'wip') renderWip();
   if (b.dataset.tab === 'nec') renderNec();
   if (b.dataset.tab === 'design') { renderDesign(); renderGalAlbums(); }
   if (b.dataset.tab === 'member') { renderMemberTagBar(); renderMembers(); }
@@ -1699,6 +1736,153 @@ document.getElementById('btnGenWip').addEventListener('click', () => {
 document.getElementById('btnSeed').addEventListener('click', () => { if (confirm('重置为出厂种子数据？当前数据将被覆盖（建议先导出备份）')) { state = seedState(); save(); renderLedger(); alert('已重置'); } });
 document.getElementById('btnWipe').addEventListener('click', () => { if (confirm('清空全部数据？不可恢复！')) { state = { materials: [], locations: [], containers: [], items: [], manuals: [], members: [], workorders: [], serials: {}, necOrders: [], necSerials: {}, scanLog: [] }; save(); renderLedger(); renderNec(); alert('已清空'); } });
 
+/* ================= 库存工单管理（Phase 3） ================= */
+const WIP_STATUS_STYLE = { '未执行': '#d33a2c', '待执行': '#d33a2c', '部分执行': '#e8a020', '已执行': '#2d9d4f', '已取消': '#8892a2' };
+let wipDetailCode = '';
+
+function wipStatusBadge(order) {
+  const label = CORE.statusLabel(order.status);
+  const color = WIP_STATUS_STYLE[order.status] || '#8892a2';
+  return '<span class="badge" style="background:' + color + '">' + esc(label) + '</span>' +
+    (order.reverseInfo ? '<br><span class="hint">已冲销</span>' : '');
+}
+
+function wipMatchesFilter(w, kw, st, ty) {
+  if (st && w.status !== st) return false;
+  if (ty && w.type !== ty) return false;
+  if (!kw) return true;
+  const k = kw.toLowerCase();
+  if (String(w.code || '').toLowerCase().includes(k)) return true;
+  return (w.items || []).some(it => {
+    const m = findMat(it.matCode);
+    return String(it.matCode || '').toLowerCase().includes(k) || (m && String(m.name || '').toLowerCase().includes(k));
+  });
+}
+
+function renderWip() {
+  const tb = document.querySelector('#wipTable tbody');
+  if (!tb) return;
+  // 详情面板：工单被删除/清空后不应继续显示旧内容
+  if (wipDetailCode && !state.workorders.some(w => w.code === wipDetailCode)) {
+    wipDetailCode = '';
+    const dp = document.getElementById('wipDetailPanel');
+    if (dp) dp.style.display = 'none';
+  }
+  const kw = document.getElementById('wipSearch').value.trim();
+  const st = document.getElementById('wipFilterStatus').value;
+  const ty = document.getElementById('wipFilterType').value;
+  const list = state.workorders.slice().reverse();   // 新的在前
+  const shown = list.filter(w => wipMatchesFilter(w, kw, st, ty));
+
+  tb.innerHTML = shown.map(w => {
+    const p = CORE.orderProgress(w);
+    const bar = '<div style="background:#eef1f6;border-radius:4px;height:8px;overflow:hidden;margin-top:3px">' +
+      '<div style="width:' + Math.min(100, p.percent) + '%;height:100%;background:' + (p.percent >= 100 ? '#2d9d4f' : '#e8a020') + '"></div></div>';
+    return '<tr>' +
+      '<td><b>' + esc(w.code) + '</b></td>' +
+      '<td>' + esc(WIP_NAMES[w.type] || w.type) + '</td>' +
+      '<td>' + esc(w.date) + '</td>' +
+      '<td>' + wipStatusBadge(w) + '</td>' +
+      '<td>' + p.executedTotal + ' / ' + p.plannedTotal + ' <span class="hint">(' + p.percent + '%)</span>' + bar + '</td>' +
+      '<td>' + ((w.execBatches || []).length || '—') + '</td>' +
+      '<td><button class="btn small ghost" data-detail="' + esc(w.code) + '">详情</button></td>' +
+      '</tr>';
+  }).join('') || '<tr><td colspan="7" class="hint" style="text-align:center">（没有符合条件的工单）</td></tr>';
+
+  tb.querySelectorAll('[data-detail]').forEach(b => b.addEventListener('click', () => showWipDetail(b.dataset.detail)));
+
+  const all = state.workorders;
+  const count = s => all.filter(w => w.status === s).length;
+  document.getElementById('wipStats').textContent =
+    '共 ' + all.length + ' 张：待执行 ' + count('未执行') + ' · 部分执行 ' + count('部分执行') +
+    ' · 已执行 ' + count('已执行') + ' · 已取消 ' + count('已取消') + (shown.length !== all.length ? '（筛选出 ' + shown.length + ' 张）' : '');
+}
+
+function showWipDetail(code) {
+  const w = state.workorders.find(x => x.code === code);
+  if (!w) return;
+  wipDetailCode = code;
+  const p = CORE.orderProgress(w);
+  const txns = CORE.orderTransactions(state, code);
+  const hist = CORE.orderHistory(w);
+  const panel = document.getElementById('wipDetailPanel');
+  const box = document.getElementById('wipDetail');
+  const sign = CORE.signOf(w.type);
+  const open = CORE.isOrderOpen(w);
+
+  box.innerHTML =
+    '<h2>工单详情 ' + esc(w.code) + ' ' + wipStatusBadge(w) + '</h2>' +
+    '<div class="kv"><b>类型</b>' + esc(WIP_NAMES[w.type] || w.type) + '（' + (sign < 0 ? '扣减库存' : '增加库存') + '）　' +
+    '<b>日期</b>' + esc(w.date) + '　<b>计划合计</b>' + p.plannedTotal + '　<b>已执行</b>' + p.executedTotal + '　<b>剩余</b>' + p.remainingTotal + '　<b>进度</b>' + p.percent + '%</div>' +
+
+    '<h3 style="margin:12px 0 6px;font-size:15px">明细：计划 / 实际 / 剩余</h3>' +
+    '<table class="grid"><thead><tr><th>物料码</th><th>名称</th><th style="width:80px">计划</th><th style="width:80px">已执行</th><th style="width:80px">剩余</th><th style="width:80px">当前库存</th></tr></thead><tbody>' +
+    p.items.map(it => {
+      const m = findMat(it.matCode);
+      return '<tr><td>' + esc(it.matCode) + '</td><td>' + esc(m ? m.name : '⚠未建档') + '</td>' +
+        '<td>' + it.planned + '</td><td style="color:' + (it.executed > 0 ? '#2d9d4f' : '#8892a2') + '">' + it.executed + '</td>' +
+        '<td style="color:' + (it.remaining > 0 ? '#d33a2c' : '#8892a2') + '">' + it.remaining + '</td>' +
+        '<td>' + (m ? m.qty : '—') + '</td></tr>';
+    }).join('') + '</tbody></table>' +
+
+    '<h3 style="margin:12px 0 6px;font-size:15px">执行历史</h3>' +
+    '<table class="grid"><thead><tr><th style="width:90px">动作</th><th style="width:150px">时间</th><th style="width:90px">操作人</th><th>明细</th></tr></thead><tbody>' +
+    hist.map(h => '<tr><td>' + ({ create: '创建', execute: '执行', cancel: '取消', reverse: '冲销' }[h.kind] || h.kind) + '</td>' +
+      '<td>' + esc(h.at || '—') + '</td><td>' + esc(h.operator || '—') + '</td><td>' + esc(h.text) + '</td></tr>').join('') +
+    '</tbody></table>' +
+
+    '<h3 style="margin:12px 0 6px;font-size:15px">关联库存流水（' + txns.length + ' 条）</h3>' +
+    '<table class="grid"><thead><tr><th style="width:60px">#</th><th style="width:150px">时间</th><th style="width:90px">操作人</th><th style="width:90px">类型</th><th>物料</th><th style="width:70px">变动</th><th style="width:70px">余量</th></tr></thead><tbody>' +
+    (txns.map(t => '<tr><td>' + t.seq + '</td><td>' + esc(t.time) + '</td><td>' + esc(t.operator) + '</td><td>' + esc(t.type) + '</td>' +
+      '<td>' + esc(t.matCode) + '</td><td style="font-weight:bold;color:' + (t.delta < 0 ? '#d33a2c' : '#2d9d4f') + '">' + (t.delta > 0 ? '+' : '') + t.delta + '</td>' +
+      '<td>' + esc(t.balance) + '</td></tr>').join('') ||
+      '<tr><td colspan="7" class="hint" style="text-align:center">（该工单尚未产生流水）</td></tr>') +
+    '</tbody></table>' +
+
+    '<div class="toolbar" style="margin-top:12px">' +
+    (open ? '<button class="btn" id="btnWipExec">去扫码执行（剩余 ' + p.remainingTotal + '）</button>' : '') +
+    (CORE.isPending(w) ? '<button class="btn warn" id="btnWipCancel">取消工单</button>' : '') +
+    (p.anyExecuted && !CORE.isCancelled(w) ? '<button class="btn warn" id="btnWipReverse">冲销工单（回退 ' + p.executedTotal + '）</button>' : '') +
+    '<button class="btn ghost" id="btnWipClose">关闭详情</button>' +
+    (w.reverseInfo ? '<span class="hint">已于 ' + esc(w.reverseInfo.at) + ' 由 ' + esc(w.reverseInfo.operator || '—') + ' 冲销</span>' : '') +
+    (w.cancelInfo ? '<span class="hint">已于 ' + esc(w.cancelInfo.at) + ' 由 ' + esc(w.cancelInfo.operator || '—') + ' 取消' + (w.cancelInfo.reason ? '（' + esc(w.cancelInfo.reason) + '）' : '') + '</span>' : '') +
+    '</div>';
+  panel.style.display = 'block';
+
+  const ev = document.getElementById('btnWipExec');
+  if (ev) ev.addEventListener('click', () => {
+    document.querySelector('nav.tabs button[data-tab=scan]').click();
+    const si = document.getElementById('scanInput');
+    if (si) { si.value = 'WIP:' + w.code; si.focus(); si.select(); }
+  });
+  const cb = document.getElementById('btnWipCancel');
+  if (cb) cb.addEventListener('click', () => {
+    const reason = prompt('取消工单 ' + w.code + ' 的原因（可留空）：', '');
+    if (reason === null) return;
+    const r = CORE.cancelOrder(state, w, { reason, operator: state.operator });
+    if (!r.ok) { alert('取消失败：' + r.error); return; }
+    save(); renderWip(); showWipDetail(code);
+    log('取消工单 ' + w.code + (reason ? '（' + reason + '）' : '') + '｜操作人 ' + state.operator);
+  });
+  const rb = document.getElementById('btnWipReverse');
+  if (rb) rb.addEventListener('click', () => {
+    const p2 = CORE.orderProgress(w);
+    const reason = prompt('冲销工单 ' + w.code + '：将把已执行的 ' + p2.executedTotal + ' 件按原方向回退到库存，然后关闭工单。\n冲销原因（可留空）：', '');
+    if (reason === null) return;
+    if (!confirm('确认冲销 ' + w.code + '？库存将回退，且写入冲销流水（不可撤销）。')) return;
+    const r = CORE.reverseOrder(state, w, { reason, operator: state.operator });
+    if (!r.ok) { alert('冲销失败：' + r.error); return; }
+    r.applied.forEach(a => { invPush(a.matCode, a.balance); fsPushStock(a.matCode, a.balance, a.delta, '冲销', reason || ('冲销 ' + w.code), w.code); });
+    save(); renderLedger(); renderTxns(); renderWip(); showWipDetail(code);
+    log('冲销工单 ' + w.code + '：' + r.applied.map(a => a.matCode + (a.delta > 0 ? '+' : '') + a.delta).join('，') + '｜操作人 ' + state.operator);
+  });
+  document.getElementById('btnWipClose').addEventListener('click', () => { panel.style.display = 'none'; wipDetailCode = ''; });
+}
+
+['wipSearch'].forEach(id => document.getElementById(id).addEventListener('input', renderWip));
+['wipFilterStatus', 'wipFilterType'].forEach(id => document.getElementById(id).addEventListener('change', renderWip));
+document.getElementById('btnWipRefresh').addEventListener('click', () => { renderWip(); if (wipDetailCode) showWipDetail(wipDetailCode); });
+
 /* ================= NEC 小工单 ================= */
 function renderNec() {
   const filter = document.getElementById('necFilter').value;
@@ -1941,37 +2125,45 @@ function scanManual(code, box) {
 function scanWip(code, box) {
   const w = state.workorders.find(x => x.code === code);
   if (!w) { box.className = 'scan-result panel flash-bad'; box.innerHTML = '未找到工单：' + esc(code) + '（请先在「编码生成」创建）'; log('未命中工单 ' + code); return; }
-  const done = CORE.isOrderExecuted(w);
-  const verb = CORE.signOf(w.type) < 0 ? '扣减库存' : '增加库存';
-  // 明细按物料合并展示：旧数据里同一物料多行时，页面显示的就是实际执行口径（合计数量）
-  const norm = CORE.normalizeItems(w.items);
-  const lines = norm.items;
-  const didMerge = lines.length !== w.items.length;
-  box.className = 'scan-result panel ' + (done ? '' : 'flash-ok');
-  box.innerHTML = '<div class="kv"><b>工单号</b>' + esc(w.code) + '　<span class="badge" style="background:' + (done ? '#8892a2' : '#d33a2c') + '">' + esc(w.status) + '</span>' +
+  const closed = CORE.isOrderExecuted(w);
+  const sign = CORE.signOf(w.type);
+  const verb = sign < 0 ? '扣减库存' : '增加库存';
+  const prog = CORE.orderProgress(w);            // 计划 / 已执行 / 剩余（部分执行按剩余预填）
+  const lines = prog.items;
+  const mergedHint = CORE.normalizeItems(w.items).items.length !== w.items.length;
+  const partial = CORE.isPartiallyExecuted(w);
+  box.className = 'scan-result panel ' + (closed ? '' : 'flash-ok');
+  box.innerHTML = '<div class="kv"><b>工单号</b>' + esc(w.code) + '　<span class="badge" style="background:' + (WIP_STATUS_STYLE[w.status] || '#8892a2') + '">' + esc(CORE.statusLabel(w.status)) + '</span>' +
+    (w.reverseInfo ? ' <span class="hint">已冲销</span>' : '') +
     '<br><b>类型</b>' + esc(WIP_NAMES[w.type] || w.type) + '（' + verb + '）　<b>日期</b>' + esc(w.date) + '</div>' +
-    (didMerge ? '<p class="hint" style="margin:6px 0 0">ℹ️ 本工单存在同一物料多行，已合并为一行按<b>合计数量</b>校验与执行。</p>' : '') +
-    '<table class="grid" style="margin-top:8px"><thead><tr><th>物料码</th><th>名称</th><th style="width:90px">数量</th><th>执行后库存</th></tr></thead><tbody>' +
-    lines.map((it, i) => { const m = findMat(it.matCode); const sign = CORE.signOf(w.type);
+    '<div class="kv" style="margin-top:6px"><b>计划</b>' + prog.plannedTotal + '　<b>已执行</b>' + prog.executedTotal + '　<b>剩余</b>' + prog.remainingTotal + '　<b>进度</b>' + prog.percent + '%</div>' +
+    (mergedHint ? '<p class="hint" style="margin:6px 0 0">ℹ️ 本工单存在同一物料多行，已合并为一行按<b>合计数量</b>校验与执行。</p>' : '') +
+    (partial ? '<p class="hint" style="margin:6px 0 0">ℹ️ 本工单已部分执行，下方数量预填<b>剩余数量</b>；改为 0 可跳过该物料。</p>' : '') +
+    '<table class="grid" style="margin-top:8px"><thead><tr><th>物料码</th><th>名称</th><th style="width:70px">计划</th><th style="width:70px">已执行</th><th style="width:90px">本次执行</th><th>执行后库存</th></tr></thead><tbody>' +
+    lines.map(it => {
+      const m = findMat(it.matCode);
       let after = '—';
-      if (m) { const proj = sign < 0 ? m.qty - it.qty : m.qty + it.qty; after = proj < 0 ? '<span style="color:#d33a2c;font-weight:bold">⚠ 不足（将 -' + Math.abs(proj) + '）</span>' : proj; }
-      return '<tr><td>' + esc(it.matCode) + '</td><td>' + esc(m ? m.name : '⚠未建档') + (it.lines > 1 ? ' <span class="hint">（合并 ' + it.lines + ' 行）</span>' : '') + '</td>' +
-      '<td><input type="number" class="execQty" data-code="' + esc(it.matCode) + '" value="' + it.qty + '" min="0"' + (done ? ' disabled' : '') + '></td>' +
+      if (m) { const proj = sign < 0 ? m.qty - it.remaining : m.qty + it.remaining; after = proj < 0 ? '<span style="color:#d33a2c;font-weight:bold">⚠ 不足（将 -' + Math.abs(proj) + '）</span>' : proj; }
+      const disabled = closed || it.remaining <= 0;
+      return '<tr' + (it.remaining <= 0 && !closed ? ' style="opacity:.55"' : '') + '><td>' + esc(it.matCode) + '</td><td>' + esc(m ? m.name : '⚠未建档') + '</td>' +
+      '<td>' + it.planned + '</td><td>' + it.executed + '</td>' +
+      '<td><input type="number" class="execQty" data-code="' + esc(it.matCode) + '" value="' + it.remaining + '" min="0"' + (disabled ? ' disabled' : '') + '></td>' +
       '<td>' + after + '</td></tr>'; }).join('') + '</tbody></table>' +
-    (done ? '<p class="hint" style="margin-top:8px">执行时间：' + esc(w.execTime || '—') + '。工单已闭环，不可重复执行。</p>'
-      : '<div class="toolbar" style="margin-top:10px"><button class="btn" id="btnExec">确认执行（' + verb + '）</button><span class="hint">执行后写入工单记录，不可撤销</span></div>');
-  if (!done) document.getElementById('btnExec').addEventListener('click', () => {
-    // 收集执行数量（按物料）→ 交给 mes-core 汇总校验并执行
+    (closed ? '<p class="hint" style="margin-top:8px">' + (w.reverseInfo ? '已冲销（' + esc(w.reverseInfo.at) + '）' : w.cancelInfo ? '已取消（' + esc(w.cancelInfo.at) + '）' : '执行时间：' + esc(w.execTime || '—')) + '。工单已闭环，不可再执行。</p>'
+      : '<div class="toolbar" style="margin-top:10px"><button class="btn" id="btnExec">确认执行（' + verb + '）</button><span class="hint">可只填一部分数量，实现分批执行</span></div>');
+  if (!closed) document.getElementById('btnExec').addEventListener('click', () => {
+    // 收集执行数量（按物料）→ 交给 mes-core 汇总校验并执行；0 表示本次跳过该物料
     const execQtyByCode = {};
     box.querySelectorAll('.execQty').forEach(inp => { execQtyByCode[inp.dataset.code] = inp.value; });
     const r = CORE.executeOrder(state, w, { execQtyByCode, operator: state.operator });
     if (!r.ok) { alert('无法执行：\n' + r.errors.join('\n')); return; }
     r.applied.forEach(a => { invPush(a.matCode, a.balance); fsPushStock(a.matCode, a.balance, a.delta, WIP_NAMES[w.type] || w.type, '', w.code); });
-    save(); renderLedger(); renderTxns();
-    log('执行工单 ' + w.code + '（' + WIP_NAMES[w.type] + '）：' + r.applied.map(a => a.matCode + (a.delta < 0 ? '' : '+') + a.delta).join('，') + '｜操作人 ' + state.operator);
+    save(); renderLedger(); renderTxns(); renderWip();
+    log('执行工单 ' + w.code + '（' + WIP_NAMES[w.type] + '）：' + r.applied.map(a => a.matCode + (a.delta < 0 ? '' : '+') + a.delta).join('，') +
+      '｜状态 ' + CORE.statusLabel(w.status) + '｜操作人 ' + state.operator);
     scanWip(code, box);
   });
-  log('扫描工单 ' + code + '（' + w.status + '）');
+  log('扫描工单 ' + code + '（' + CORE.statusLabel(w.status) + '）');
 }
 /* 统一扫码入口：手输回车 / 扫码枪 / 摄像头 共用 */
 function handleScan(raw) {
@@ -2215,7 +2407,7 @@ async function fsBoot() {
 
 /* ---------- 启动 ---------- */
 document.getElementById('gWipDate').value = today();
-load(); renderLedger(); refreshMatDatalist(); refreshMemberDatalist(); renderNec(); renderOperators(); renderTxns();
+load(); renderLedger(); refreshMatDatalist(); refreshMemberDatalist(); renderNec(); renderOperators(); renderTxns(); renderWip();
 (function () {   // 支持门户页深链 index.html#ledger / #member / #label / #gen / #nec / #scan
   const h = location.hash.slice(1);
   if (h) { const btn = document.querySelector('nav.tabs button[data-tab="' + h + '"]'); if (btn) btn.click(); }
