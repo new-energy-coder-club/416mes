@@ -1499,9 +1499,28 @@ function mergePackage(pkg, { from = '备份文件', upsertMembers = false } = {}
       if (keys.some(k => (old[k] ?? '') !== (o[k] ?? ''))) { keys.forEach(k => { if (o[k] !== undefined) old[k] = o[k]; }); stat.necUpd++; }
     }
   });
+  /* 流水合并：以 seq 为主键（seq 是流水不可变的唯一编号），无 seq 的旧数据回退到
+     「时间+物料+变动+关联单」组合键。
+     别只靠组合键：飞书云端返回的 time 是英文 12 小时制（Vercel 运行时 en-US），
+     与本地 toLocaleString 的中文格式不是同一个字符串，同一条流水会被判成两条而重复入库；
+     而且新拉到的流水必须重新排序，否则数组不再是「新的在前」的约定顺序。
+     这段与 fsMerge() 保持同一套语义。 */
   const txnKey = t => [t.time, t.matCode, t.delta, t.ref].join('|');
-  const have = new Set(state.transactions.map(txnKey));
-  (inc.transactions || []).forEach(t => { if (!have.has(txnKey(t))) { state.transactions.push(t); stat.txn++; } });
+  const localBySeq = new Map((state.transactions || []).filter(t => t.seq != null).map(t => [t.seq, t]));
+  const localNoSeq = (state.transactions || []).filter(t => t.seq == null);
+  const noSeqKeys = new Set(localNoSeq.map(txnKey));
+  (inc.transactions || []).forEach(t => {
+    if (t.seq != null) {
+      if (!localBySeq.has(t.seq)) stat.txn++;
+      localBySeq.set(t.seq, t);
+    } else if (!noSeqKeys.has(txnKey(t))) {
+      noSeqKeys.add(txnKey(t)); localNoSeq.push(t); stat.txn++;
+    }
+  });
+  state.transactions = [...localBySeq.values()]
+    .sort((a, b) => (b.seq || 0) - (a.seq || 0))
+    .concat(localNoSeq)
+    .slice(0, 2000);
   state.txnSeq = Math.max(state.txnSeq || 0, ...state.transactions.map(t => t.seq || 0), 0);   // 合并后序号取最大防撞号
   ['serials', 'necSerials'].forEach(key => Object.entries(inc[key] || {}).forEach(([k, v]) => {
     state[key][k] = Math.max(state[key][k] || 0, v);   // 流水号取最大，防换浏览器撞号
@@ -1526,9 +1545,16 @@ async function cloudSync({ silent = false } = {}) {
     if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ('HTTP ' + r.status)); }
     const stat = mergePackage(await r.json(), { from: '飞书云端', upsertMembers: true });
     log('云端同步完成：' + mergeStatText(stat));
+    // 关键：云端只读同步成功后也要更新顶部状态。
+    // fsBoot()（真源服务/隧道）与 cloudSync()（Vercel 只读接口）是两条独立通路，
+    // 若这里不改状态，部署在 Vercel 上时会出现「数据明明同步了，顶部却显示 ⚪ 离线」。
+    cloudOnline = true; refreshStatusHint();
     if (!silent) alert('云端同步完成：' + mergeStatText(stat));
     return stat;
   } catch (err) {
+    log('云端同步失败：' + err.message);
+    // 只有真源服务也不可用时才回落成离线，避免把「只读同步失败」误报成整站离线
+    cloudOnline = false; refreshStatusHint();
     if (!silent) alert('云端同步失败：' + err.message + '\n（离线/无后端环境请改用「导入合并」）');
     return null;
   } finally {
@@ -2484,9 +2510,17 @@ async function invPush(matCode, qty) {
 /* ---------- 飞书真源（路线 A：服务可达时，启动拉取 + 写口直写；不可达自动离线） ---------- */
 const FS_QUEUE_LS = 'mes416_fs_queue';
 const FS_FALLBACK_BASE = 'https://api.newenergycoder.club';   // 公网版（Vercel）走 Cloudflare Tunnel 后端
-let fsOnline = false;
+let fsOnline = false;      // 真源服务（feishu-server / 隧道）可用
+let cloudOnline = false;   // Vercel 只读接口可用
 let fsBase = '';   // 真源服务基地址：同源优先，其次隧道域名
 function fsQueue() { try { return JSON.parse(localStorage.getItem(FS_QUEUE_LS) || '[]'); } catch { return []; } }
+/* 顶部状态按优先级统一渲染：真源服务 > 云端只读 > 离线。
+   两条通路（fsBoot 与 cloudSync）各自的成败都会调用它，因此最终显示与谁先返回无关。 */
+function refreshStatusHint() {
+  if (fsOnline) fsStatusHint('飞书真源已连接', true);
+  else if (cloudOnline) fsStatusHint('已连接飞书云端（只读同步）', true);
+  else fsStatusHint('离线模式 · 本机数据', false);
+}
 function fsQueueSave(q) {
   localStorage.setItem(FS_QUEUE_LS, JSON.stringify(q));
   const chip = document.getElementById('fsQueueChip');
@@ -2564,10 +2598,9 @@ async function fsBoot() {
       for (const it of q) await fsPushStock(it.matCode, it.qty, it.delta, it.type, it.reason, it.ref);
       log('☁️ 离线队列冲刷 ' + q.length + ' 条');
     }
-    fsStatusHint('飞书真源已连接', true);
+    fsOnline = true; refreshStatusHint();
   } catch (e) {
-    fsOnline = false;
-    fsStatusHint('离线模式 · 本机数据', false);
+    fsOnline = false; refreshStatusHint();
   }
 }
 
