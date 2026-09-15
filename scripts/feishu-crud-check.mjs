@@ -114,20 +114,35 @@ const rows = [];
 const fail = (tbl, step, msg) => rows.push({ tbl, step, ok: false, msg });
 const pass = (tbl, step, msg) => rows.push({ tbl, step, ok: true, msg });
 
+/* 清理哨兵：
+   只清自己这一轮的 PREFIX 是不够的 —— 上一轮中途被 Ctrl-C / 断网打断时留下的记录
+   没人管，会一直躺在生产库里（实测踩过：一次中断留下 4 条，肉眼看不出来）。
+   所以这里扫「任何 ZZ 开头的哨兵编码」，顺便把哨兵流水也带走。 */
+const TEST_CODE_RE = /^ZZ[TPNRD]/i;
+const TEST_TXN_RE = /哨兵|验收/;
+
 async function cleanup() {
   let removed = 0;
   try {
     const st = await pull();
     for (const tbl of ALL) {
-      const bad = (st[tbl] || []).filter(r => String(keyOf(tbl)(r) || '').startsWith(PREFIX));
+      const bad = (st[tbl] || []).filter(r => TEST_CODE_RE.test(String(keyOf(tbl)(r) || '')));
       if (!bad.length) continue;
-      const keys = bad.map(delKeyOf(tbl));
+      const keys = [...new Set(bad.map(delKeyOf(tbl)))];
       const r = await post('/api/feishu/delete', { table: tbl, keys });
       removed += (r.d?.deleted || 0);
-      process.stdout.write(`  🧹 清理残留 ${LABEL[tbl]}：${keys.join(', ')}\n`);
+      process.stdout.write(`  🧹 清理哨兵残留 ${LABEL[tbl]}：${keys.join(', ')}\n`);
+    }
+    const txnBad = (st.transactions || []).filter(t =>
+      TEST_CODE_RE.test(String(t.matCode || '')) || TEST_TXN_RE.test(String(t.reason || '') + String(t.operator || '')));
+    if (txnBad.length) {
+      const keys = txnBad.map(t => '#' + String(t.seq).padStart(6, '0'));
+      const r = await post('/api/feishu/delete', { table: 'transactions', keys });
+      removed += (r.d?.deleted || 0);
+      process.stdout.write(`  🧹 清理哨兵残留 库存流水：${keys.join(', ')}\n`);
     }
   } catch (e) {
-    process.stderr.write('  ⚠️ 清理失败，请手动检查前缀 ' + PREFIX + ' 的记录：' + e.message + '\n');
+    process.stderr.write('  ⚠️ 清理失败，请手动检查 ZZ* 开头的记录：' + e.message + '\n');
   }
   return removed;
 }

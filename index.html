@@ -537,6 +537,9 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 /* ================= 416MES 应用逻辑 ================= */
 'use strict';
 
+/* 应用版本：改到用户看得见的行为时手动 +1，页脚会显示，方便确认线上跑的是哪一版 */
+const APP_VERSION = '1.1.0';
+
 /* ---------- 标签类型配置 ---------- */
 const TYPES = {
   loc: { name: '库位码', color: '#1f6fd6', prefix: 'LOC:' },
@@ -3077,8 +3080,10 @@ document.getElementById('gWipDate').value = today();
 function renderDataStoreHint() {
   const origin = location.origin === 'null' ? 'file://（本地文件）' : location.origin;
   const f = document.getElementById('appFooter');
-  if (f) f.innerHTML = '416MES · 单机离线版 · 当前数据源：<b>' + esc(origin) + '</b> · ' +
-    '数据只存在这个地址下的本浏览器 localStorage，换地址/换浏览器/清缓存会读不到 · 定期导出 Excel 备份';
+  // 版本号放在页脚：现场报问题时能一眼看出线上跑的是哪一版，不必再问「你刷新了吗」
+  if (f) f.innerHTML = '416MES <b>v' + APP_VERSION + '</b> · 当前数据源：<b>' + esc(origin) + '</b> · ' +
+    '本地数据存在这个地址下的浏览器 localStorage，换地址/换浏览器/清缓存会读不到；' +
+    '台账/人员/工单/流水同时同步到飞书多维表 · 定期导出 Excel 备份';
 
   if (!state.__freshSeed) return;
   delete state.__freshSeed;   // 只提示一次，不写回存储
