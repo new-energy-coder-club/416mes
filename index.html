@@ -1581,7 +1581,8 @@ async function cloudSync({ silent = false } = {}) {
   }
 }
 document.getElementById('btnCloudSync').addEventListener('click', () => cloudSync());
-if (location.protocol.startsWith('http')) cloudSync({ silent: true });   // 打开页面自动同步一次，失败静默
+// 打开页面自动同步交给 fsBoot()（它先试同源真源接口，失败再退回云端只读接口），
+// 这里不再无条件自动跑一次，避免同一份数据被拉两遍。
 
 document.getElementById('btnMergeJson').addEventListener('click', () => document.getElementById('fileMerge').click());
 document.getElementById('fileMerge').addEventListener('change', e => {
@@ -2620,6 +2621,9 @@ async function fsBoot() {
     fsOnline = true; refreshStatusHint();
   } catch (e) {
     fsOnline = false; refreshStatusHint();
+    // 真源服务（feishu-server / 隧道）不可达时，退回云端只读接口 —— 同一份飞书数据。
+    // 放在这里而不是页面加载时无条件调用，是为了避免每次打开都把 8 张表拉两遍。
+    cloudSync({ silent: true });
   }
 }
 
