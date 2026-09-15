@@ -539,7 +539,7 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 'use strict';
 
 /* 应用版本：改到用户看得见的行为时手动 +1，页脚会显示，方便确认线上跑的是哪一版 */
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.2.1';
 
 /* ---------- 标签类型配置 ---------- */
 const TYPES = {
@@ -3064,7 +3064,11 @@ async function fsFlushQueue() {
   for (const item of q) {
     try {
       await fsSerialize(fsChainKey(item), () => fsExecItem(item));
-      fsQueueSave(fsQueue().filter(x => x !== item));
+      // 必须按 id 删除。旧版写的是 fsQueue().filter(x => x !== item) —— 但 fsQueue() 每次都
+      // 重新解析 JSON、返回全新对象，x !== item 永远成立，于是**成功的条目从来没被移除过**：
+      // 角标永远显示旧数字，而且每次开机都会重放，对 stock 就是重复记账。
+      fsOutbox().removeById(item.id);
+      fsQueueChip();
       ok++;
     } catch (e) {
       fsQueueFail(item, e.message);

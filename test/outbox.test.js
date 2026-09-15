@@ -247,3 +247,36 @@ test('outbox【防漂移】DEFAULT_TABLES 与 mes-core 的 MERGE_TABLES 必须�
   const b = Core.MERGE_TABLES.map(t => t.key + ':' + t.id).sort();
   assert.deepEqual(a, b, '业务主键定义两边必须一模一样，否则投影会按错的键匹配');
 });
+
+test('outbox【关键回归】冲刷时按 id 删除，成功条目必须真的出队', () => {
+  const ob = mk();
+  ob.append({ op: 'delete', table: 'materials', keys: ['X-1'] });
+  ob.append({ op: 'delete', table: 'materials', keys: ['X-2'] });
+
+  // 模拟 fsFlushQueue：先取一份快照，逐条执行，成功的按 id 删除。
+  // 旧实现这里是 fsQueue().filter(x => x !== item) —— fsQueue() 每次都重新解析 JSON
+  // 返回全新对象，x !== item 永远成立，于是成功的条目从来没被移除过：
+  // 角标永远显示旧数字，而且每次开机都会重放，对 stock 就是重复记账。
+  const snapshot = ob.list();
+  for (const item of snapshot) {
+    ob.removeById(item.id);          // = 执行成功
+  }
+  assert.equal(ob.list().length, 0, '全部成功后队列必须为空');
+});
+
+test('outbox：部分成功时只移除成功的那些', () => {
+  const ob = mk();
+  ob.append({ op: 'delete', table: 'materials', keys: ['X-1'] });
+  ob.append({ op: 'delete', table: 'materials', keys: ['X-2'] });
+  ob.append({ op: 'delete', table: 'materials', keys: ['X-3'] });
+  const snapshot = ob.list();
+  ob.removeById(snapshot[0].id);
+  ob.markAttempt(snapshot[1].id, '网络超时');
+  ob.removeById(snapshot[2].id);
+
+  const left = ob.list();
+  assert.equal(left.length, 1, '失败的必须留在队列里');
+  assert.deepEqual(left[0].keys, ['X-2']);
+  assert.equal(left[0].tries, 1);
+  assert.equal(left[0].lastError, '网络超时');
+});
