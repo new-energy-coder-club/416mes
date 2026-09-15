@@ -884,3 +884,190 @@ test('工单完整闭环：创建 → 部分执行 → 再执行 → 冲销，�
   // 执行历史完整可查：创建 + 2 批次 + 冲销
   assert.equal(Core.orderHistory(o).length, 4);
 });
+
+/* ================= Phase 4：30S 精确定位收口 ================= */
+
+test('库位解析：货架区精确到架-层-位', () => {
+  assert.deepEqual(Core.parseLocationCode('B-01-03-04'), {
+    level: 'shelf', text: 'B区 1号货架 第3层 第4位', parts: { area: 'B', shelf: 1, layer: 3, pos: 4 }
+  });
+  assert.equal(Core.parseLocationCode('C-02-04-08').text, 'C区 2号货架 第4层 第8位');
+});
+
+test('库位解析：工位格与开放区块不混淆', () => {
+  // W01-G02 与 K401-A03 形状相同，必须靠规则消歧
+  assert.equal(Core.parseLocationCode('W01-G02').level, 'workstation');
+  assert.equal(Core.parseLocationCode('W01-G02').text, '1号工位 第2格');
+  assert.equal(Core.parseLocationCode('K401-A03').level, 'block');
+  assert.equal(Core.parseLocationCode('K401-A03').text, 'K401 开放区 A通道 第3块位');
+});
+
+test('库位解析：台账 kind 优先于编码规则', () => {
+  const s = { locations: [{ code: 'K401-A03', kind: '空地', desc: '401开放区 A通道 3号块位' }] };
+  assert.equal(Core.resolveLocation(s, 'K401-A03').desc, '401开放区 A通道 3号块位');
+  assert.equal(Core.resolveLocation(s, 'K401-A03').level, 'block');
+});
+
+test('库位解析：模块区与容器码', () => {
+  assert.equal(Core.parseLocationCode('M-01').level, 'zone');
+  assert.equal(Core.parseLocationCode('XK-001').level, 'container');
+  assert.equal(Core.parseLocationCode('A4SH-015').level, 'container');
+  assert.equal(Core.parseLocationCode('').level, 'unknown');
+});
+
+test('resolveLocation：容器解析到它所在的架-层-位', () => {
+  const s = {
+    locations: [{ code: 'B-02-04-08', kind: '货架', desc: 'B区 2号货架 第四层 第8位' }],
+    containers: [{ code: 'XK-001', loc: 'B-02-04-08' }]
+  };
+  const r = Core.resolveLocation(s, 'XK-001');
+  assert.equal(r.level, 'container');
+  assert.ok(r.containerAt, '应补出容器所在库位');
+  assert.equal(r.containerAt.code, 'B-02-04-08');
+  assert.match(r.containerAt.text, /B区 2号货架/);
+});
+
+test('定位分级：有库位 = exact（架-层-位）', () => {
+  const s = mkState();
+  s.materials[0].loc = 'B-01-03-04';
+  const d = Core.locateDetail(s, 'MAT-A');
+  assert.equal(d.grade, 'exact');
+  assert.equal(d.level, 'shelf');
+  assert.equal(d.path, 'B区 1号货架 第3层 第4位');   // 台账无说明时也翻译成可读的架-层-位
+});
+
+test('定位分级：台账无说明时仍给出可读位置', () => {
+  const s = mkState();
+  s.materials[0].loc = 'B-01-03-04';
+  s.locations = [];                      // 没有说明列
+  const d = Core.locateDetail(s, 'MAT-A');
+  assert.equal(d.grade, 'exact');
+  assert.equal(d.level, 'shelf');
+  assert.equal(s.materials[0].loc, 'B-01-03-04');
+  // parseLocationCode 能把编码翻译成人话
+  assert.equal(Core.parseLocationCode('B-01-03-04').text, 'B区 1号货架 第3层 第4位');
+});
+
+test('定位分级：只有容器且容器有库位 → 仍算精确', () => {
+  const s = mkState();
+  s.materials[0].loc = '';
+  s.materials[0].container = 'XK-001';
+  s.containers = [{ code: 'XK-001', loc: 'B-05-02-03' }];
+  s.locations = [{ code: 'B-05-02-03', kind: '货架', desc: 'B区5号货架 第二层 第3位' }];
+  const d = Core.locateDetail(s, 'MAT-A');
+  assert.equal(d.grade, 'exact');
+  assert.match(d.path, /B区5号货架 第二层 第3位/);
+  assert.match(d.path, /容器 XK-001/);
+});
+
+test('定位分级：只有容器且容器未登记库位 → container', () => {
+  const s = mkState();
+  s.materials[0].loc = '';
+  s.materials[0].container = 'XK-777';
+  s.containers = [{ code: 'XK-777', loc: '' }];
+  assert.equal(Core.locateDetail(s, 'MAT-A').grade, 'container');
+});
+
+test('定位分级：只有模块区 → zone（粗略）', () => {
+  const s = mkState();
+  s.materials[0].loc = '';
+  s.materials[0].container = '';
+  s.materials[0].zone = 'M-02';
+  const d = Core.locateDetail(s, 'MAT-A');
+  assert.equal(d.grade, 'zone');
+  assert.equal(d.level, 'zone');
+  assert.match(d.path, /模块区/);
+});
+
+test('定位分级：已领出的零件靠历史线索仍可定位（clue）', () => {
+  const s = mkState();
+  s.materials[0].loc = '';        // 已领出：台账里没有库位
+  s.materials[0].container = '';
+  s.materials[0].zone = '';
+  Core.recordScan(s, { code: 'MAT-A', hit: true, loc: 'B-08-01-02', now: T0 });
+  const d = Core.locateDetail(s, 'MAT-A');
+  assert.equal(d.grade, 'exact', '历史扫码带位置 → 可直接落到架-层-位');
+  assert.equal(d.loc, 'B-08-01-02');
+});
+
+test('定位分级：无位置但有流水 → clue，给出时间与位置', () => {
+  const s = mkState();
+  s.materials[0].loc = '';
+  s.materials[0].container = '';
+  s.materials[0].zone = '';
+  Core.executeOrder(s, Core.createOrder(s, { type: 'LL', code: 'LOC-1', items: [{ matCode: 'MAT-A', qty: 1 }] }).order, { now: T1 });
+  const d = Core.locateDetail(s, 'MAT-A');
+  assert.equal(d.grade, 'clue', '没有位置线索时退化为时间线索');
+  assert.match(d.path, /最近记录/);
+});
+
+test('定位分级：完全无记录 → none', () => {
+  const s = mkState();
+  s.materials[0].loc = '';
+  s.materials[0].container = '';
+  s.materials[0].zone = '';
+  assert.equal(Core.locateDetail(s, 'MAT-A').grade, 'none');
+  assert.equal(Core.locateDetail(s, 'NOT-EXIST').grade, 'none');
+});
+
+test('locateAudit【验收标准 9】随机抽 10 个零件，全部可定位且多数精确', () => {
+  const s = mkState({ materials: [] });
+  s.locations = [];
+  s.containers = [];
+  for (let i = 1; i <= 40; i++) {
+    const hasLoc = i % 4 !== 0;                       // 3/4 有库位
+    s.materials.push({
+      code: 'P-' + String(i).padStart(2, '0'), name: '零件' + i, qty: i, minQty: 0, cost: 0,
+      loc: hasLoc ? 'B-01-' + String((i % 4) + 1).padStart(2, '0') + '-01' : '',
+      container: (i % 4 === 0) ? '' : '',
+      zone: 'M-0' + ((i % 5) + 1)
+    });
+  }
+  const rep = Core.locateAudit(s, { sample: 10, seed: 42 });
+  assert.equal(rep.checked, 10);
+  assert.equal(rep.total, 40);
+  assert.equal(rep.ok, true, '不应有完全无法定位的零件');
+  assert.equal(rep.summary.none, 0);
+  assert.ok(rep.preciseRatio >= 0.5, '精确率应过半，实际 ' + rep.preciseRatio);
+});
+
+test('locateAudit：同 seed 抽样可复现，不同 seed 抽样不同', () => {
+  const s = mkState({ materials: [] });
+  for (let i = 0; i < 50; i++) s.materials.push({ code: 'P' + i, name: 'n' + i, qty: 1, minQty: 0, cost: 0, loc: 'B-01-01-01' });
+  const a = Core.locateAudit(s, { sample: 10, seed: 7 }).results.map(r => r.code);
+  const b = Core.locateAudit(s, { sample: 10, seed: 7 }).results.map(r => r.code);
+  const c = Core.locateAudit(s, { sample: 10, seed: 99 }).results.map(r => r.code);
+  assert.deepEqual(a, b, '同 seed 应抽到同一批');
+  assert.notDeepEqual(a, c, '不同 seed 应抽出不同批次');
+});
+
+test('locateAudit：抽查数量超过总数时按总数取', () => {
+  const s = mkState();
+  const rep = Core.locateAudit(s, { sample: 100 });
+  assert.equal(rep.checked, 2);
+  assert.equal(rep.total, 2);
+});
+
+test('locateAudit：能标出无法定位的零件（负数用于验证告警真的会触发）', () => {
+  const s = mkState({ materials: [
+    { code: 'HAS-LOC', name: '有位置', qty: 1, minQty: 0, cost: 0, loc: 'B-01-01-01' },
+    { code: 'NO-CLUE', name: '完全无线索', qty: 1, minQty: 0, cost: 0, loc: '', container: '', zone: '' }
+  ] });
+  const rep = Core.locateAudit(s, { sample: 10, seed: 1 });
+  assert.equal(rep.ok, false, '存在无法定位的零件时 ok 必须为 false');
+  assert.equal(rep.summary.none, 1);
+  assert.ok(rep.results.find(r => r.code === 'NO-CLUE'));
+});
+
+test('回归：locateDetail 与扫码页、台账页看到的位置一致', () => {
+  const s = mkState();
+  s.materials[0].loc = 'B-01-05-06';
+  s.materials[0].container = 'XK-001';
+  s.materials[0].zone = 'M-03';
+  const d = Core.locateDetail(s, 'MAT-A');
+  const L = Core.locateMaterial(s, 'MAT-A');
+  assert.equal(d.loc, L.loc);
+  assert.equal(d.container, L.container);
+  assert.equal(d.zone, L.zone);
+  assert.equal(d.source, '物料台账');
+});

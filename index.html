@@ -203,6 +203,12 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         <tbody></tbody>
       </table>
       <datalist id="zoneList"></datalist>
+      <div class="toolbar" style="margin-top:10px">
+        <button class="btn small ghost" id="btnLocateAudit">🎯 定位抽查（随机 10 件）</button>
+        <button class="btn small ghost" id="btnLocateFind">📍 按位置查物料</button>
+        <span class="hint">验收标准 9：随机抽查任一零件，都能给出库位/容器/模块区（精确到架-层-位）或最近一次扫码/流水的位置与时间</span>
+      </div>
+      <div id="locateAuditBox" style="display:none"></div>
       <p class="hint" style="margin-top:8px">所有修改自动保存到浏览器本地；换电脑/换浏览器前请「导出备份 JSON」（全量含流水）或「导出 Excel 台账」。库存数量带<b>黄底=低于安全库存，红底=负库存</b>；手工改数量会要求填写调整原因并写入流水。</p>
       <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;color:#445" id="txnSummary">📜 库存流水</summary>
       <div class="toolbar" style="margin-top:8px">
@@ -882,6 +888,59 @@ function renderTxns() {
     || '<tr><td colspan="8" class="hint" style="text-align:center">（暂无流水）</td></tr>';
 }
 document.getElementById('btnAuditReplay').addEventListener('click', replayAudit);
+
+/* ---------- 定位抽查（验收标准 9） ---------- */
+const LOCATE_GRADE = { exact: ['精确', '#2d9d4f'], container: ['容器', '#1a8fb0'], zone: ['模块区', '#c98a00'], clue: ['历史线索', '#c98a00'], none: ['无法定位', '#d33a2c'] };
+
+function renderLocateAudit(rep, ms) {
+  const box = document.getElementById('locateAuditBox');
+  const g = g => { const [t, c] = LOCATE_GRADE[g] || [g, '#8892a2']; return '<span style="color:' + c + ';font-weight:bold">' + t + '</span>'; };
+  const far = rep.results.filter(r => r.grade !== 'exact' && r.grade !== 'container');
+  box.style.display = 'block';
+  box.className = 'panel';
+  box.style.marginTop = '10px';
+  box.innerHTML =
+    '<h3 style="margin:0 0 6px;font-size:15px">🎯 定位抽查结果</h3>' +
+    '<div class="hint" style="margin-bottom:6px">物料总数 ' + rep.total + '，随机抽查 ' + rep.checked + ' 件（seed ' + rep.seed + '，同 seed 可复现）　' +
+    '本次查询耗时 <b>' + ms.toFixed(1) + ' ms</b>　精确率 <b>' + Math.round(rep.preciseRatio * 100) + '%</b></div>' +
+    '<table class="grid"><thead><tr><th style="width:110px">物料码</th><th>名称</th><th style="width:60px">数量</th><th style="width:80px">精度</th><th>位置</th><th style="width:70px">来源</th></tr></thead><tbody>' +
+    rep.results.map(r => '<tr><td>' + esc(r.code) + '</td><td>' + esc(r.name || '—') + '</td><td>' + (r.qty == null ? '—' : r.qty) + '</td>' +
+      '<td>' + g(r.grade) + '</td><td>' + esc(r.path || '—') + '</td><td class="hint">' + esc(r.source || '—') + '</td></tr>').join('') +
+    '</tbody></table>' +
+    '<div class="toolbar" style="margin-top:8px">' +
+    '<span class="hint">汇总：精确 ' + rep.summary.exact + ' · 容器 ' + rep.summary.container + ' · 模块区 ' + rep.summary.zone + ' · 历史线索 ' + rep.summary.clue + ' · 无法定位 ' + rep.summary.none + '</span>' +
+    (far.length ? '<span class="hint" style="color:#c98a00">⚠️ ' + far.length + ' 件只能给到粗略位置或历史线索</span>' : '') +
+    (rep.ok ? '<span class="hint" style="color:#2d9d4f">✅ 每一件都能定位</span>' : '<span class="hint" style="color:#d33a2c">❌ 有零件无法定位，请补库位/容器/模块区</span>') +
+    '<button class="btn small ghost" id="btnLocateAuditClose">关闭</button></div>';
+  const close = document.getElementById('btnLocateAuditClose');
+  if (close) close.addEventListener('click', () => { box.style.display = 'none'; });
+  // 注意：抽查只是"读"，不能写进扫码历史 —— 否则会被当成一次真实的现场扫码，
+  // 污染「最近扫码」时间，甚至影响 30S 定位回查的线索。
+}
+document.getElementById('btnLocateAudit').addEventListener('click', () => {
+  const t0 = performance.now();
+  const rep = CORE.locateAudit(state, { sample: 10 });
+  const ms = performance.now() - t0;
+  renderLocateAudit(rep, ms);
+  log('定位抽查：抽查 ' + rep.checked + ' 件，精确 ' + rep.summary.exact + '，无法定位 ' + rep.summary.none + '，耗时 ' + ms.toFixed(1) + 'ms');
+});
+document.getElementById('btnLocateFind').addEventListener('click', () => {
+  const code = prompt('输入库位 / 容器 / 模块区编码，列出该位置的物料：\n例：B-01-01-01 或 XK-001 或 M-01', '');
+  if (!code || !code.trim()) return;
+  const c = code.trim();
+  const hit = state.materials.filter(m => m.loc === c || m.container === c || m.zone === c);
+  const r = CORE.resolveLocation(state, c);
+  const box = document.getElementById('locateAuditBox');
+  box.style.display = 'block'; box.className = 'panel'; box.style.marginTop = '10px';
+  box.innerHTML = '<h3 style="margin:0 0 6px;font-size:15px">📍 ' + esc(r.text) + ' <span class="hint">' + esc(c) + '</span></h3>' +
+    (hit.length
+      ? '<table class="grid"><thead><tr><th style="width:110px">物料码</th><th>名称</th><th style="width:60px">库存</th><th style="width:90px">匹配字段</th></tr></thead><tbody>' +
+        hit.map(m => '<tr><td>' + esc(m.code) + '</td><td>' + esc(m.name) + '</td><td>' + m.qty + '</td>' +
+          '<td class="hint">' + (m.loc === c ? '库位' : m.container === c ? '容器' : '模块区') + '</td></tr>').join('') + '</tbody></table>'
+      : '<p class="hint">该位置没有登记任何物料。</p>') +
+    '<div class="toolbar" style="margin-top:8px"><button class="btn small ghost" id="btnLocateAuditClose2">关闭</button></div>';
+  document.getElementById('btnLocateAuditClose2').addEventListener('click', () => { box.style.display = 'none'; });
+});
 document.getElementById('btnAuditExport').addEventListener('click', () => {
   const ord = orderedTxns();
   const blob = new Blob([JSON.stringify({ app: '416MES-audit', version: 1, deviceId: state.deviceId, exportedAt: new Date().toISOString(), count: ord.length, txns: ord }, null, 1)], { type: 'application/json' });
@@ -910,6 +969,7 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('cl
   history.replaceState(null, '', '#' + b.dataset.tab);   // 支持 index.html#tab 深链
   document.querySelectorAll('nav.tabs button').forEach(x => x.classList.toggle('on', x === b));
   document.querySelectorAll('section.tab').forEach(s => s.classList.toggle('on', s.id === 'tab-' + b.dataset.tab));
+  if (b.dataset.tab === 'ledger') renderLedger();   // 数据可能在别的页签被改过，切回时必须重渲染
   if (b.dataset.tab === 'label') renderLabelTab();
   if (b.dataset.tab === 'wip') renderWip();
   if (b.dataset.tab === 'nec') renderNec();
@@ -1951,18 +2011,31 @@ function findMat(code) { return state.materials.find(m => m.code === code); }
 function locationCard(code, { withTimes = true } = {}) {
   const L = CORE.locateMaterial(state, code);
   const rows = [];
-  if (L.loc) rows.push('<b>库位</b>' + esc(L.loc) + (L.source === '最近扫码' ? ' <span class="hint">（上次扫码时的位置）</span>' : ''));
-  if (L.container) rows.push('<b>容器</b>' + esc(L.container));
-  if (L.zone) rows.push('<b>模块区</b>' + esc(L.zone));
+  // 位置一律翻译成可读的「架-层-位 / 工位格 / 区块」；编码同时保留便于核对标签
+  if (L.loc) {
+    const r = CORE.resolveLocation(state, L.loc);
+    rows.push('<b>库位</b><span style="font-weight:bold">' + esc(r.text) + '</span> <span class="hint">' + esc(L.loc) + '</span>' +
+      (L.source === '最近扫码' ? ' <span class="hint">（上次扫码时的位置）</span>' : ''));
+  }
+  if (L.container) {
+    const c = CORE.resolveLocation(state, L.container);
+    rows.push('<b>容器</b>' + esc(L.container) + (c.containerAt ? ' <span class="hint">位于 ' + esc(c.containerAt.text) + '</span>' : ''));
+  }
+  if (L.zone) {
+    const z = CORE.resolveLocation(state, L.zone);
+    rows.push('<b>模块区</b>' + esc(L.zone) + (z.desc ? ' <span class="hint">' + esc(z.desc) + '</span>' : ''));
+  }
   if (!rows.length) rows.push('<span class="hint">（台账未登记库位 / 容器 / 模块区）</span>');
 
   const times = [];
   if (L.lastScan) times.push('<b>最近扫码</b>' + esc(L.lastScan.time) + ' <span class="hint">' + CORE.timeAgo(L.lastScan.ts) + ' · ' + esc(L.lastScan.operator || '—') + '</span>');
   if (L.lastTxn) times.push('<b>最近流水</b>' + esc(L.lastTxn.time) + ' <span class="hint">' + CORE.timeAgo(L.lastTxn.ts) + ' · ' + esc(L.lastTxn.type) + ' ' + (L.lastTxn.delta > 0 ? '+' : '') + L.lastTxn.delta + ' → ' + esc(L.lastTxn.balance) + (L.lastTxn.ref ? ' · 单 ' + esc(L.lastTxn.ref) : '') + '</span>');
-  if (L.lastOrder) times.push('<b>最近工单</b>' + esc(L.lastOrder.code) + ' <span class="hint">' + esc(WIP_NAMES[L.lastOrder.type] || L.lastOrder.type) + ' · ' + esc(L.lastOrder.status) + (L.lastOrder.execTime ? ' · ' + esc(L.lastOrder.execTime) : '') + '</span>');
+  if (L.lastOrder) times.push('<b>最近工单</b>' + esc(L.lastOrder.code) + ' <span class="hint">' + esc(WIP_NAMES[L.lastOrder.type] || L.lastOrder.type) + ' · ' + esc(CORE.statusLabel(L.lastOrder.status)) + (L.lastOrder.execTime ? ' · ' + esc(L.lastOrder.execTime) : '') + '</span>');
 
+  const g = CORE.gradeLocation(state, L);
+  const GRADE_TXT = { exact: '精确', container: '容器', zone: '模块区', clue: '历史线索', none: '无' };
   return '<div class="kv" style="margin-top:6px">' +
-    '<div><span class="hint">定位来源：' + esc(L.source) + '</span></div>' +
+    '<div><span class="hint">定位来源：' + esc(L.source) + '　定位精度：' + esc(GRADE_TXT[g.grade] || g.grade) + '</span></div>' +
     rows.map(r => '<div>' + r + '</div>').join('') +
     (times.length && withTimes ? '<div style="margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">' + times.map(t => '<div>' + t + '</div>').join('') + '</div>' : '') +
     '</div>';
