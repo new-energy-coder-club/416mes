@@ -2709,17 +2709,29 @@ function pushBlockedSummary() {
   const b = state.__pushBlocked || {};
   const rows = [];
   Object.entries(b).forEach(([tbl, m]) => Object.entries(m || {}).forEach(([id, fields]) => {
-    if (fields && fields.length) rows.push({ table: tbl, id, fields });
+    if (fields && fields.length && findRec(tbl, id)) rows.push({ table: tbl, id, fields });   // 记录已被删除的不再显示
   }));
   return rows;
 }
 function tableKeyOf(t, rec) { return String(t === 'transactions' ? rec.seq : rec.code); }
 function findRec(t, id) { return (state[t] || []).find(x => tableKeyOf(t, x) === String(id)); }
 
+/** 待推送列表按「当前本地还存在的记录」重算，避免删掉记录后面板还在报旧数字 */
+function pendingSummary() {
+  const out = {};
+  if (!_pendingPush) return out;
+  Object.entries(_pendingPush).forEach(([tbl, list]) => {
+    const alive = list.filter(r => findRec(tbl, tableKeyOf(tbl, r)));
+    if (alive.length) out[tbl] = alive;
+  });
+  return out;
+}
+
 function renderAlignBox() {
   const box = document.getElementById('cloudGapBox');
   if (!box) return;
-  const pendingCount = _pendingPush ? Object.values(_pendingPush).reduce((a, v) => a + v.length, 0) : 0;
+  const pending = pendingSummary();
+  const pendingCount = Object.values(pending).reduce((a, v) => a + v.length, 0);
   const blocked = pushBlockedSummary();
   const rep = _lastReport;
   const missingCols = rep ? Object.entries(rep.tables).filter(([, t]) => t.missingColumns.length) : [];
@@ -2760,7 +2772,7 @@ function renderAlignBox() {
   const pp = document.getElementById('btnPushPending');
   if (pp) pp.addEventListener('click', async () => {
     pp.disabled = true; pp.textContent = '推送中…';
-    const n = await pushPending();
+    const n = await pushPending(pending);
     alert('已提交 ' + n + ' 条到飞书。刷新后两边即为一致。');
     fsBoot();
   });
@@ -2776,14 +2788,14 @@ function renderAlignBox() {
 }
 
 /** 把合并时记下的「本地新建、飞书还没有」的记录推到飞书 */
-async function pushPending() {
-  if (!_pendingPush) return 0;
+async function pushPending(list) {
+  const src = list || pendingSummary();
   let n = 0;
-  for (const [key, list] of Object.entries(_pendingPush)) {
+  for (const [key, arr] of Object.entries(src)) {
     if (PUSHABLE.indexOf(key) < 0) continue;
-    for (let i = 0; i < list.length; i += 100) {
-      await fsPushRecord(key, list.slice(i, i + 100));
-      n += Math.min(100, list.length - i);
+    for (let i = 0; i < arr.length; i += 100) {
+      await fsPushRecord(key, arr.slice(i, i + 100));
+      n += Math.min(100, arr.length - i);
     }
   }
   return n;
