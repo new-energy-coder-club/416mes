@@ -1006,6 +1006,7 @@
     locateAudit: locateAudit,
     pickXianyu: pickXianyu,
     normalizeXianyuRow: normalizeXianyuRow,
-    mergeXianyu: mergeXianyu
+    mergeXianyu: mergeXianyu,
+    round6: round6
   };
 });
