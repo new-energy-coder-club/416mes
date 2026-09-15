@@ -14,8 +14,9 @@
 import { execFileSync } from 'node:child_process';
 import XLSX from 'xlsx';
 
-const BASE_TOKEN = 'E5pEbt6fJalkUvstfmJc23kongd';
-const TABLE_ID = 'tbl4ASLFeTdssZIF';
+// 源表：优先读环境变量（避免把标识写死在源码里），未配置时回退到「A416零件位置明细」
+const BASE_TOKEN = process.env.FEISHU_A416_BASE_TOKEN || 'E5pEbt6fJalkUvstfmJc23kongd';
+const TABLE_ID = process.env.FEISHU_A416_TABLE_ID || 'tbl4ASLFeTdssZIF';
 
 /* ---------- 分类关键词（顺序即优先级） ---------- */
 const CAT_RULES = [

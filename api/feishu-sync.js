@@ -9,8 +9,11 @@
  * 应用需具备 base:record:read 权限，且已加入该 Base。
  */
 
-const BASE_TOKEN = 'NpWBb0RXYayqfosYqnScWdlDnMb';
-const TABLES = {
+// Base 与表 ID：优先读环境变量，便于换 Base / 避免把标识写死在源码里。
+// 未配置时回退到当前线上 Base（保持既有部署继续可用）。建议在 Vercel 配好
+// FEISHU_BASE_TOKEN / FEISHU_TABLES 后删除这里的回退值。
+const BASE_TOKEN = process.env.FEISHU_BASE_TOKEN || 'NpWBb0RXYayqfosYqnScWdlDnMb';
+const TABLES = process.env.FEISHU_TABLES ? JSON.parse(process.env.FEISHU_TABLES) : {
   materials: 'tblorMKz5gejPLLj',    // 物料台账
   locations: 'tblI4J48v6GvLZZ2',    // 库位
   containers: 'tblf726XegK4za9v',   // 容器
@@ -101,6 +104,9 @@ module.exports = async (req, res) => {
       state[key] = recs.map(DOWN[key]).filter(r => r.code || r.seq != null);
     }
     state.txnSeq = Math.max(0, ...state.transactions.map(t => t.seq || 0));
+    // 网页端约定：库存流水「新的在前」（与 feishu-sync.mjs pull 一致）。
+    // 飞书表返回的是自然顺序，不排序会把乱序流水喂给合并逻辑。
+    state.transactions.sort((a, b) => (b.seq || 0) - (a.seq || 0));
     res.status(200).json({ state, deviceId: 'feishu-cloud', pulledAt: new Date().toISOString() });
   } catch (e) {
     res.status(502).json({ error: String(e.message || e) });
