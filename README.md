@@ -86,6 +86,43 @@ npm test             # 语法检查 + 核心库存规则单元测试
 4. 补齐后把绊线测试改成往返一致性断言
 5. 再按下节步骤做真机验证
 
+## 闲鱼数据同步（Phase 5）
+
+对应需求书 4.3。字段映射与合并规则如下（`mes-core.js` 的 `mergeXianyu()`，纯逻辑可单测）：
+
+| 闲鱼字段 | → 台账字段 | 说明 |
+|---|---|---|
+| `outer_id` | 物料码 `code` | 必填，缺失的行跳过并给出原因 |
+| `product_id` | 闲鱼XY编号 `xy` | |
+| `标题` | 名称 `name` | |
+| `stock` | 库存 `qty` | **0 表示售罄，必须采用** |
+| `售价` | 成本 `cost` | 按 `priceDivisor` 换算（默认 100，即售价单位为分） |
+| `首图` | 图片链接 `img` | |
+| — | 分类 `cat` | 新建时默认 `QT`，**已有记录不覆盖** |
+
+**合并规则**：
+
+- **不覆盖本地已维护字段**：分类 / 库位 / 容器 / 模块区 / 安全库存 / 规格型号
+- **空值不覆盖旧值**：名称为空、`product_id` 为空、首图为空时，保留台账里的旧值
+- **数量与成本例外**：外部值始终采用（`stock=0` 表示售罄，这是有意义的业务状态）
+- **幂等**：重复执行不产生重复记录，第二次全部「无变化」
+
+**用法**：
+
+```bash
+cp xianyu-sync.config.example.json xianyu-sync.config.json   # 按需改
+node xianyu-sync.mjs status                                  # 查看配置与取数命令可用性
+node xianyu-sync.mjs import 闲鱼导出.csv 416MES_备份.json --dry-run   # 先预演
+node xianyu-sync.mjs import 闲鱼导出.csv 416MES_备份.json             # 正式合并
+node xianyu-sync.mjs fetch 416MES_备份.json                  # 先跑配置里的取数命令再合并
+```
+
+支持 **JSON 数组**（或 `{items|data|list|rows|products|result: [...]}`）与 **CSV**（含引号包裹、逗号、双引号转义）。合并后写出的是标准备份 JSON，在网页端「导入合并」即可回本机——这就是与现有 Excel / JSON 导入流程的打通方式。
+
+> **关于取数**：闲鱼没有公开官方接口，取数方式因人而异，因此把它抽象成一条配置命令 `fetchCommand`，只要向 stdout 输出 JSON 或 CSV 即可。想用 Python 爬取脚本，就放进 `.venv-xianyu/` 并在配置里指明命令——**合并逻辑与 Python 环境完全解耦**，留在 `xianyu-sync.mjs` + `mes-core.js` 里，可以不依赖任何 Python 环境直接单测。
+>
+> 与计划书的差异：计划书写的是 `xianyu-sync.py` + `.venv-xianyu/`。这里改用 Node 实现，因为合并逻辑需要与 `mes-core.js` 共用同一套规则和测试；Python 只作为可选的取数适配器保留。
+
 ## 30S 精确定位（Phase 4）
 
 对应需求书验收标准 9：「随机抽查任一零件（含已领出/在容器内的），从提出查询到给出精确位置（库位/容器/模块区，精确到架-层-位）用时 ≤ 30 S；查台账无果时须定位到最近一次扫码/流水的时间与位置」。

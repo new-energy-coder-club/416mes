@@ -863,6 +863,100 @@
     };
   }
 
+  /* ================= 闲鱼数据合并（需求书 4.3） =================
+     字段映射：outer_id → 物料码、product_id → 闲鱼XY编号、标题 → 名称、
+               stock → 库存、售价/100 → 成本、首图 → 图片链接、分类默认 QT
+     合并规则：不覆盖本地已维护的分类/库位/容器/模块区/安全库存；
+               空值不覆盖旧值；数量与成本例外 —— 外部值始终采用（0 表示售罄）。 */
+
+  var XIANYU_KEYS = {
+    code: ['outer_id', 'outerId', 'outerid', '物料码', '外部编码', '编码'],
+    xy: ['product_id', 'productId', 'productid', '闲鱼XY编号', '商品ID', 'item_id'],
+    name: ['标题', 'title', '名称', '商品标题'],
+    qty: ['stock', '库存', '库存数量', '数量'],
+    price: ['售价', 'price', '价格'],
+    img: ['首图', 'pic_url', 'picUrl', 'image', '图片链接', '主图']
+  };
+
+  /** 从一行外部数据里按候选键名取值（键名大小写不敏感，空值视为未提供） */
+  function pickXianyu(row, field) {
+    if (!row || typeof row !== 'object') return undefined;
+    var keys = XIANYU_KEYS[field] || [];
+    var lower = Object.create(null);
+    Object.keys(row).forEach(function (k) { lower[String(k).trim().toLowerCase()] = row[k]; });
+    for (var i = 0; i < keys.length; i++) {
+      var v = lower[keys[i].toLowerCase()];
+      if (v !== undefined && v !== null && String(v).trim() !== '') return v;
+    }
+    return undefined;
+  }
+
+  /** 外部行 → 规范字段（售价按 priceDivisor 换算成元，默认 /100） */
+  function normalizeXianyuRow(row, opts) {
+    opts = opts || {};
+    var div = opts.priceDivisor == null ? 100 : opts.priceDivisor;
+    var price = toQty(pickXianyu(row, 'price'));
+    var cv = pickXianyu(row, 'code'), xv = pickXianyu(row, 'xy'), nv = pickXianyu(row, 'name'), iv = pickXianyu(row, 'img');
+    return {
+      code: String(cv == null ? '' : cv).trim(),
+      xy: String(xv == null ? '' : xv).trim(),
+      name: String(nv == null ? '' : nv).trim(),
+      qty: toQty(pickXianyu(row, 'qty')),
+      cost: price === null ? null : round6(price / div),
+      img: String(iv == null ? '' : iv).trim()
+    };
+  }
+
+  /**
+   * 把闲鱼数据合并进台账（只补空缺，不覆盖本地已维护字段）。
+   * @returns {{created:number, updated:number, unchanged:number, skipped:Array, changes:Array}}
+   */
+  function mergeXianyu(state, rows, opts) {
+    opts = opts || {};
+    if (!state || !Array.isArray(state.materials)) throw new Error('mergeXianyu: state.materials 不可用');
+    var stat = { created: 0, updated: 0, unchanged: 0, skipped: [], changes: [] };
+    var seen = Object.create(null);
+
+    (rows || []).forEach(function (raw, idx) {
+      var r = normalizeXianyuRow(raw, opts);
+      if (!r.code) { stat.skipped.push({ index: idx, reason: '缺少 outer_id（物料码）' }); return; }
+      if (seen[r.code]) { stat.skipped.push({ index: idx, code: r.code, reason: '同一批数据里 outer_id 重复' }); return; }
+      seen[r.code] = true;
+
+      var m = findMaterial(state, r.code);
+      if (!m) {
+        // 新建：只填外部能给到的字段，本地字段用安全默认值
+        var fresh = {
+          code: r.code, cat: 'QT', name: r.name || '', spec: '', xy: r.xy || '',
+          loc: '', container: '', zone: '',
+          qty: r.qty === null ? 0 : r.qty,
+          minQty: 0,
+          cost: r.cost === null ? 0 : r.cost,
+          img: r.img || ''
+        };
+        state.materials.push(fresh);
+        stat.created++;
+        stat.changes.push({ code: r.code, kind: 'create', fields: Object.keys(fresh) });
+        return;
+      }
+
+      var changed = [];
+      // 数量 / 成本：外部值始终采用（0 表示售罄）
+      if (r.qty !== null && r.qty !== m.qty) { changed.push('qty: ' + m.qty + ' → ' + r.qty); m.qty = r.qty; }
+      if (r.cost !== null && r.cost !== m.cost) { changed.push('cost: ' + m.cost + ' → ' + r.cost); m.cost = r.cost; }
+      // 其余字段：空值不覆盖旧值
+      ['name', 'xy', 'img'].forEach(function (f) {
+        if (r[f] && r[f] !== m[f]) { changed.push(f + ': ' + (m[f] || '（空）') + ' → ' + r[f]); m[f] = r[f]; }
+      });
+      // cat / loc / container / zone / minQty 一律不动（本地已维护）
+
+      if (changed.length) { stat.updated++; stat.changes.push({ code: r.code, kind: 'update', fields: changed }); }
+      else stat.unchanged++;
+    });
+
+    return stat;
+  }
+
   return {
     WIP_NAMES: WIP_NAMES,
     STATUS: STATUS,
@@ -909,6 +1003,9 @@
     resolveLocation: resolveLocation,
     gradeLocation: gradeLocation,
     locateDetail: locateDetail,
-    locateAudit: locateAudit
+    locateAudit: locateAudit,
+    pickXianyu: pickXianyu,
+    normalizeXianyuRow: normalizeXianyuRow,
+    mergeXianyu: mergeXianyu
   };
 });

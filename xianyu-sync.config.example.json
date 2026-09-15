@@ -1,0 +1,13 @@
+{
+  "priceDivisor": 100,
+  "fetchCommand": "python .venv-xianyu/fetch.py --json",
+  "_说明": [
+    "priceDivisor：售价 → 成本 的除数（需求书 4.3 定为 100，即闲鱼售价单位为分）。",
+    "fetchCommand：可选的取数命令，stdout 需输出 JSON 数组或 CSV。",
+    "  闲鱼无公开官方接口，取数方式因人而异，因此抽象成一条命令：",
+    "  想用 Python 爬取脚本，把它放进 .venv-xianyu/ 并在这里指明命令即可；",
+    "  合并逻辑与 Python 环境完全解耦（在 xianyu-sync.mjs + mes-core.js 里）。",
+    "  不配置则用 `node xianyu-sync.mjs import <文件>` 手动导入。",
+    "本文件为示例，真实配置请复制为 xianyu-sync.config.json（已被 .gitignore 排除）。"
+  ]
+}
