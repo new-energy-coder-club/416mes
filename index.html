@@ -822,6 +822,7 @@ function load() {
   try { const raw = localStorage.getItem(LS_KEY); if (raw) { state = JSON.parse(raw); hadSaved = true; } } catch (e) { }
   if (!state) state = seedState();
   state.__freshSeed = !hadSaved;   // 本次是「全新数据空间」，用于提示用户数据可能存在别的地址下
+  /* 出厂示例数据稍后由 dropSeedDemoRecords() 在云端同步成功时清理（见那里说明） */
   state.necOrders = state.necOrders || [];      // 旧版本数据迁移
   state.items = state.items || [];
   state.members = state.members || [];
@@ -1575,7 +1576,11 @@ async function cloudSync({ silent = false } = {}) {
   try {
     const r = await fetch(CLOUD_SYNC_API, { cache: 'no-store' });
     if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ('HTTP ' + r.status)); }
-    const stat = mergePackage(await r.json(), { from: '飞书云端', upsertMembers: true });
+    const pkg = await r.json();
+    const stat = mergePackage(pkg, { from: '飞书云端', upsertMembers: true });
+    // 这条通路（Vercel 只读接口 / fallback）也要清示例数据，否则 file:// 下清理不生效
+    dropSeedDemoRecords(pkg.state || pkg);
+    save(); renderLedger(); renderMembers(); renderMemberTagBar();
     log('云端同步完成：' + mergeStatText(stat));
     // 关键：云端只读同步成功后也要更新顶部状态。
     // fsBoot()（真源服务/隧道）与 cloudSync()（Vercel 只读接口）是两条独立通路，
@@ -2609,6 +2614,51 @@ async function fsPullState() {
   try { fsBase = ''; return await tryBase(''); }   // 同源（node feishu-server）
   catch (e1) { fsBase = FS_FALLBACK_BASE; return await tryBase(FS_FALLBACK_BASE); }   // 隧道后端
 }
+/* 全新初始化时灌了出厂示例数据；云端拉到真实数据后要把这些示例记录丢掉，
+   否则网页端会比飞书多出几条「只在本地」的记录（人员多 3 个、物料多 2 个…）。
+   只清理「在示例快照里、且云端没有」的记录，不会误删用户自己新建的数据。
+   注意：这个函数必须被两条云端通路都调用 —— fsMerge（真源/同源）与 cloudSync（Vercel 只读接口），
+   否则在 file:// 或只读接口下会出现「清理没生效」。 */
+let _seedDemoCodes = null;
+/** 出厂示例记录的编码基线（由 seedState() 现算，种子数据改了也自动跟上） */
+function seedDemoCodes() {
+  if (_seedDemoCodes) return _seedDemoCodes;
+  try {
+    const s = seedState();
+    _seedDemoCodes = {
+      materials: (s.materials || []).map(x => x.code),
+      members: (s.members || []).map(x => x.code),
+      items: (s.items || []).map(x => x.code),
+      manuals: (s.manuals || []).map(x => x.code)
+    };
+  } catch { _seedDemoCodes = {}; }
+  return _seedDemoCodes;
+}
+/**
+ * 清掉「出厂示例数据里、但云端没有」的记录。
+ *
+ * 为什么要做：页面首次打开会灌示例物料/人员/物品/手册；而合并是并集，
+ * 所以网页端会比飞书多出几条「只在本地」的记录（人员多 3 个、物料多 2 个…），
+ * 看上去像「同步不同步」。
+ *
+ * 为什么不直接按编码硬删：示例里的 GJ-SD-001 / WP-001 等在飞书里**也是真数据**，
+ * 所以判据是「属于示例基线 **且** 云端没有」才删 —— 用户自己新建的绝不会被误删。
+ * 每次云端同步成功都会跑一遍，因此老浏览器里已经存下的示例数据同样会被清掉。
+ */
+function dropSeedDemoRecords(remote) {
+  if (!remote) return;
+  const snap = seedDemoCodes();
+  ['materials', 'members', 'items', 'manuals'].forEach(key => {
+    if (!Array.isArray(remote[key]) || !Array.isArray(snap[key]) || !snap[key].length) return;
+    const remoteCodes = new Set(remote[key].map(r => r.code).filter(Boolean));
+    if (!remoteCodes.size) return;                    // 云端本来就是空的 → 保留示例
+    const seedCodes = new Set(snap[key]);
+    const before = state[key].length;
+    state[key] = state[key].filter(x => !seedCodes.has(x.code) || remoteCodes.has(x.code));
+    if (state[key].length !== before) log('🧹 清理出厂示例数据 ' + key + '：' + (before - state[key].length) + ' 条（云端没有这些记录）');
+  });
+}
+
 function fsMerge(remote) {
   // 飞书为真源：按编码覆盖本地（本地多出的保留；流水按 seq 合并取并集）
   ['materials', 'locations', 'containers', 'members', 'items', 'manuals', 'workorders'].forEach(key => {
@@ -2617,6 +2667,7 @@ function fsMerge(remote) {
     remote[key].forEach(r => { if (r.code) byCode.set(r.code, Object.assign({}, byCode.get(r.code) || {}, r)); });
     state[key] = [...byCode.values()];
   });
+  dropSeedDemoRecords(remote);   // 云端有真实数据时清掉出厂示例
   if (Array.isArray(remote.transactions) && remote.transactions.length) {
     const bySeq = new Map((state.transactions || []).filter(t => t.seq != null).map(t => [t.seq, t]));
     remote.transactions.forEach(t => { if (t.seq != null) bySeq.set(t.seq, t); });
