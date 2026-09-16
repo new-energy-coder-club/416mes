@@ -542,7 +542,7 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 'use strict';
 
 /* 应用版本：改到用户看得见的行为时手动 +1，页脚会显示，方便确认线上跑的是哪一版 */
-const APP_VERSION = '1.6.0';   // Phase 2：增量协议（10 秒探测 / 只拉变化行 / 隐藏暂停 / 恢复即拉）
+const APP_VERSION = '1.7.0';   // Phase 2 完成：增量协议 + 飞书侧删除闭环（census + 三重闸门）
 
 /* ---------- 标签类型配置 ---------- */
 const TYPES = {
@@ -2894,6 +2894,8 @@ function seedDemoCodes() {
      本地有、飞书没有、上次同步时没有 → 本地新建还没推上去 → 保留并待推送
    这里只负责把差异呈现出来 + 给一键入口，绝不静默批量写生产库。 */
 const TABLE_LABEL = { materials: '物料台账', locations: '库位', containers: '容器', members: '人员', items: '物品', manuals: '手册', workorders: '工单记录', transactions: '库存流水' };
+/** 每张表的业务主键字段名（必须与 outbox.js DEFAULT_TABLES / mes-core MERGE_TABLES 一致） */
+const TABLE_KEY_FIELD = { materials: 'code', locations: 'code', containers: 'code', members: 'code', items: 'code', manuals: 'code', workorders: 'code', transactions: 'seq' };
 const PUSHABLE = ['materials', 'locations', 'containers', 'members', 'items', 'manuals', 'workorders'];  // 流水由库存直写产生，不做批量推送
 const SYNC_TABLES = ['materials', 'locations', 'containers', 'members', 'items', 'manuals', 'workorders', 'transactions'];
 
@@ -2960,7 +2962,7 @@ function renderAlignBox() {
   const missingCols = rep ? Object.entries(rep.tables).filter(([, t]) => t.missingColumns.length) : [];
   const missingOpts = rep ? Object.entries(rep.tables).filter(([, t]) => t.missingOptions.length) : [];
   // 只要核对过就常显一致性表：一致本身也是要让人看见的信息
-  if (!rep && !pendingCount && !blocked.length) { box.style.display = 'none'; return; }
+  if (!rep && !pendingCount && !blocked.length && !Object.keys(_censusPending).length) { box.style.display = 'none'; return; }
 
   let html = dataConsistencyHtml();
   if (missingCols.length || missingOpts.length) {
@@ -2979,9 +2981,24 @@ function renderAlignBox() {
     blocked.slice(0, 5).map(b => (TABLE_LABEL[b.table] || b.table) + ' ' + b.id + '（' + b.fields.join('、') + '）').join('；') +
     (blocked.length > 5 ? ' …' : '') + '<br>';
 
+  // 待人工确认的删除：飞书里找不到、但没到自动删的门槛（超阈值 / 未连续两次 / 已执行工单）
+  const pendDel = Object.entries(_censusPending);
+  const pendDelCount = pendDel.reduce((a, [, v]) => a + v.keys.length, 0);
+  const REASON = { 'over-threshold': '数量超阈值', 'need-second-census': '首次发现，需再次确认', 'needs-human': '已执行/已取消工单，只能人工裁决' };
+  if (pendDelCount) {
+    html += '🗑️ <b>有 ' + pendDelCount + ' 条记录在飞书里找不到了</b>，需人工确认后才删除本地：<br>';
+    pendDel.forEach(([k, v]) => {
+      html += '<span class="hint">· <b>' + (TABLE_LABEL[k] || k) + '</b> ' + v.keys.length + ' 条（' +
+        (REASON[v.reason] || v.reason) + '）：<code>' + v.keys.slice(0, 8).join('</code>、<code>') +
+        (v.keys.length > 8 ? '</code> …' : '</code>') + '</span><br>';
+    });
+  }
+
   html += '<div class="toolbar" style="margin-top:6px">' +
     (pendingCount ? '<button class="btn small" id="btnPushPending">全部推到飞书</button>' : '') +
     '<button class="btn small ghost" id="btnRecheck">重新核对</button>' +
+    '<button class="btn small ghost" id="btnCensus">立即核对删除</button>' +
+    (pendDelCount ? '<button class="btn small" id="btnConfirmDel">确认删除这 ' + pendDelCount + ' 条</button>' : '') +
     (blocked.length ? '<button class="btn small ghost" id="btnRepushBlocked">重推受限字段</button>' : '') +
     '<button class="btn small ghost" id="btnHideAlign">收起</button></div>';
   box.style.display = 'block';
@@ -2999,6 +3016,31 @@ function renderAlignBox() {
     const n = await pushPending(pending);
     alert('已提交 ' + n + ' 条到飞书。刷新后两边即为一致。');
     fsBoot();
+  });
+  const cn = document.getElementById('btnCensus');
+  if (cn) cn.addEventListener('click', async () => {
+    cn.disabled = true; cn.textContent = '对账中…';
+    try { await fsCensusNow(); } finally { cn.disabled = false; cn.textContent = '立即核对删除'; }
+  });
+  const cd = document.getElementById('btnConfirmDel');
+  if (cd) cd.addEventListener('click', async () => {
+    const total = Object.values(_censusPending).reduce((a, v) => a + v.keys.length, 0);
+    if (!confirm('确认这 ' + total + ' 条记录在飞书里已被删除，并从本地一并删除？\n（此操作不可撤销，建议先「导出备份 JSON」）')) return;
+    cd.disabled = true;
+    let n = 0;
+    Object.entries(_censusPending).forEach(([k, v]) => {
+      const gone = new Set(v.keys.map(String));
+      const before = (state[k] || []).length;
+      state[k] = (state[k] || []).filter(rec => !gone.has(String(rec[TABLE_KEY_FIELD[k]])));
+      n += before - state[k].length;
+      state.__syncedKeys[k] = (state.__syncedKeys[k] || []).filter(x => !gone.has(String(x)));
+      // 人工已裁决 → 记进基线痕迹，避免下一轮又被当成「首次发现」
+      state.__censusMissing = state.__censusMissing || {};
+      state.__censusMissing[k] = { keys: v.keys, at: Date.now(), confirmed: true };
+    });
+    _censusPending = {};
+    save(); renderLedger(); renderTxns(); renderMembers(); renderWip(); renderNec(); renderAlignBox();
+    log('🗑️ 人工确认删除 ' + n + ' 条（飞书侧已不存在）');
   });
   const rb = document.getElementById('btnRepushBlocked');
   if (rb) rb.addEventListener('click', async () => {
@@ -3022,9 +3064,12 @@ const POLL_ACTIVE_MS = 10000;    // 可见 + 2 分钟内有操作
 const POLL_IDLE_MS = 60000;      // 可见但闲置
 const POLL_IDLE_AFTER = 120000;  // 超过这么久没操作就算闲置
 
+const CENSUS_INTERVAL_MS = 90000;   // 键集合对账是低频操作：90 秒一次
 let _pollTimer = null;
 let _pollBusy = false;
 let _lastUserActionAt = Date.now();
+let _lastCensusAt = 0;
+let _censusPending = {};            // 表 → 待人工确认的删除键（只展示，不自动删）
 
 /** 水位随 state 一起落盘（IndexedDB），刷新/换页面不会丢 */
 function fsWatermarks() {
@@ -3101,6 +3146,86 @@ async function fsIncrementalSync() {
   } finally { _pollBusy = false; }
 }
 
+/**
+ * ③ 键集合对账 → 飞书侧硬删传播。
+ *
+ * 这是唯一能判定「飞书里记录真的没了」的路径。三条硬规矩（lib/incremental.js 里实现并有断言）：
+ *   ① 分页不完整（任一页失败 / 收到数 != total）→ **放弃判定，绝不判删**
+ *   ② 单次超阈值（>5% 或 >50 条）→ 转人工
+ *   ③ 主数据要**连续两次**完整 census 都缺才自动确认；
+ *      已执行/已取消工单、库存流水一律人工
+ *   （流水根本不参与对账 —— append-only 台账记录消失该报「数据不完整」，不是静默删本地）
+ */
+async function fsRunCensus(opts) {
+  opts = opts || {};
+  const synced = state.__syncedKeys || {};
+  const prevMissingAll = state.__censusMissing || {};
+  const nextMissingAll = {};
+  _censusPending = {};
+  let deleted = 0, checked = 0, skipped = 0;
+
+  for (const key of SYNC_TABLES) {
+    if (key === 'transactions') continue;              // 闸门 4：流水不参与删除对账
+    const prevKeys = Array.isArray(synced[key]) ? synced[key] : null;
+    if (!prevKeys || !prevKeys.length) { skipped++; continue; }   // 没有基线 → 不判删
+
+    let r;
+    try { r = await fsPostIncremental({ mode: 'census', table: key }); }
+    catch (e) { log('⚠️ 键对账 ' + (TABLE_LABEL[key] || key) + ' 失败，本轮放弃判定（绝不猜删除）：' + e.message); skipped++; continue; }
+    checked++;
+
+    const prev = new Set(prevKeys.map(String));
+    const next = new Set((r.keys || []).map(String));
+    const missing = [...prev].filter(k => !next.has(k));
+
+    const prevMissing = (prevMissingAll[key] || {}).keys || [];
+    const humanOnly = key === 'workorders' && missing.some(k => {
+      const o = findRec('workorders', k);
+      return o && (o.status === '已执行' || o.status === '已取消');
+    });
+    const d = INC.censusDecision(prevKeys, r.keys, {
+      complete: r.complete,
+      tableId: key,
+      humanOnly,
+      ledgerConfirmed: INC.secondCensusConfirms(prevMissing, missing)
+    });
+
+    if (d.reason === 'census-incomplete') {
+      log('⚠️ ' + (TABLE_LABEL[key] || key) + ' 对账分页不完整（收到 ' + r.scanned + '/' + r.total + ' 条），本轮放弃判删');
+      nextMissingAll[key] = { keys: [], at: Date.now() };   // 不完整 → 清掉上一次的痕迹，避免误确认
+      continue;
+    }
+    nextMissingAll[key] = { keys: missing, at: Date.now() };
+
+    if (d.deletions.length) {
+      const gone = new Set(d.deletions.map(String));
+      const before = (state[key] || []).length;
+      state[key] = (state[key] || []).filter(rec => !gone.has(String(rec[TABLE_KEY_FIELD[key]])));
+      deleted += before - state[key].length;
+      state.__syncedKeys[key] = (state.__syncedKeys[key] || []).filter(k => !gone.has(String(k)));
+      log('🗑️ 飞书侧已删除 ' + (before - state[key].length) + ' 条 ' + (TABLE_LABEL[key] || key) + '，本地已同步删除');
+    }
+    if (d.toConfirm.length) {
+      _censusPending[key] = { keys: d.toConfirm, reason: d.reason };
+    }
+  }
+
+  state.__censusMissing = nextMissingAll;
+  _lastCensusAt = Date.now();
+  if (deleted) { save(); renderLedger(); renderTxns(); renderMembers(); renderWip(); renderNec(); }
+  const confirmCount = Object.values(_censusPending).reduce((a, v) => a + v.keys.length, 0);
+  if (confirmCount) log('⚠️ 有 ' + confirmCount + ' 条记录在飞书里找不到了，需人工确认后才删除（见「对齐」面板）');
+  else if (checked && !deleted) log('🔍 键对账完成：' + checked + ' 张表，' + (skipped ? skipped + ' 张无基线已跳过' : '无删除'));
+  renderAlignBox();
+  return { deleted, checked, skipped, pending: _censusPending };
+}
+
+/** 马上核对一次（面板按钮 / 手动触发） */
+async function fsCensusNow() {
+  const r = await fsRunCensus();
+  return r;
+}
+
 /** 轮询档位：可见才跑，闲置降频，隐藏暂停 */
 function fsSchedulePoll() {
   if (_pollTimer) { clearTimeout(_pollTimer); _pollTimer = null; }
@@ -3110,6 +3235,10 @@ function fsSchedulePoll() {
   _pollTimer = setTimeout(async () => {
     _pollTimer = null;
     try { await fsIncrementalSync(); } catch (e) { log('⚠️ 增量同步失败：' + e.message); }
+    // 键对账是低频的：增量走完之后，隔一段时间才做一次完整对账
+    if (Date.now() - _lastCensusAt > CENSUS_INTERVAL_MS) {
+      try { await fsRunCensus(); } catch (e) { log('⚠️ 键对账失败：' + e.message); }
+    }
     fsSchedulePoll();
   }, idle ? POLL_IDLE_MS : POLL_ACTIVE_MS);
 }

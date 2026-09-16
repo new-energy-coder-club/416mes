@@ -223,3 +223,22 @@ test('增量合并【关键】不修改传入的远端对象（避免共享引�
   st.materials[0].name = '本地改过';
   assert.equal(remote.materials[0].name, '来自网络', 'state 里的对象不能和响应体共享引用');
 });
+
+/* ================= 连续两次 census 确认 ================= */
+
+test('增量·删除【闸门3】只认交集：两次缺不同的键不算连续确认', () => {
+  assert.equal(Inc.secondCensusConfirms(['a', 'b'], ['a', 'b']), true, '两次都缺同样的键 → 确认');
+  assert.equal(Inc.secondCensusConfirms(['a'], ['a', 'b']), false, '这次多缺了 b，b 不是连续确认');
+  assert.equal(Inc.secondCensusConfirms(['a', 'b'], ['a']), true, 'a 连续两次都缺');
+  assert.equal(Inc.secondCensusConfirms([], ['a']), false, '没有上一次记录 → 不确认');
+  assert.equal(Inc.secondCensusConfirms(['a'], []), false, '这次没缺 → 不确认');
+});
+
+test('增量·删除【闸门5】已执行 / 已取消工单必须人工裁决', () => {
+  const r = Inc.censusDecision(['W1', 'W2'], ['W1'], {
+    complete: true, tableId: 'workorders', ledgerConfirmed: true, humanOnly: true
+  });
+  assert.deepEqual(r.deletions, [], '已执行工单绝不能被自动删掉');
+  assert.equal(r.reason, 'needs-human');
+  assert.deepEqual(r.toConfirm, ['W2']);
+});
