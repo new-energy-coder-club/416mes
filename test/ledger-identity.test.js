@@ -30,9 +30,26 @@ test('P3-1 每一条库存写入都要把本地 seq 交给服务端回写', () =
   assert.ok(/localSeq: \(localTxn && localTxn\.seq != null\) \? localTxn\.seq : undefined/.test(push),
     'fsPushStock 没有把 localTxn.seq 真正传成 localSeq → 服务端分配的新流水号无处回写');
 
-  // 4 个业务调用点（手工调整 / 冲销 / 盘点 / 工单执行）都必须把 txn 传进去
-  const calls = (CODE.match(/fsPushStock\([^;\n]*?\.txn\)/g) || []);
-  assert.equal(calls.length, 4, '应有 4 个调用点传 txn，实际 ' + calls.length + '：' + JSON.stringify(calls));
+  /* 每一个业务调用点都必须把第 7 个参数（本地流水）传进去。
+     ⚠️ 这里**不能断言调用点个数**：原来的写法写死「必须正好 4 个」，
+     结果我新增「账本修数」的调用点（它也正确传了 txn）就把测试判成失败 ——
+     那是在测「代码有没有被改过」，不是在测不变式。
+     也不能简单要求「结尾必须是 .txn」：队列重试路径拿不到本地 txn，是**显式传 null** 的。
+     真正的不变式是：每个调用点都有第 7 个参数（7 个实参）。 */
+  // 只匹配**同一行内**的调用点（用 [\s\S] 会跨行吃到函数定义里的 return fsPush({...})）
+  const sites = [...CODE.matchAll(/fsPushStock\(([^\n]*?)\);/g)].map(m => m[1]).filter(a => !a.trim().startsWith('{'));
+  assert.ok(sites.length >= 5, '调用点太少，可能整个写路径都被删了：' + sites.length);
+  const argCount = a => {           // 顶层逗号计数（要跳过 ('冲销 ' + w.code) 这种括号内的逗号）
+    let d = 0, n = 1;
+    for (const ch of a) { if (ch === '(') d++; else if (ch === ')') d--; else if (ch === ',' && d === 0) n++; }
+    return n;
+  };
+  const bad = sites.filter(a => argCount(a) !== 7);
+  assert.deepEqual(bad, [],
+    '这些 fsPushStock 调用点没有第 7 个参数（服务端分配的新流水号会无处回写）：' + JSON.stringify(bad));
+  // 5 条业务路径要真的传 txn；队列重试那条显式传 null 是允许的
+  const withTxn = sites.filter(a => /\.txn\s*$/.test(a.trim())).length;
+  assert.ok(withTxn >= 4, '至少 4 条业务路径要传 txn，实际 ' + withTxn);
 });
 
 test('P3-1 fsExecItem 必须把服务端 seq 回写，并把新号记进基线', () => {

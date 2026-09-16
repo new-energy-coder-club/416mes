@@ -1622,3 +1622,52 @@ test('replayAudit【P7】有 legacy（无 seq）流水时 assumeOrdered 自动�
   assert.deepEqual(r.mismatches.map(m => m.seq), full.mismatches.map(m => m.seq));
   assert.equal(r.status, full.status);
 });
+
+/* ---------- B4：账本修数方案（纯函数） ---------- */
+
+test('B4 账本修数【自洽】无问题时 clean=true，不提任何改动', () => {
+  const st = { materials: [{ code: 'A', qty: 5 }], transactions: [{ seq: 1, matCode: 'A', delta: 5, balance: 5 }] };
+  const p = Core.ledgerRepairPlan(st);
+  assert.equal(p.clean, true);
+  assert.deepEqual(p.txnFixes, []);
+  assert.deepEqual(p.qtyFixes, []);
+});
+
+test('B4 账本修数：余量列错了 → 给出该行应有值，且不动 delta', () => {
+  const st = { materials: [{ code: 'A', qty: 5 }], transactions: [
+    { seq: 1, matCode: 'A', delta: 3, balance: 3 },
+    { seq: 2, matCode: 'A', delta: 2, balance: 99 }   // 余量写错
+  ] };
+  const p = Core.ledgerRepairPlan(st);
+  assert.equal(p.clean, false);
+  assert.equal(p.txnFixes.length, 1);
+  assert.equal(p.txnFixes[0].seq, 2);
+  assert.equal(p.txnFixes[0].from, 99);
+  assert.equal(p.txnFixes[0].to, 5, '应按链算出的 5');
+});
+
+test('B4 账本修数【关键】qty 与账本不符 → 给出目标值和所需增量', () => {
+  // 账本口径 = 期初(2) + Σ变动(5) = 7，而 qty 列是 9
+  const st = { materials: [{ code: 'A', qty: 9 }], transactions: [{ seq: 1, matCode: 'A', delta: 5, balance: 7 }] };
+  const p = Core.ledgerRepairPlan(st);
+  assert.equal(p.clean, false);
+  assert.equal(p.qtyFixes.length, 1);
+  assert.equal(p.qtyFixes[0].to, 7);
+  assert.equal(p.qtyFixes[0].delta, -2);
+});
+
+test('B4 账本修数：没有流水的物料不参与（没有可比口径，不能凭空判它错）', () => {
+  const st = { materials: [{ code: 'A', qty: 0 }, { code: 'B', qty: 123 }], transactions: [{ seq: 1, matCode: 'A', delta: 0, balance: 0 }] };
+  const p = Core.ledgerRepairPlan(st);
+  assert.deepEqual(p.qtyFixes, [], 'B 没有流水 → 不该被判为需要修');
+});
+
+test('B4 账本修数：每条流水都缺余量时全部报出来（不静默跳过）', () => {
+  const st = { materials: [{ code: 'A', qty: 0 }], transactions: [
+    { seq: 1, matCode: 'A', delta: 0, balance: null },
+    { seq: 2, matCode: 'A', delta: 0, balance: null }
+  ] };
+  const p = Core.ledgerRepairPlan(st);
+  // 第一条缺余量 → 无法定期初 → 该物料整组跳过（宁可不动，也不猜）
+  assert.equal(p.qtyFixes.length, 0, '期初无法确定时不得猜');
+});

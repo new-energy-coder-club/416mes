@@ -693,6 +693,66 @@
    *   校验用简单数值比较（发现逆序立刻退出、不分配、不调比较器），
    *   比 sort 便宜得多，所以仍然有净收益。
    */
+  /**
+   * 账本修数方案（B4）—— 纯函数，只算不改。
+   *
+   * 为什么需要它：qty 与账本不一致时，**没有任何正规接口能改 qty**。
+   * P4 关掉了 upsert 的绝对 qty（这是对的），于是 qty 只能由服务端按
+   * 「期初 + Σ变动」收敛重写；而「补一条流水」根本改不了这个差 ——
+   * qty 和 Σ变动 同时加同一个数，差不变。所以唯一正确的修法是两步：
+   *   ① 把账本里错了的「余量」列改对（让链式校验自洽）
+   *   ② 对每个仍不符的物料触发一次库存写入 → 服务端会用账本口径重写 qty
+   *      （注意：服务端的收敛是拿「期初 + Σ变动」算的，不是拿当前 qty 加 delta，
+   *        所以**任何**一次写入都会把不变量恢复，连 delta 0 都行）
+   *
+   * @returns {{ clean:boolean, txnFixes:Array, qtyFixes:Array, materials:number }}
+   *   txnFixes: [{ seq, matCode, from, to }] 余量列需要改的行
+   *   qtyFixes: [{ code, from, to, delta }]  库存数量与账本不符、需要触发收敛的物料
+   */
+  function ledgerRepairPlan(state) {
+    var txns = ((state && state.transactions) || []).slice().sort(function (a, b) {
+      return (Number(a.seq) || 0) - (Number(b.seq) || 0);
+    });
+    var byMat = Object.create(null);
+    txns.forEach(function (t) {
+      if (!t || t.matCode == null) return;
+      (byMat[t.matCode] = byMat[t.matCode] || []).push(t);
+    });
+
+    var txnFixes = [];
+    var expected = Object.create(null);   // matCode → 账本口径的结存
+    Object.keys(byMat).forEach(function (mat) {
+      var list = byMat[mat];
+      // 期初只由**最早那条**决定（余量 − 变动）——与 replayAudit 同一口径
+      var first = list[0];
+      if (!first || first.balance == null || first.delta == null) return;
+      var run = first.balance - first.delta;
+      list.forEach(function (t) {
+        run += (Number(t.delta) || 0);
+        if (t.balance == null || Math.abs(t.balance - run) > 1e-9) {
+          txnFixes.push({ seq: t.seq, matCode: mat, from: t.balance, to: run });
+        }
+      });
+      expected[mat] = run;
+    });
+
+    var qtyFixes = [];
+    ((state && state.materials) || []).forEach(function (m) {
+      if (!m || m.code == null) return;
+      if (!(m.code in expected)) return;             // 该物料没有任何流水 → 无可比口径
+      var want = expected[m.code];
+      if (Math.abs((Number(m.qty) || 0) - want) > 1e-9) {
+        qtyFixes.push({ code: m.code, from: m.qty, to: want, delta: round6(want - (Number(m.qty) || 0)) });
+      }
+    });
+
+    return {
+      clean: txnFixes.length === 0 && qtyFixes.length === 0,
+      txnFixes: txnFixes, qtyFixes: qtyFixes,
+      materials: Object.keys(byMat).length
+    };
+  }
+
   /** 严格 seq 降序？（纯数值比较，发现逆序立刻返回 false；任何一条没有 seq 就返回 false） */
   function isDescendingBySeq(all) {
     var last = Infinity;
@@ -1414,6 +1474,7 @@
     applyStocktake: applyStocktake,
     applyManualAdjust: applyManualAdjust,
     orderedTransactions: orderedTransactions,
+    ledgerRepairPlan: ledgerRepairPlan,
     replayAudit: replayAudit,
     applyRemoteChanges: applyRemoteChanges,
     recordScan: recordScan,
