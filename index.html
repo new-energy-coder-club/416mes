@@ -3458,7 +3458,14 @@ load(); renderDataStoreHint(); renderLedger(); refreshMatDatalist(); refreshMemb
   if (h) { const btn = document.querySelector('nav.tabs button[data-tab="' + h + '"]'); if (btn) btn.click(); }
 })();
 if (state.scanLog.length) document.getElementById('scanLog').textContent = state.scanLog.slice(0, 200).join('\n');
-fsBoot();   // 飞书真源：可达则拉取合并 + 冲刷离线队列，不可达自动离线
+/* 启动顺序很重要：**必须先等 IndexedDB 状态就位，再去飞书拉取合并**。
+   否则 fsBoot 会拿 localStorage 里那份旧状态去合并，而合并又会 save() ——
+   于是把刚迁移进 IDB 的新状态用旧状态覆盖回去。实测踩过：
+   __syncedKeys 还是空的（于是「本地新建」判定失真），基线整份被冲掉。 */
+(async function boot() {
+  try { await localStoreReady; } catch (e) { /* initLocalStore 内部已兜底，这里只保证顺序 */ }
+  fsBoot();   // 飞书真源：可达则拉取合并 + 冲刷离线队列，不可达自动离线
+})();
 
 </script>
 </body>
