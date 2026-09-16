@@ -52,6 +52,19 @@ for (const [kind, make] of backends()) {
     await store.close();
   });
 
+  test('store[' + kind + ']：replaceAll 原子替换流水快照', async () => {
+    const store = make(); await store.open();
+    await store.put('transactions', { seq: 1, matCode: 'OLD', delta: 1 });
+    await store.transaction(['transactions'], async tx => {
+      await tx.replaceAll('transactions', [
+        { seq: 2, matCode: 'A-1', delta: 2, ts: 't2' },
+        { seq: 3, matCode: 'A-1', delta: -1, ts: 't3' }
+      ]);
+    });
+    const rows = await store.getAll('transactions');
+    assert.deepEqual(rows.map(r => r.seq).sort((a, b) => a - b), [2, 3]);
+    await store.close();
+  });
   test('store[' + kind + ']：transactions 与 metadata 使用声明键持久化', async () => {
     const store = make();
     await store.open();
