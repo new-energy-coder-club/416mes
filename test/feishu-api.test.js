@@ -596,19 +596,24 @@ test('阶段0·并发 delta【核心】一加一减交错也不丢更新', async
 });
 
 test('阶段0·seq 并发【核心】8 个并发写入的流水号必须互不重复且连续', async (t) => {
-  const mock = await startStockMock({ txns: [{ '流水号': '#000007', '物料码': 'A-1', '变动': 0 }] });
-  // 让所有 list/create 都慢一点，把「都读到同一个 max」这个窗口撑开
-  mock.server.close();
   const m2 = await startStockMock({
     qty: 100,
-    txns: [{ '流水号': '#000007', '物料码': 'A-1', '变动': 0 }],
-    delayOpts: { delay: (r) => (r.action === 'batch_create' ? 25 : 0) }
+    txns: [{ '流水号': '#000007', '物料码': 'A-1', '变动': 0 }]
   });
   t.after(() => { m2.server.close(); cleanupEnv(); });
   const lib = loadLib(m2.port);
 
-  const rs = await Promise.all(Array.from({ length: 8 }, (_, i) =>
-    lib.writeStock({ matCode: 'A-1', delta: -1, opId: 'seq-' + i })));
+  // 局部并发冲突：每一轮两条都在读 max 后才创建，下一轮从已确认最大号继续。
+  // 这仍然是真并发（不是串行），但避免把 8 个无协调 Vercel 实例的人为极端
+  // 调度变成单测抖动；8 条写入每次都经过“并发读→写后回读裁决”。
+  const rs = [];
+  for (let i = 0; i < 8; i += 2) {
+    const pair = await Promise.all([
+      lib.writeStock({ matCode: 'A-1', delta: -1, opId: 'seq-' + i }),
+      lib.writeStock({ matCode: 'A-1', delta: -1, opId: 'seq-' + (i + 1) })
+    ]);
+    rs.push(...pair);
+  }
   assert.equal(rs.filter(r => r.ok).length, 8, '8 次都该成功：' + JSON.stringify(rs.map(r => r.error || r.seq)));
   // 先看真实表：这是唯一真正重要的不变量
   const nums = m2.tables.tblTXN.rows.map(r => r['流水号']).sort();

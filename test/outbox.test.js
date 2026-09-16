@@ -280,6 +280,40 @@ test('投影：多条未提交操作按顺序叠加', () => {
   assert.equal(r.counts.materials, 1);
 });
 
+test('outbox【Phase1·IDB】异步 adapter 与同步语义一致：去重、失败保留、重开仍在', async () => {
+  const Store = require('../lib/store.js');
+  const store = Store.createMemoryStore();
+  await store.open();
+  let n = 0;
+  const ob = Outbox.createAsync({ store, maxTries: 2, idFactory: () => 'id-' + (++n) });
+  await ob.append({ op: 'stock', matCode: 'A-1', qty: 3, delta: -2 });
+  await ob.append({ op: 'stock', matCode: 'A-1', qty: 3, delta: -2 });
+  let q = await ob.list();
+  assert.equal(q.length, 1, '相同操作只允许一条');
+  assert.equal(q[0].id, 'id-1');
+  await ob.markAttempt('id-1', '网络断开');
+  await ob.markAttempt('id-1', '仍然断开');
+  q = await ob.list();
+  assert.equal(q.length, 1, '超限也不能自动删除');
+  assert.equal(q[0].status, 'needs_attention');
+  const reopened = Outbox.createAsync({ store });
+  assert.equal((await reopened.list()).length, 1, '同一IDB store重开后队列必须仍在');
+});
+
+test('outbox【Phase1·IDB】append 与 remove 均在事务内，不能把其他条目丢掉', async () => {
+  const Store = require('../lib/store.js');
+  const store = Store.createMemoryStore(); await store.open();
+  let n = 0;
+  const ob = Outbox.createAsync({ store, idFactory: () => 'id-' + (++n) });
+  await ob.append({ op: 'stock', matCode: 'A-1', qty: 1 });
+  await ob.append({ op: 'stock', matCode: 'B-1', qty: 1 });
+  const before = await ob.list();
+  assert.equal(before.length, 2);
+  await ob.removeById(before[0].id);
+  const after = await ob.list();
+  assert.equal(after.length, 1, '删除 A 时不能顺手覆盖掉 B');
+});
+
 test('投影：已放弃（gaveup）的操作不参与投影', () => {
   const r = Outbox.project(snap(), [{ op: 'delete', table: 'materials', keys: ['A-1'], status: 'gaveup' }]);
   assert.equal(r.view.materials.length, 2, '放弃掉的操作不该继续影响视图');

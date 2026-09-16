@@ -539,8 +539,31 @@
    * 回放校验：从首条余量反推期初，逐条重算链式余量并与记录比对。
    * @returns {{ok:boolean, materials:number, transactions:number, compared:number, mismatches:Array}}
    */
-  function replayAudit(state) {
+  function replayAudit(state, opts) {
+    opts = opts || {};
     var ord = orderedTransactions(state);
+    /* 覆盖度优先于余额：余额链能从首条 balance-delta 反推“期初”，
+       所以前缀被截断时会把错期初当真，最终反而显示一致。连续 seq 才能说明
+       当前校验覆盖了完整账本；中间洞必须明确报「数据不完整」，不能伪装 mismatch。 */
+    var seqs = ord.map(function (t) { return Number(t && t.seq); }).filter(function (n) { return Number.isFinite(n) && n > 0; }).sort(function (a, b) { return a - b; });
+    var unique = [];
+    seqs.forEach(function (n) { if (!unique.length || unique[unique.length - 1] !== n) unique.push(n); });
+    var gaps = [], duplicates = [];
+    for (var si = 0; si < seqs.length; si++) if (si && seqs[si] === seqs[si - 1] && duplicates.indexOf(seqs[si]) < 0) duplicates.push(seqs[si]);
+    for (var gi = 1; gi < unique.length; gi++) if (unique[gi] > unique[gi - 1] + 1) gaps.push({ from: unique[gi - 1] + 1, to: unique[gi] - 1 });
+    var minSeq = unique.length ? unique[0] : null;
+    var maxSeq = unique.length ? unique[unique.length - 1] : null;
+    var expectedMax = opts.expectedMaxSeq == null ? null : Number(opts.expectedMaxSeq);
+    if (expectedMax != null && maxSeq != null && expectedMax > maxSeq) gaps.push({ from: maxSeq + 1, to: expectedMax, tail: true });
+    var hasLegacy = ord.some(function (t) { return !t || t.seq == null; });
+    var coverage = {
+      minSeq: minSeq, maxSeq: maxSeq, gaps: gaps, duplicates: duplicates,
+      complete: !!unique.length && minSeq === 1 && gaps.length === 0 && duplicates.length === 0 && !hasLegacy,
+      status: 'unknown'
+    };
+    if (gaps.length || duplicates.length) coverage.status = 'incomplete';
+    else if (coverage.complete) coverage.status = 'complete';
+    else coverage.status = 'partial';
     var byMat = Object.create(null);
     ord.forEach(function (t) { (byMat[t.matCode] = byMat[t.matCode] || []).push(t); });
 
@@ -562,12 +585,17 @@
       });
     });
 
+    var status = coverage.status === 'incomplete' ? 'incomplete'
+      : (mismatches.length ? 'mismatch' : (coverage.complete ? 'complete-valid' : 'partial-valid-within-range'));
     return {
-      ok: mismatches.length === 0,
+      // 有中间缺口时绝不能给 ok=true；否则会把“数据不完整”伪装成“账目正确”。
+      ok: coverage.status !== 'incomplete' && mismatches.length === 0,
+      status: status,
       materials: Object.keys(byMat).length,
       transactions: ord.length,
       compared: compared,
-      mismatches: mismatches
+      mismatches: mismatches,
+      coverage: coverage
     };
   }
 

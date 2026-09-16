@@ -300,6 +300,52 @@ test('回放校验：多物料互不干扰，按物料各自成链', () => {
   assert.equal(stockOf(s, 'MAT-B'), 6);
 });
 
+test('回放校验【Phase1·coverage】中间挖掉 #500~#600 必须报数据不完整，不能伪装账目正确', () => {
+  const s = mkState();
+  s.transactions = Array.from({ length: 1000 }, (_, i) => {
+    const seq = 1000 - i;
+    return { seq, matCode: 'MAT-A', delta: 1, balance: seq, type: '测试', time: 't' + seq };
+  }).filter(t => t.seq < 500 || t.seq > 600);
+  const rep = Core.replayAudit(s, { expectedMaxSeq: 1000 });
+  assert.equal(rep.ok, false, '中间缺账时绝不能显示为正确');
+  assert.equal(rep.status, 'incomplete');
+  assert.deepEqual(rep.coverage.gaps, [{ from: 500, to: 600 }]);
+});
+
+test('回放校验【Phase1·coverage】尾部尚未拉到时报告缺失范围', () => {
+  const s = mkState();
+  s.transactions = [{ seq: 1, matCode: 'MAT-A', delta: 1, balance: 1 }];
+  const rep = Core.replayAudit(s, { expectedMaxSeq: 3 });
+  assert.equal(rep.status, 'incomplete');
+  assert.deepEqual(rep.coverage.gaps, [{ from: 2, to: 3, tail: true }]);
+});
+
+test('回放校验【Phase1·coverage】完整连续链条保持 complete-valid', () => {
+  const s = mkState();
+  s.transactions = [
+    { seq: 3, matCode: 'MAT-A', delta: -1, balance: 2 },
+    { seq: 2, matCode: 'MAT-A', delta: 1, balance: 3 },
+    { seq: 1, matCode: 'MAT-A', delta: 2, balance: 2 }
+  ];
+  const rep = Core.replayAudit(s, { expectedMaxSeq: 3 });
+  assert.equal(rep.ok, true);
+  assert.equal(rep.status, 'complete-valid');
+  assert.equal(rep.coverage.complete, true);
+});
+
+test('回放校验【Phase1·coverage】真余额篡改仍必须是 mismatch（coverage 不能削弱核账）', () => {
+  const s = mkState();
+  s.transactions = [
+    { seq: 2, matCode: 'MAT-A', delta: -1, balance: 99 },
+    { seq: 1, matCode: 'MAT-A', delta: 2, balance: 2 }
+  ];
+  const rep = Core.replayAudit(s, { expectedMaxSeq: 2 });
+  assert.equal(rep.ok, false);
+  assert.equal(rep.status, 'mismatch');
+  assert.equal(rep.coverage.complete, true);
+  assert.equal(rep.mismatches.length, 1);
+});
+
 test('回放校验：兼容无 seq 的旧数据', () => {
   const s = mkState();
   // 旧数据同样遵循「数组内新的在前」约定（recordTxn 用 unshift），
