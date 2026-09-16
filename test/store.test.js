@@ -81,3 +81,28 @@ test('store：未打开不能写；IndexedDB 不可用必须显式报错', async
   await assert.rejects(() => s.put('outbox', { id: 'x' }), /未打开/);
   assert.throws(() => Store.createIndexedDbStore({ indexedDB: null }), /不支持 IndexedDB/);
 });
+
+test('store[memory]：iterate 分批回调，不一次性把整表读进内存', async () => {
+  const s = Store.createMemoryStore(); await s.open();
+  for (let i = 1; i <= 1200; i++) await s.put('transactions', { seq: i, matCode: 'A', delta: 1, ts: 't' + i });
+  const sizes = [], seen = [];
+  const total = await s.iterate('transactions', chunk => { sizes.push(chunk.length); seen.push(...chunk.map(r => r.seq)); }, { chunk: 500 });
+  assert.equal(total, 1200);
+  assert.deepEqual(sizes, [500, 500, 200], '必须分批，实测 ' + JSON.stringify(sizes));
+  assert.equal(seen.length, 1200);
+  assert.equal(new Set(seen).size, 1200, '不能漏读或重复');
+});
+
+test('store[indexeddb]：iterate 走真实游标，1200 条分批读完', async () => {
+  let make = null;
+  try { const fidb = require('fake-indexeddb'); make = () => Store.createIndexedDbStore({ indexedDB: fidb.indexedDB, dbName: 'mes416-iter-' + Date.now() + '-' + Math.random() }); }
+  catch (_) { return; }
+  const s = make(); await s.open();
+  for (let i = 1; i <= 1200; i++) await s.put('transactions', { seq: i, matCode: 'A', delta: 1, ts: 't' + i });
+  const sizes = [], seen = [];
+  const total = await s.iterate('transactions', chunk => { sizes.push(chunk.length); chunk.forEach(r => seen.push(r.seq)); }, { chunk: 500 });
+  assert.equal(total, 1200);
+  assert.deepEqual(sizes, [500, 500, 200]);
+  assert.equal(new Set(seen).size, 1200);
+  await s.close();
+});

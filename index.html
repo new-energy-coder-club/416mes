@@ -545,7 +545,7 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 'use strict';
 
 /* 应用版本：改到用户看得见的行为时手动 +1，页脚会显示，方便确认线上跑的是哪一版 */
-const APP_VERSION = '2.0.1';   // Phase 5：健康面板（全量同步后刷新）
+const APP_VERSION = '2.1.0';   // Phase 5：IDB 游标导出 + 健康面板 + 区域改香港
 
 /* ---------- 标签类型配置 ---------- */
 const TYPES = {
@@ -893,6 +893,7 @@ function save() {
     delete persist.__base;
     localStorage.setItem(LS_KEY, JSON.stringify(persist));
   } catch (e) { }
+  _idxTxn = null;   // 状态变了 → IDB 流水缓存失效，下次导出前重新按游标读
   // UI 仍要求同步渲染；IDB 落盘异步防抖，失败只告警，LS 源仍在，绝不假装已迁移。
   if (localStore && !_saveTimer) _saveTimer = setTimeout(() => {
     _saveTimer = null;
