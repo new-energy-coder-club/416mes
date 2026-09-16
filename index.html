@@ -924,7 +924,7 @@ async function persistStateToIdb() {
   ];
   // 每次 save 用一个短 transaction 同步写 records、完整流水和兼容 state blob。
   // 这里绝不夹网络 await；网络冲刷在 transaction 之外，成功后才按 id 删除 outbox。
-  await localStore.transaction(['records', 'transactions', 'syncMeta'], async tx => {
+  await localStore.transaction(['records', 'transactions', 'baselines', 'syncMeta'], async tx => {
     const records = [];
     tableDefs.forEach(([table, key]) => (state[table] || []).forEach(row => {
       if (row && row[key] != null && row[key] !== '') records.push({ table, key: String(row[key]), value: row });
