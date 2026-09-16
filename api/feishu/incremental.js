@@ -5,6 +5,7 @@
  *   ① mode=probe   8 表廉价变更探测（每表 pageSize=1，合计约 1KB）
  *   ② mode=pull    按「最后更新时间 desc」只拉变了的行（倒序翻页到水位）
  *   ③ mode=census  键集合对账（翻完全表只取业务主键，用于发现飞书侧硬删）
+ *   ④ mode=bench   延迟归因诊断（只读）：拆出网络基线 / 排序开销 / 数据量开销
  *
  * 请求体：
  *   { mode:'probe' }
@@ -15,7 +16,7 @@
  * 而 sort 在文本与日期（含系统字段 1002）上都被验证可用。
  */
 'use strict';
-const { probeAllChanges, probeTableChange, pullChangesBySort, censusTable, setCors, readBody, tenantToken, TABLES } = require('../../lib/feishu-api.js');
+const { probeAllChanges, probeTableChange, pullChangesBySort, censusTable, benchFeishu, setCors, readBody, tenantToken, TABLES } = require('../../lib/feishu-api.js');
 
 module.exports = async (req, res) => {
   setCors(res);
@@ -25,6 +26,12 @@ module.exports = async (req, res) => {
   try {
     const p = JSON.parse((await readBody(req)) || '{}');
     const mode = p.mode || 'probe';
+
+    // mode=bench：延迟归因诊断（只读）——把一次探测拆成网络基线 / 排序开销 / 数据量开销
+    if (mode === 'bench') {
+      res.status(200).json({ ok: true, mode, bench: await benchFeishu() });
+      return;
+    }
 
     if (mode === 'probe') {
       if (p.table) {
