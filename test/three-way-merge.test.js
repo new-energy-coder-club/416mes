@@ -360,3 +360,62 @@ test('applyMerge【P4-4】旧格式快照（没有 hadBase）仍然可用，不�
   assert.equal(st.materials[0].name, '旧');
   assert.deepEqual(st.__base, { materials: [] }, '旧快照不回退 __base（兼容）');
 });
+
+/* ============================================================================
+ * B1/B2（阶段二实测发现）：假冲突的两个来源
+ * ========================================================================== */
+
+test('B1【关键】结构相同的数组/对象不得判为「两边都改了」', () => {
+  // 工单的 items 是数组 —— 只要用工作单就会走到这里
+  const items = [{ matCode: 'M-1', qty: 2 }];
+  const base = [{ code: 'WO-1', items, status: '未执行' }];
+  const local = [{ code: 'WO-1', items: [{ matCode: 'M-1', qty: 2 }], status: '未执行' }];   // 新对象、同内容
+  const remote = [{ code: 'WO-1', items: [{ matCode: 'M-1', qty: 2 }], status: '未执行' }];
+  const p = TWM.planMerge({ workorders: base }, { workorders: local }, { workorders: remote });
+  assert.equal(p.conflicts.length, 0,
+    '内容完全相同（只是不同对象）不该产生冲突；旧实现用 === 比较数组，这里会报冲突');
+  assert.equal(p.writes.length, 0, '也不该产生写入');
+});
+
+test('B1 数组内容真的不同时仍然要报冲突（不能为了消假冲突把真改动也吞掉）', () => {
+  const base = [{ code: 'WO-1', items: [{ matCode: 'M-1', qty: 2 }] }];
+  const local = [{ code: 'WO-1', items: [{ matCode: 'M-1', qty: 5 }] }];
+  const remote = [{ code: 'WO-1', items: [{ matCode: 'M-1', qty: 3 }] }];
+  const p = TWM.planMerge({ workorders: base }, { workorders: local }, { workorders: remote });
+  assert.equal(p.conflicts.length, 1, '三边互不相同 → 必须报冲突');
+  assert.equal(p.conflicts[0].field, 'items');
+});
+
+test('B1 数组元素顺序不同算改动（执行批次的顺序是有意义的历史）', () => {
+  const base = [{ code: 'WO-1', execBatches: [{ at: 'a' }, { at: 'b' }] }];
+  const local = [{ code: 'WO-1', execBatches: [{ at: 'b' }, { at: 'a' }] }];
+  const remote = [{ code: 'WO-1', execBatches: [{ at: 'a' }, { at: 'b' }] }];
+  const p = TWM.planMerge({ workorders: base }, { workorders: local }, { workorders: remote });
+  // 本地改了顺序、远端没动 → 保留本地（不冲突）
+  assert.equal(p.conflicts.length, 0, '远端没动 → 保留本地，不算冲突');
+});
+
+test('B1 键序不同不算改动（对象比较要与键序无关）', () => {
+  const base = [{ code: 'T-1', reverseInfo: { at: 'x', reason: 'y' } }];
+  const local = [{ code: 'T-1', reverseInfo: { reason: 'y', at: 'x' } }];
+  const remote = [{ code: 'T-1', reverseInfo: { at: 'x', reason: 'y' } }];
+  const p = TWM.planMerge({ transactions: base }, { transactions: local }, { transactions: remote });
+  assert.equal(p.conflicts.length, 0, '键序不同、内容相同 → 不算改动');
+});
+
+test('B2【关键】流水的 ts/time 是派生字段：两边不同也不问人，直接采用飞书', () => {
+  const base = [{ seq: 22, ts: '2026-09-16T13:32:06.724Z', time: '2026/9/16 21:32:06' }];
+  const local = [{ seq: 22, ts: '2026-09-16T13:32:06.724Z', time: '2026/9/16 21:32:06' }];
+  const remote = [{ seq: 22, ts: '2026-09-16T13:32:08.596Z', time: '2026-09-16 13:32:08' }];
+  const p = TWM.planMerge({ transactions: base }, { transactions: local }, { transactions: remote });
+  assert.equal(p.conflicts.length, 0, 'ts/time 不该产生冲突（旧实现每条本地新建流水都会冲突）');
+  const w = (p.writes[0] || {}).fields || {};
+  assert.equal(w.ts, '2026-09-16T13:32:08.596Z', '要直接采用飞书的时间');
+});
+
+test('B2 降级模式（没有 base）下 ts/time 同样不问人', () => {
+  const local = [{ seq: 22, ts: 'AAA', time: 'a' }];
+  const remote = [{ seq: 22, ts: 'BBB', time: 'b' }];
+  const p = TWM.planMerge(null, { transactions: local }, { transactions: remote });
+  assert.equal(p.conflicts.length, 0, '降级模式下也不该为派生字段问人');
+});
