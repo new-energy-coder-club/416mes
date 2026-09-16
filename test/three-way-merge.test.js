@@ -419,3 +419,13 @@ test('B2 降级模式（没有 base）下 ts/time 同样不问人', () => {
   const p = TWM.planMerge(null, { transactions: local }, { transactions: remote });
   assert.equal(p.conflicts.length, 0, '降级模式下也不该为派生字段问人');
 });
+
+test('B2 补：workorders.execTime 也是派生时间，格式不同不该问人', () => {
+  const base = [{ code: 'WO-1', execTime: '' }];
+  const local = [{ code: 'WO-1', execTime: '2026/9/16 21:52:03' }];
+  const remote = [{ code: 'WO-1', execTime: '2026-09-16 21:52' }];
+  const p = TWM.planMerge({ workorders: base }, { workorders: local }, { workorders: remote });
+  assert.equal(p.conflicts.length, 0,
+    'execTime 是 toLocaleString 与 DT() 的格式差异，不是业务改动 —— 阶段二重跑实测它会产生假冲突');
+  assert.equal(((p.writes[0] || {}).fields || {}).execTime, '2026-09-16 21:52', '采用飞书的格式');
+});
