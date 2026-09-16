@@ -130,12 +130,41 @@ test('增量·删除【闸门2】删 3 条自动应用，删 200 条转人工', 
   assert.equal(warn.toConfirm.length, 200);
 });
 
-test('增量·删除【闸门2】绝对阈值 50 条单独生效（小表也不许一次删太多）', () => {
-  const prev = Array.from({ length: 100 }, (_, i) => 'k' + i);   // 5% = 5 条，绝对值 50 更大
-  const next = prev.slice(51);                                    // 少 51 条
-  const r = Inc.censusDecision(prev, next, { complete: true, tableId: 'materials', ledgerConfirmed: true });
-  assert.equal(r.reason, 'over-threshold');
-  assert.equal(r.threshold, 50);
+test('增量·删除【闸门2】阈值是「超 5% 或超 50 条」（AND 会让小表完全失效）', () => {
+  const mk = n => Array.from({ length: n }, (_, i) => 'k' + i);
+  const decide = (total, missing) => Inc.censusDecision(
+    mk(total), mk(total).slice(missing), { complete: true, tableId: 'materials', ledgerConfirmed: true });
+
+  /* 这一条是本次修正的核心：写成 Math.max（AND 语义）时，
+     ceil(size*5%) ≤ 50 对所有 ≤1000 行的表恒成立 → 门槛恒为 50 →
+     4 行的表丢掉 3 条（75%）竟判 ok **自动删**。
+     现场 7 张主数据表里 6 张 ≤200 行，全部受这个 bug 影响。 */
+  const tiny = decide(4, 3);
+  assert.equal(tiny.reason, 'over-threshold', '4 行丢 3 必须转人工，绝不能自动删');
+  assert.equal(tiny.threshold, 1, 'min(50, ceil(4*5%)) = 1');
+
+  // 5% 分支生效：100 行丢 5 可以自动，丢 6 转人工
+  assert.equal(decide(100, 5).reason, 'ok');
+  assert.equal(decide(100, 6).reason, 'over-threshold');
+  assert.equal(decide(100, 6).threshold, 5);
+
+  // 绝对阈值封顶：2000 行丢 50 可以自动（5% = 100 > 50），丢 51 转人工
+  assert.equal(decide(2000, 50).reason, 'ok');
+  assert.equal(decide(2000, 51).reason, 'over-threshold');
+  assert.equal(decide(2000, 51).threshold, 50);
+
+  // 万级表同理，阈值恒为 50
+  assert.equal(decide(10000, 50).reason, 'ok');
+  assert.equal(decide(10000, 51).reason, 'over-threshold');
+});
+
+test('增量·删除【闸门2】阈值必须恒 ≤ 50（绝不能出现"要丢一大半才拦"）', () => {
+  const mk = n => Array.from({ length: n }, (_, i) => 'k' + i);
+  [4, 10, 26, 122, 188, 1000, 5000, 50000].forEach(total => {
+    const r = Inc.censusDecision(mk(total), mk(total).slice(1), { complete: true, tableId: 'materials', ledgerConfirmed: true });
+    assert.ok(r.threshold <= 50, total + ' 行的阈值应 ≤50，实测 ' + r.threshold);
+    assert.equal(r.threshold, Math.min(50, Math.ceil(total * 0.05)));
+  });
 });
 
 test('增量·删除【闸门3】主数据必须连续两次完整 census 都缺才自动确认', () => {

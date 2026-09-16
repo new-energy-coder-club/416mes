@@ -219,7 +219,7 @@ async function pull(cfg, outFile, { dryRun = false } = {}) {
     console.log(`  ${map.table}：${state[key].length} 条`);
   }
   state.transactions.sort((a, b) => (b.seq || 0) - (a.seq || 0));   // 网页端约定：新的在前
-  state.txnSeq = Math.max(0, ...state.transactions.map(t => t.seq || 0));   // 与云端接口保持一致，防止合并后撞号
+  state.txnSeq = state.transactions.reduce((m, t) => Math.max(m, (t && t.seq) || 0), 0);   // 展开运算符在数万条时会栈溢出   // 与云端接口保持一致，防止合并后撞号
   if (!dryRun) {
     const pkg = { app: '416MES', version: 2, deviceId: 'feishu-pull', exportedAt: new Date().toLocaleString(), state };
     fs.writeFileSync(outFile, JSON.stringify(pkg, null, 1));

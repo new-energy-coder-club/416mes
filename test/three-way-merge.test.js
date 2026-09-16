@@ -231,3 +231,37 @@ test('三方合并【关键】base 必须跟着远端前进，否则会产生满
   const stale = TWM.planMerge({ materials: [{ code: 'K', name: '原' }] }, local, { materials: [{ code: 'K', name: 'v2' }] });
   assert.equal(stale.conflicts.length, 1, 'base 不前进就会出现假冲突 —— 这正是必须 fsUpdateBase 的原因');
 });
+
+/* ================= P1：流水顺序与 txnSeq（原缺口，已实测复现） ================= */
+
+test('applyMerge【P1·关键】流水必须新的在前，且 txnSeq 必须推进到最大 seq', () => {
+  // 原缺口：applyMerge 对不存在的记录一律 push 到尾部，且不推进 txnSeq。
+  // 实测后果：order=[5,4,6,7]（新流水被塞到尾部）；txnSeq 停在 5
+  //   → 本地下一笔 recordTransaction 会拿到已被远端占用的 seq=6，
+  //     正是 Phase 0 修掉的「流水号撞号」在增量路径上复活。
+  const state = { transactions: [{ seq: 5 }, { seq: 4 }], txnSeq: 5, materials: [] };
+  const plan = {
+    writes: [
+      { table: 'transactions', key: '6', fields: { seq: 6, matCode: 'A', delta: 1 }, kind: 'create' },
+      { table: 'transactions', key: '7', fields: { seq: 7, matCode: 'A', delta: 1 }, kind: 'create' }
+    ],
+    conflicts: []
+  };
+  TWM.applyMerge(state, plan, {});
+  assert.deepEqual(state.transactions.map(t => t.seq), [7, 6, 5, 4], '必须严格降序（新的在前）');
+  assert.equal(state.txnSeq, 7, 'txnSeq 必须推进到最大 seq，否则本地下一笔会撞号');
+});
+
+test('applyMerge【P1】没有流水时不该凭空造出 transactions 数组或改 txnSeq', () => {
+  const state = { materials: [{ code: 'A' }] };
+  TWM.applyMerge(state, { writes: [{ table: 'materials', key: 'A', fields: { name: 'x' } }], conflicts: [] }, {});
+  assert.equal(state.transactions, undefined, '没有流水就不该出现该字段');
+  assert.equal(state.txnSeq, undefined);
+});
+
+test('applyMerge【P1】无 seq 的旧流水仍拼在尾部，不被排序打乱', () => {
+  const state = { transactions: [{ seq: null, matCode: 'A', time: 'old' }, { seq: 3 }], txnSeq: 3 };
+  TWM.applyMerge(state, { writes: [{ table: 'transactions', key: '4', fields: { seq: 4, matCode: 'A' } }], conflicts: [] }, {});
+  assert.deepEqual(state.transactions.map(t => t.seq), [4, 3, null], '带 seq 的降序在前，无 seq 的旧数据在后');
+  assert.equal(state.txnSeq, 4);
+});
