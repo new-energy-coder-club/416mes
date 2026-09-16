@@ -544,7 +544,7 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 'use strict';
 
 /* 应用版本：改到用户看得见的行为时手动 +1，页脚会显示，方便确认线上跑的是哪一版 */
-const APP_VERSION = '1.9.0';   // Phase 3：三方合并（base/local/remote）+ 批量冲突分组 + token 缓存
+const APP_VERSION = '1.9.1';   // Phase 3：三方合并 + 冲突面板（裁决后仍可回滚）
 
 /* ---------- 标签类型配置 ---------- */
 const TYPES = {
@@ -3353,13 +3353,26 @@ function fsUndoConflictApply() {
   TWM.undoMerge(state, _conflictSnapshot);
   _conflictSnapshot = null;
   save(); renderLedger(); renderMembers(); renderTxns(); renderWip();
-  log('↩️ 已回滚上一次冲突裁决');
+  log('↩️ 已回滚上一次冲突裁决（冲突已重新列入待裁决）');
+  renderConflictPanel();
 }
 
 function renderConflictPanel() {
   const box = document.getElementById('conflictBox');
   if (!box) return;
-  if (!_conflictGroups.length) { box.style.display = 'none'; return; }
+  // 没有待裁决冲突、也没有可回滚的快照时才隐藏。
+  // 否则会出现「裁决完面板消失、回滚按钮够不着」—— 裁决错了就没法退回去。
+  if (!_conflictGroups.length && !_conflictSnapshot) { box.style.display = 'none'; return; }
+  if (!_conflictGroups.length) {
+    box.style.display = 'block';
+    box.innerHTML = '✅ <b>冲突已全部裁决</b><br>' +
+      '<span class="hint">本地值已按你的选择更新；后悔了可以整体回滚（保留最近一次）。</span>' +
+      '<div class="toolbar" style="margin-top:6px"><button class="btn small ghost" id="btnUndoConflict">回滚上次裁决</button>' +
+      '<button class="btn small ghost" id="btnDismissConflict">收起</button></div>';
+    document.getElementById('btnUndoConflict').addEventListener('click', fsUndoConflictApply);
+    document.getElementById('btnDismissConflict').addEventListener('click', () => { _conflictSnapshot = null; box.style.display = 'none'; });
+    return;
+  }
   const total = _conflicts.length;
   let html = '⚔️ <b>两边都改过同一字段，需要你决定：' + total + ' 条（' + _conflictGroups.length + ' 组）</b><br>' +
     '<span class="hint">按「表 × 字段」分组，人只需要对几十组做决定，不用逐条点。</span>' +
