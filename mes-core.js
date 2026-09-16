@@ -1091,7 +1091,15 @@
       var withSeq = state.transactions.filter(function (x) { return x && x.seq != null; });
       var noSeq = state.transactions.filter(function (x) { return !x || x.seq == null; });
       withSeq.sort(function (a, b) { return (b.seq || 0) - (a.seq || 0); });
-      state.transactions = withSeq.concat(noSeq).slice(0, opts.txnCap || 2000);
+      /* Phase 0：**绝不截断流水**。
+         旧的 `.slice(0, opts.txnCap || 2000)` 是最危险的一处「本地悄悄丢数据」：
+         replayAudit 从首条流水的 balance − delta 反推期初，截断后首条不是真首条，
+         于是反推出一个错的期初，整条链算下来余量反而「对得上」——
+         **截断把不一致伪装成一致，比报错更危险**。
+         而且无 seq 的旧流水被拼在数组尾部、超限时最先被无声扔掉，
+         飞书里还在 → 每次同步「拉取新增 N 条」→ 又被截掉 → 永久 churn。
+         数据量的问题由 IndexedDB 与覆盖度报告解决，不靠丢数据解决。 */
+      state.transactions = withSeq.concat(noSeq);
       var mx = state.txnSeq || 0;
       state.transactions.forEach(function (x) { if ((x.seq || 0) > mx) mx = x.seq || 0; });
       state.txnSeq = mx;

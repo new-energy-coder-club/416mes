@@ -539,7 +539,7 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 'use strict';
 
 /* 应用版本：改到用户看得见的行为时手动 +1，页脚会显示，方便确认线上跑的是哪一版 */
-const APP_VERSION = '1.2.1';
+const APP_VERSION = '1.3.0';   // Phase 0：并发正确性（seq 撞号 / 库存丢更新 / 队列不丢 / 跨标签互斥 / 工单取号）
 
 /* ---------- 标签类型配置 ---------- */
 const TYPES = {
@@ -1574,8 +1574,7 @@ function mergePackage(pkg, { from = '备份文件', upsertMembers = false } = {}
   });
   state.transactions = [...localBySeq.values()]
     .sort((a, b) => (b.seq || 0) - (a.seq || 0))
-    .concat(localNoSeq)
-    .slice(0, 2000);
+    .concat(localNoSeq);   // Phase 0：不再 slice(0,2000) —— 截断会把「不一致」伪装成「一致」
   state.txnSeq = Math.max(state.txnSeq || 0, ...state.transactions.map(t => t.seq || 0), 0);   // 合并后序号取最大防撞号
   ['serials', 'necSerials'].forEach(key => Object.entries(inc[key] || {}).forEach(([k, v]) => {
     state[key][k] = Math.max(state[key][k] || 0, v);   // 流水号取最大，防换浏览器撞号
@@ -1974,14 +1973,37 @@ function wipItemRow() {
   return tr;
 }
 document.getElementById('btnWipAddItem').addEventListener('click', () => document.querySelector('#wipItemTable tbody').appendChild(wipItemRow()));
-document.getElementById('btnGenWip').addEventListener('click', () => {
+/**
+ * 工单取号：先问飞书当天同类型的最大号，再取本地计数器的较大者。
+ *
+ * 为什么必须问飞书：计数器原来只在浏览器本地，另一台设备建过单本机不知道，
+ * 两台设备同时建单会生成同一个工单号，而工单按业务键 upsert ——
+ * 结果不是建了两张单，而是**两张单互相覆盖**。
+ * 查询失败（离线/接口不通）时退回本地计数器，并明确告知「已按本地号生成」。
+ */
+async function fsNextWorkorderSerial(type, date) {
+  const key = type + ymdCompact(date);
+  let local = state.serials[key] || 0;
+  let remote = 0, warned = false;
+  try {
+    const r = await fetch(fsWriteBase + '/api/feishu/nextcode?prefix=' + encodeURIComponent(key) + '&type=' + encodeURIComponent(type),
+      { headers: { 'Accept': 'application/json' } }).then(x => x.json());
+    if (r && r.ok) remote = r.max || 0;
+    else warned = true;
+  } catch (e) { warned = true; }
+  const max = Math.max(local, remote);
+  return { key, next: max + 1, local, remote, warned };
+}
+
+document.getElementById('btnGenWip').addEventListener('click', async () => {
   const type = document.getElementById('gWipType').value;
   const date = document.getElementById('gWipDate').value || today();
   const rows = [...document.querySelectorAll('#wipItemTable tbody tr')].map(tr => ({
     matCode: tr.querySelector('.wiMat').value.trim(), qty: tr.querySelector('.wiQty').value
   })).filter(it => it.matCode);   // 数量校验交给 mes-core，避免 '|| 0' 静默吞掉非法值
-  const key = type + ymdCompact(date);
-  const nextSerial = (state.serials[key] || 0) + 1;
+  const seqInfo = await fsNextWorkorderSerial(type, date);
+  const key = seqInfo.key;
+  const nextSerial = seqInfo.next;
   const code = key + pad(nextSerial, 3);
   // 创建工单：mes-core 负责物料存在性校验 + 同一物料多行自动合并
   const r = CORE.createOrder(state, { type, date, code, items: rows });
@@ -1995,7 +2017,11 @@ document.getElementById('btnGenWip').addEventListener('click', () => {
   const notes = [];
   if (merged.length) notes.push('同一物料多行已自动合并：' + merged.join('、'));
   if (dropped.length) notes.push('已忽略 ' + dropped.length + ' 行无效明细（' + dropped.map(d => d.reason).join('；') + '）');
-  alert('已生成工单 ' + code + '（' + WIP_NAMES[type] + '，明细 ' + r.order.items.length + ' 项）' + (notes.length ? '\n\n' + notes.join('\n') : ''));
+  alert('已生成工单 ' + code + '（' + WIP_NAMES[type] + '，明细 ' + r.order.items.length + ' 项）' +
+    (seqInfo.warned ? '\n\n⚠️ 没能问到飞书侧的号段，已按本地计数器生成（本地 ' + seqInfo.local + '）。' +
+      '若此时别的设备正在建单，可能撞号，请稍后在工单列表核对。' : '') +
+    (seqInfo.remote > seqInfo.local ? '\n（飞书侧已有 ' + seqInfo.remote + ' 号，已自动接在其后）' : '') +
+    (notes.length ? '\n\n' + notes.join('\n') : ''));
   // 三选：去扫码执行 / 去打印标签 / 留在本页
   const choice = prompt('工单 ' + code + ' 已生成。下一步：\n输入 1 = 去「扫码出入库」立即执行（扣减/增加库存）\n输入 2 = 去「标签打印」打印工单标签\n其他/取消 = 留在本页', '1');
   if (choice === '1') {
@@ -2638,6 +2664,16 @@ function fsOutbox() {
   return _outbox;
 }
 function fsQueue() { return fsOutbox().list(); }
+
+/* ---------- 幂等键（操作ID）----------
+   飞书没有事务，「已写入但响应丢失」时重试会重复扣一次库存。
+   给每个写操作带一个稳定且唯一的操作ID，服务端按它查重即可。
+   格式：<设备ID>-<单调序号>-<随机尾>，设备ID换浏览器会变，单调序号用时间戳兜底。 */
+let _opSeq = 0;
+function newOpId() {
+  _opSeq++;
+  return (state.deviceId || 'dev') + '-' + Date.now().toString(36) + '-' + _opSeq + '-' + Math.random().toString(36).slice(2, 6);
+}
 /** 顶部离线队列角标：待冲刷条数常驻显示 */
 function fsQueueChip() {
   const q = fsQueue();
@@ -2975,17 +3011,46 @@ function fsEnqueue(item) {
   fsQueueChip();
 }
 /**
- * 记录一次失败；超过上限才剔除并告警。
- * 注意「剔除」是被显式审计的行为：prune() 把被丢弃的条目交回来，这里逐条打日志，
- * 绝不静默消失。
+ * 记录一次失败：只累加计数并把状态置为 needs_attention，**绝不自动丢弃**。
+ *
+ * Phase 0 之前这里会调 prune()，连续失败 5 次就把用户的操作从队列里删掉 ——
+ * 那是静默丢数据：扫码枪离线攒的账，网络恢复慢一点就永久消失，而且只留一行日志。
+ * 现在队列只进不出：超限的条目进入「待人工处理」，由人显式补交或显式放弃
+ * （放弃要走 index.html 的「放弃并导出」入口，导出留底之后才删）。
  */
 function fsQueueFail(item, err) {
   const ob = fsOutbox();
-  ob.markAttempt(item.id, err);
-  const r = ob.prune();
-  r.dropped.forEach(x => log('❌ 放弃同步（连续失败 ' + x.tries + ' 次）：' + fsDescribeItem(x) + '　原因：' + (x.lastError || '未知')));
-  if (r.dropped.length) fsQueueChip();
-  return r.dropped.length;
+  const before = (item.tries || 0);
+  const q = ob.markAttempt(item.id, err);
+  const now = (q.find(x => x.id === item.id) || {});
+  if (now.status === 'needs_attention' && before < QUEUE_MAX_TRIES) {
+    log('⛔ 同步连续失败 ' + now.tries + ' 次，已转「待人工处理」（队列保留，不会自动丢弃）：' + fsDescribeItem(item) + '　原因：' + (err || '未知'));
+  }
+  fsQueueChip();
+  return 0;   // 自动流程永远不丢弃条目
+}
+
+/**
+ * 人工显式放弃：把条目导出留底后从队列移除。
+ * 这是**唯一**能让条目离开队列的失败路径，且必须是人点的。
+ */
+function fsGiveUpItem(id) {
+  const ob = fsOutbox();
+  const it = ob.list().find(x => x.id === id);
+  if (!it) return null;
+  const dump = JSON.stringify(it);
+  try {
+    const blob = new Blob([dump], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = '放弃的同步操作-' + (it.id || 'item') + '.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  } catch (e) { log('⚠️ 导出放弃条目失败（仍会保留在日志里）：' + e.message); }
+  log('🗑️ 人工放弃同步操作：' + fsDescribeItem(it) + '　原始内容：' + dump);
+  ob.removeById(id);
+  fsQueueChip();
+  return it;
 }
 
 /** 执行一条队列项（也用于直写） */
@@ -2994,7 +3059,8 @@ async function fsExecItem(item) {
   if (op === 'stock') {
     const d = await fsPost('/api/feishu/stock', {
       matCode: item.matCode, qty: item.qty, delta: item.delta,
-      operator: item.operator || state.operator, type: item.type, reason: item.reason, ref: item.ref
+      operator: item.operator || state.operator, type: item.type, reason: item.reason, ref: item.ref,
+      opId: item.opId          // 幂等键：重试不会重复记账
     });
     log('☁️ 飞书台账已同步 ' + item.matCode + ' → ' + item.qty);
     return d;
@@ -3040,7 +3106,9 @@ async function fsPush(item) {
 
 /** 库存写入（改数量 + 追加流水），保持原有调用签名 */
 function fsPushStock(matCode, qty, delta, type, reason, ref) {
-  return fsPush({ op: 'stock', matCode, qty, delta, type, reason, ref, operator: state.operator });
+  // opId 在入队前就定下来并随条目落盘：这样「响应丢失后重试」用的是同一个幂等键，
+  // 服务端能认出这是重放而不是新的一次扣减。
+  return fsPush({ op: 'stock', matCode, qty, delta, type, reason, ref, operator: state.operator, opId: newOpId() });
 }
 /** 任意表的新建/修改 */
 function fsPushRecord(table, records) {
@@ -3055,13 +3123,57 @@ function fsPushDelete(table, keys) {
   return fsPush({ op: 'delete', table, keys: list });
 }
 
-/** 冲刷离线队列 */
+/**
+ * 冲刷离线队列。
+ *
+ * Phase 0 修正：**跨标签页互斥**。
+ * 旧实现每个标签页启动时都调一次 fsFlushQueue，两个标签页同时冲刷同一个队列
+ * → 同一笔库存写两遍 → 重复记账。fsSerialize 只是单页内的 Promise 链，挡不住这个。
+ * 现在用 Web Locks API 选主（线上是 https，满足安全上下文）；浏览器没有这个 API 时
+ * 退回页面内锁，至少保证单页不重入。
+ */
+let _flushInFlight = null;
+/* 跨标签页广播：别的标签页冲刷完队列后，本页的角标要跟着更新，
+   否则会出现「这个标签页显示 3 条、其实早同步完了」的假告警。 */
+let _fsChannel = null;
+function fsChannel() {
+  try {
+    if (!_fsChannel && typeof BroadcastChannel !== 'undefined') _fsChannel = new BroadcastChannel('mes416-sync');
+  } catch (e) { _fsChannel = null; }
+  return _fsChannel;
+}
+function fsBroadcast(msg) {
+  const c = fsChannel();
+  if (c) { try { c.postMessage(msg); } catch (e) { /* 广播失败不影响主流程 */ } }
+}
+(function initFsChannel() {
+  const c = fsChannel();
+  if (!c) return;
+  c.onmessage = (ev) => {
+    const d = ev.data || {};
+    if (d.type === 'queue-changed') fsQueueChip();
+  };
+})();
 async function fsFlushQueue() {
+  if (_flushInFlight) return _flushInFlight;      // 同页重入：直接复用正在进行的那次
+  _flushInFlight = fsFlushQueueLocked().finally(() => { _flushInFlight = null; });
+  return _flushInFlight;
+}
+async function fsFlushQueueLocked() {
+  if (navigator.locks && navigator.locks.request) {
+    // 等锁 + 锁内复查：拿到锁时队列可能已被另一个标签页冲刷干净
+    return navigator.locks.request('mes416-flush', async () => fsFlushQueueInner());
+  }
+  return fsFlushQueueInner();
+}
+async function fsFlushQueueInner() {
   const q = fsQueue();
   if (!q.length) return 0;
   let ok = 0;
   // 逐条处理：成功的从队列移除，失败的累计次数。同样走串行链，避免和正在进行的用户写入打架。
   for (const item of q) {
+    // 拿到锁之后队列可能已经被别的标签页改过，逐条复核还在不在
+    if (!fsQueue().some(x => x.id === item.id)) continue;
     try {
       await fsSerialize(fsChainKey(item), () => fsExecItem(item));
       // 必须按 id 删除。旧版写的是 fsQueue().filter(x => x !== item) —— 但 fsQueue() 每次都
@@ -3074,7 +3186,7 @@ async function fsFlushQueue() {
       fsQueueFail(item, e.message);
     }
   }
-  if (ok) { log('☁️ 离线队列冲刷成功 ' + ok + ' 条，剩余 ' + fsQueue().length + ' 条'); save(); }
+  if (ok) { log('☁️ 离线队列冲刷成功 ' + ok + ' 条，剩余 ' + fsQueue().length + ' 条'); save(); fsBroadcast({ type: 'queue-changed' }); }
   return ok;
 }
 

@@ -1309,8 +1309,27 @@ test('合并：流水按 seq 去重合并、新的在前、txnSeq 单调递增',
   assert.equal(r.created, 1);
 });
 
-test('合并：流水被飞书侧删除时同样同步删除', () => {
-  const st = mkSync({ transactions: [{ seq: 1 }, { seq: 2 }], txnSeq: 2 });
+test('合并【Phase0·关键】流水绝不截断到 2000 条（截断会把不一致伪装成一致）', () => {
+  const N = 2500;
+  const remoteTxns = Array.from({ length: N }, (_, i) => ({ seq: N - i, matCode: 'A', delta: -1, balance: N - i - 1 }));
+  const st = mkSync({ transactions: [], txnSeq: 0 });
+  Core.mergeRemote(st, { transactions: remoteTxns }, { syncedKeys: { transactions: [] } });
+
+  assert.equal(st.transactions.length, N, '必须完整保留 ' + N + ' 条，实测 ' + st.transactions.length);
+  // 无 seq 的旧流水最危险：旧实现把它们拼在数组尾部，超限时**最先被无声扔掉**，
+  // 而飞书里还在 → 每次同步都「拉取新增 N 条」→ 又被截掉 → 永久 churn。
+  assert.ok(st.transactions.some(t => t.seq === 1), '最旧的 #1 也必须还在');
+  assert.ok(st.transactions.every(t => t && t.seq != null), '不能丢掉任何带 seq 的流水');
+});
+
+test('合并【Phase0】无 seq 的旧流水同样不被丢弃', () => {
+  const old = Array.from({ length: 2100 }, (_, i) => ({ seq: null, matCode: 'A', delta: 0, balance: 0, time: 't' + i }));
+  const st = mkSync({ transactions: old, txnSeq: 0 });
+  Core.mergeRemote(st, { transactions: [] }, { syncedKeys: { transactions: [] } });
+  assert.equal(st.transactions.filter(t => t.seq == null).length, 2100, '无 seq 的旧流水一条都不能少');
+});
+
+test('合并：流水被飞书侧删除时同样同步删除', () => {  const st = mkSync({ transactions: [{ seq: 1 }, { seq: 2 }], txnSeq: 2 });
   Core.mergeRemote(st, { transactions: [{ seq: 1 }] }, { syncedKeys: { transactions: [1, 2] } });
   assert.deepEqual(st.transactions.map(t => t.seq), [1]);
 });

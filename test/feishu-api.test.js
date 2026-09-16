@@ -29,12 +29,60 @@ function mockTypeCheck(defs, fields) {
 }
 
 
+/* ---------- mock 的读路径语义（与真飞书对齐） ---------- */
+
+/** 真飞书 records/search 的 filter 支持得很有限，这里只实现实测可用的几种 */
+function mockMatch(t, filter, row) {
+  if (!filter || !Array.isArray(filter.conditions) || !filter.conditions.length) return true;
+  const test = (c) => {
+    const raw = row[c.field_name];
+    const v = Array.isArray(raw) ? raw.map(x => (x && (x.text || x.name)) || x).join('') : raw;
+    switch (c.operator) {
+      case 'is':
+        // 文本列的值在真机上是数组：{ operator:'is', value:['GJ-001'] }
+        return (c.value || []).some(x => String(x) === String(v == null ? '' : v));
+      case 'isNotEmpty':
+        return v !== '' && v !== null && v !== undefined;
+      case 'contains':
+        return String(v == null ? '' : v).includes(String((c.value || [])[0]));
+      default:
+        throw new Error('InvalidFilter: 不支持的 operator ' + c.operator);
+    }
+  };
+  return filter.conjunction === 'or' ? filter.conditions.some(test) : filter.conditions.every(test);
+}
+
+function mockSort(rows, sort) {
+  if (!Array.isArray(sort) || !sort.length) return rows;
+  const s = sort[0];
+  return rows.slice().sort((a, b) => {
+    // 注意：这里的 a/b 是 {record_id, fields}，排序键在 fields 里。
+    // 写成 a[s.field_name] 会得到 undefined，于是「排了序」却保持原顺序 ——
+    // 这种 mock 自身的假象会让真正的排序 bug 一路绿灯，必须盯住。
+    const av = (a.fields || {})[s.field_name], bv = (b.fields || {})[s.field_name];
+    const an = typeof av === 'number' ? av : String(av == null ? '' : av);
+    const bn = typeof bv === 'number' ? bv : String(bv == null ? '' : bv);
+    const c = an < bn ? -1 : an > bn ? 1 : 0;
+    return s.desc ? -c : c;
+  });
+}
+
 function startMock(opts = {}) {
   const tables = opts.tables || {
     tblMAT: { fields: ['物料码', '名称', '库存数量'], rows: [{ '物料码': 'A-1', '名称': '螺丝刀', '库存数量': 5 }] },
     tblTXN: { fields: ['流水号', '时间', '操作人', '类型', '物料码', '变动', '余量', '关联单', '原因/备注'], rows: [] }
   };
-  const calls = { created: [], updated: [], deleted: [], deny: false, denyOn: opts.denyOn || null };
+  // 每张表维护一份稳定的 record_id：飞书的 record_id 与行序无关，
+  // 旧 mock 用下标当 id，一旦删除/新建就错位 —— 并发测试必须先修掉这个假象。
+  let idSeq = 0;
+  Object.keys(tables).forEach(tid => {
+    const t = tables[tid];
+    // ids 必须是**不可枚举**的：有用例用 JSON.stringify(tables) 前后比对照「有没有写数据」，
+    // 内部记账用的 record_id 不该算作数据变更（真飞书的 record_id 也不在 fields 里）。
+    if (!t.ids) Object.defineProperty(t, 'ids', { value: [], writable: true, enumerable: false, configurable: true });
+    t.rows.forEach(() => t.ids.push('rec_' + (++idSeq)));
+  });
+  const calls = { created: [], updated: [], deleted: [], requests: [], deny: false, denyOn: opts.denyOn || null };
   // 字段类型定义：type 数字对应飞书字段类型码（1 文本 / 2 数字 / 3 单选 / 5 日期）
   const fieldTypes = opts.fieldTypes || {
     tblMAT: [{ name: '物料码', type: 1 }, { name: '名称', type: 1 }, { name: '库存数量', type: 2 }],
@@ -44,6 +92,8 @@ function startMock(opts = {}) {
       { name: '余量', type: 2 }, { name: '关联单', type: 1 }, { name: '原因/备注', type: 1 }
     ]
   };
+  let reqNo = 0;
+
   const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', c => body += c);
@@ -51,71 +101,129 @@ function startMock(opts = {}) {
       const url = new URL(req.url, 'http://x');
       const json = (o, code = 200) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
 
-      if (url.pathname.endsWith('/auth/v3/tenant_access_token/internal')) {
-        if (opts.badAuth) return json({ code: 10003, msg: 'app_id or app_secret invalid' });
-        return json({ code: 0, tenant_access_token: 't-fake' });
-      }
-      // 表结构（dry-run 校验用）
+      // --- 先只做「路由识别」，真正的处理放到 dispatch 里，好让延迟插在读与写之间 ---
       const fm = url.pathname.match(/\/tables\/([^/]+)\/fields$/);
-      if (fm) {
-        const ft = fieldTypes[fm[1]];
-        if (!ft) return json({ code: 1254005, msg: 'table not found: ' + fm[1] });
-        return json({ code: 0, data: { items: ft.map(f => ({
-          field_name: f.name, type: f.type, property: f.options ? { options: f.options.map(o => ({ name: o })) } : undefined
-        })) } });
-      }
-      // 表 ID 从路径里取：.../tables/<id>/records[...]
-      const m = url.pathname.match(/\/tables\/([^/]+)\/records(\/[a-z_]+)?/);
-      if (!m) return json({ code: 404, msg: 'not found' });
-      const tableId = m[1];
-      const action = (m[2] || '').replace('/', '');
-      const t = tables[tableId];
-      if (!t) return json({ code: 1254005, msg: 'table not found: ' + tableId });
+      const m = url.pathname.match(/\/tables\/([^/]+)\/records(\/[^/]+)?$/);
+      const isAuth = url.pathname.endsWith('/auth/v3/tenant_access_token/internal');
+      const tableId = fm ? fm[1] : (m ? m[1] : null);
+      const KNOWN = ['', 'search', 'batch_create', 'batch_delete', 'batch_update'];
+      const sub = m ? (m[2] || '').replace('/', '') : '';
+      const recordId = (m && sub && KNOWN.indexOf(sub) < 0) ? sub : null;
+      const action = m ? (recordId ? 'get' : sub) : (isAuth ? 'auth' : (fm ? 'fields' : 'unknown'));
+      const phase = (action === 'auth' || action === 'fields' || action === '' || action === 'search' || action === 'get') ? 'read' : 'write';
+      const info = { requestNo: ++reqNo, method: req.method, path: url.pathname, action, phase, tableId, body };
+      calls.requests.push(info);
 
-      // 权限注入
-      if (calls.denyOn && calls.denyOn === action) return json({ code: 99991672, msg: 'Forbidden: no permission' });
-      if (action === 'batch_update') calls.denyOn = calls.denyOn || null;
+      const dispatch = () => {
+        if (isAuth) {
+          if (opts.badAuth) return json({ code: 10003, msg: 'app_id or app_secret invalid' });
+          return json({ code: 0, tenant_access_token: 't-fake' });
+        }
+        // 表结构（dry-run 校验用）
+        if (fm) {
+          const ft = fieldTypes[fm[1]];
+          if (!ft) return json({ code: 1254005, msg: 'table not found: ' + fm[1] });
+          return json({ code: 0, data: { items: ft.map(f => ({
+            field_name: f.name, type: f.type, property: f.options ? { options: f.options.map(o => ({ name: o })) } : undefined
+          })) } });
+        }
+        if (!m) return json({ code: 404, msg: 'not found' });
+        const t = tables[tableId];
+        if (!t) return json({ code: 1254005, msg: 'table not found: ' + tableId });
+        // 用例常直接 push 行（模拟飞书界面里手动加的数据）→ 这里补发 record_id
+        while (t.ids.length < t.rows.length) t.ids.push('rec_' + (++idSeq));
 
-      if (!action) {   // 列表
-        return json({ code: 0, data: {
-          items: t.rows.map((r, i) => ({ record_id: 'rec_' + i, fields: r })),
-          has_more: false
-        } });
-      }
-      if (action === 'batch_create') {
-        if (opts.denyWrite || opts.denyCreate) return json({ code: 99991672, msg: 'Forbidden: no permission to write' });
-        const b = JSON.parse(body || '{}');
-        for (const r of (b.records || [])) {
-          const err = mockTypeCheck(fieldTypes[tableId], r.fields);
-          if (err) return json({ code: 1254006, msg: err });
+        // 权限注入
+        if (calls.denyOn && calls.denyOn === action) return json({ code: 99991672, msg: 'Forbidden: no permission' });
+        if (action === 'batch_update') calls.denyOn = calls.denyOn || null;
+
+        const rowsWithIds = () => t.rows.map((r, i) => ({ record_id: t.ids[i], fields: r }));
+        if (!action) {   // 列表（整表）
+          return json({ code: 0, data: { items: rowsWithIds(), has_more: false } });
         }
-        (b.records || []).forEach(r => { calls.created.push(r.fields); t.rows.push(r.fields); });
-        return json({ code: 0, data: { records: (b.records || []).map((_, i) => ({ record_id: 'new_' + i })) } });
-      }
-      if (action === 'batch_delete') {
-        if (opts.denyWrite) return json({ code: 99991672, msg: 'Forbidden: no permission to write' });
-        const b = JSON.parse(body || '{}');
-        const want = new Set(b.records || []);
-        const keep = [];
-        t.rows.forEach((r, i) => { if (!want.has('rec_' + i)) keep.push(r); else calls.deleted.push('rec_' + i); });
-        t.rows.length = 0; keep.forEach(r => t.rows.push(r));
-        return json({ code: 0, data: { records: (b.records || []).map(id => ({ record_id: id, deleted: true })) } });
-      }
-      if (action === 'batch_update') {
-        if (opts.denyWrite) return json({ code: 99991672, msg: 'Forbidden: no permission to write' });
-        const b = JSON.parse(body || '{}');
-        for (const r of (b.records || [])) {
-          const err = mockTypeCheck(fieldTypes[tableId], r.fields);
-          if (err) return json({ code: 1254006, msg: err });
+        if (action === 'get') {   // 单条读（回读校验用）
+          const i = t.ids.indexOf(recordId);
+          if (i < 0) return json({ code: 1254004, msg: 'record not found: ' + recordId });
+          return json({ code: 0, data: { record: { record_id: recordId, fields: t.rows[i] } } });
         }
-        (b.records || []).forEach(r => {
-          calls.updated.push(r);
-          const idx = parseInt(String(r.record_id).replace('rec_', ''), 10);
-          if (t.rows[idx]) Object.assign(t.rows[idx], r.fields);
-        });
-        return json({ code: 0, data: { records: (b.records || []).map((_, i) => ({ record_id: 'u_' + i })) } });
-      }
-      json({ code: 404, msg: 'unhandled action ' + action });
+        if (action === 'search') {
+          const b = JSON.parse(body || '{}');
+          let rows = rowsWithIds();
+          try {
+            rows = rows.filter(r => mockMatch(t, b.filter, r.fields));
+          } catch (e) {
+            return json({ code: 1254008, msg: String(e.message) });
+          }
+          rows = mockSort(rows, b.sort);
+          const total = rows.length;
+          const size = Math.min(parseInt(url.searchParams.get('page_size') || '500', 10) || 500, 500);
+          const off = parseInt(url.searchParams.get('page_token') || '0', 10) || 0;
+          const page = rows.slice(off, off + size);
+          const hasMore = off + size < total;
+          const items = page.map(r => {
+            if (!b.field_names) return r;
+            const f = {};
+            b.field_names.forEach(n => { if (n in r.fields) f[n] = r.fields[n]; });
+            return { record_id: r.record_id, fields: f };
+          });
+          return json({ code: 0, data: { items, total, has_more: hasMore,
+            page_token: hasMore ? String(off + size) : undefined } });
+        }
+        if (action === 'batch_create') {
+          if (opts.denyWrite || opts.denyCreate) return json({ code: 99991672, msg: 'Forbidden: no permission to write' });
+          const b = JSON.parse(body || '{}');
+          for (const r of (b.records || [])) {
+            const err = mockTypeCheck(fieldTypes[tableId], r.fields);
+            if (err) return json({ code: 1254006, msg: err });
+          }
+          const made = (b.records || []).map(r => {
+            calls.created.push(r.fields);
+            t.rows.push(r.fields);
+            const id = 'new_' + (++idSeq);
+            t.ids.push(id);
+            return { record_id: id };
+          });
+          return json({ code: 0, data: { records: made } });
+        }
+        if (action === 'batch_delete') {
+          if (opts.denyWrite) return json({ code: 99991672, msg: 'Forbidden: no permission to write' });
+          const b = JSON.parse(body || '{}');
+          const want = new Set(b.records || []);
+          const keepRows = [], keepIds = [];
+          t.rows.forEach((r, i) => {
+            if (want.has(t.ids[i])) calls.deleted.push(t.ids[i]);
+            else { keepRows.push(r); keepIds.push(t.ids[i]); }
+          });
+          t.rows.length = 0; keepRows.forEach(r => t.rows.push(r));
+          t.ids.length = 0; keepIds.forEach(x => t.ids.push(x));
+          return json({ code: 0, data: { records: (b.records || []).map(id => ({ record_id: id, deleted: true })) } });
+        }
+        if (action === 'batch_update') {
+          if (opts.denyWrite) return json({ code: 99991672, msg: 'Forbidden: no permission to write' });
+          const b = JSON.parse(body || '{}');
+          for (const r of (b.records || [])) {
+            const err = mockTypeCheck(fieldTypes[tableId], r.fields);
+            if (err) return json({ code: 1254006, msg: err });
+          }
+          const out = [];
+          (b.records || []).forEach(r => {
+            calls.updated.push(r);
+            const idx = t.ids.indexOf(r.record_id);
+            if (idx >= 0) Object.assign(t.rows[idx], r.fields);
+            out.push({ record_id: r.record_id });
+          });
+          return json({ code: 0, data: { records: out } });
+        }
+        json({ code: 404, msg: 'unhandled action ' + action });
+      };
+
+      // 默认 0 延迟 → 与旧行为完全一致；
+      // 传函数则可按「第几个请求 / 阶段」编排延迟，把读写之间的交错变成确定性的。
+      let ms = 0;
+      try {
+        ms = typeof opts.delay === 'function' ? (opts.delay(info) || 0) : (opts.delay || 0);
+      } catch (_) { ms = 0; }
+      if (ms > 0) setTimeout(dispatch, ms); else dispatch();
     });
   });
   return new Promise(resolve => {
@@ -273,17 +381,19 @@ test('飞书写【重要】流水表读不到时，干脆不动库存（避免�
   assert.equal(mock.calls.updated.length, 0, '不应产生任何写入');
 });
 
-test('飞书写【重要】流水写入失败时，必须如实报告「库存已改」而不能假装成功', async (t) => {
+test('飞书写【Phase0·重要】流水写不进去时，库存必须保持原值（账本优先，不留半提交）', async (t) => {
   // 读得到流水表，但 batch_create 被拒
   const mock = await startMock({ denyCreate: true });
   t.after(() => { mock.server.close(); cleanupEnv(); });
   const lib = loadLib(mock.port);
   const r = await lib.writeStock({ matCode: 'A-1', qty: 3, delta: -2 });
   assert.equal(r.ok, false, '不能返回成功');
-  assert.equal(r.warning, 'stock_written_txn_failed');
-  assert.match(r.error, /库存已改为 3，但流水写入失败/);
-  // 库存确实被改了 —— 这正是必须明确告知的原因
-  assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 3);
+  assert.equal(r.warning, 'txn_not_written');
+  assert.match(r.error, /库存未改动/);
+  // 关键：旧实现是「先改 qty 再写流水」，这一步会留下 stock_written_txn_failed ——
+  // 库存被静默改了、没有任何凭据。现在先写账本，写不进去就整个不动。
+  assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 5, '库存必须保持原值 5');
+  assert.equal(mock.calls.updated.length, 0, '不应产生任何库存写入');
   assert.equal(mock.calls.created.length, 0);
 });
 
@@ -397,6 +507,218 @@ test('飞书写：写完后回放读到的余量与库存一致', async (t) => {
   assert.equal(newest.delta, -2);
 });
 
+/* ================= 阶段 0：真并发（mock 可注入延迟，能造出读写交错） =================
+
+   这一组是阶段 0 的核心验收。之所以以前测不出来：旧 mock 在 req.on('end') 里
+   同步处理，两个并发请求实际上被串行执行，「读 → 写」之间不可能交错，
+   于是并发 bug 一路绿灯。现在 opts.delay 能把交错变成确定性的。 */
+
+/** 库存并发测试专用 mock：流水表带「操作ID」，物料表只有一条 A-1 */
+async function startStockMock(opts = {}) {
+  const tables = {
+    tblMAT: { fields: ['物料码', '名称', '库存数量'], rows: [{ '物料码': 'A-1', '名称': '螺丝刀', '库存数量': opts.qty == null ? 10 : opts.qty }] },
+    tblTXN: { fields: ['流水号', '时间', '操作人', '类型', '物料码', '变动', '余量', '关联单', '原因/备注', '操作ID'],
+              rows: (opts.txns || []).slice() }
+  };
+  const fieldTypes = {
+    tblMAT: [{ name: '物料码', type: 1 }, { name: '名称', type: 1 }, { name: '库存数量', type: 2 }],
+    tblTXN: [
+      { name: '流水号', type: 1 }, { name: '时间', type: 5 }, { name: '操作人', type: 1 },
+      { name: '类型', type: 1 }, { name: '物料码', type: 1 }, { name: '变动', type: 2 },
+      { name: '余量', type: 2 }, { name: '关联单', type: 1 }, { name: '原因/备注', type: 1 },
+      { name: '操作ID', type: 1 }
+    ]
+  };
+  return startMock(Object.assign({ tables, fieldTypes }, opts.delayOpts || {}));
+}
+
+test('阶段0·幂等【核心】同一操作ID 并发提交 3 次，只记一次账', async (t) => {
+  const mock = await startStockMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+
+  const args = { matCode: 'A-1', delta: -2, opId: 'op-dup-1', operator: '甲', type: '领料工单' };
+  const rs = await Promise.all([
+    lib.writeStock(Object.assign({}, args)),
+    lib.writeStock(Object.assign({}, args)),
+    lib.writeStock(Object.assign({}, args))
+  ]);
+
+  assert.equal(rs.filter(r => r.ok).length, 3, '三次都必须返回成功（重放不算失败）');
+  assert.equal(rs.filter(r => r.duplicate).length, 2, '后两次必须被识别为重放');
+  assert.equal(mock.tables.tblTXN.rows.length, 1, '账本里只能有一条流水');
+  assert.equal(rs.filter(r => r.seq).map(r => r.seq).filter((v, i, a) => a.indexOf(v) === i).length, 1, '重放必须返回同一个 seq');
+  // 关键：库存只扣一次
+  assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 8, '10 − 2，绝不能扣成 6 或 4');
+});
+
+test('阶段0·幂等【回归】不同操作ID 必须各记一次账（幂等键不能误吞真实操作）', async (t) => {
+  const mock = await startStockMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  await Promise.all([
+    lib.writeStock({ matCode: 'A-1', delta: -2, opId: 'op-a' }),
+    lib.writeStock({ matCode: 'A-1', delta: -3, opId: 'op-b' })
+  ]);
+  assert.equal(mock.tables.tblTXN.rows.length, 2, '两个不同操作必须留下两条流水');
+  assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 5, '10 − 2 − 3');
+});
+
+test('阶段0·并发 delta【核心】两台设备同时 +2，最终必须是原值 +4（旧代码必然丢一次）', async (t) => {
+  const mock = await startStockMock({ qty: 10 });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+
+  await Promise.all([
+    lib.writeStock({ matCode: 'A-1', delta: 2, opId: 'dev1-1', operator: 'PC' }),
+    lib.writeStock({ matCode: 'A-1', delta: 2, opId: 'dev2-1', operator: '手机' })
+  ]);
+
+  assert.equal(mock.tables.tblTXN.rows.length, 2, '两次写入必须都留下流水');
+  const sum = mock.tables.tblTXN.rows.reduce((s, r) => s + r['变动'], 0);
+  assert.equal(sum, 4, '账本求和必须是 4');
+  assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 14, 'qty 必须等于账本说的 14，不能是 12（丢一次更新）');
+});
+
+test('阶段0·并发 delta【核心】一加一减交错也不丢更新', async (t) => {
+  const mock = await startStockMock({ qty: 10 });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+
+  await Promise.all([
+    lib.writeStock({ matCode: 'A-1', delta: 5, opId: 'p1' }),
+    lib.writeStock({ matCode: 'A-1', delta: -3, opId: 'p2' }),
+    lib.writeStock({ matCode: 'A-1', delta: -3, opId: 'p3' })
+  ]);
+  const sum = mock.tables.tblTXN.rows.reduce((s, r) => s + r['变动'], 0);
+  assert.equal(sum, -1);
+  assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 9, 'qty 必须跟账本一致：10 + (−1)');
+});
+
+test('阶段0·seq 并发【核心】8 个并发写入的流水号必须互不重复且连续', async (t) => {
+  const mock = await startStockMock({ txns: [{ '流水号': '#000007', '物料码': 'A-1', '变动': 0 }] });
+  // 让所有 list/create 都慢一点，把「都读到同一个 max」这个窗口撑开
+  mock.server.close();
+  const m2 = await startStockMock({
+    qty: 100,
+    txns: [{ '流水号': '#000007', '物料码': 'A-1', '变动': 0 }],
+    delayOpts: { delay: (r) => (r.action === 'batch_create' ? 25 : 0) }
+  });
+  t.after(() => { m2.server.close(); cleanupEnv(); });
+  const lib = loadLib(m2.port);
+
+  const rs = await Promise.all(Array.from({ length: 8 }, (_, i) =>
+    lib.writeStock({ matCode: 'A-1', delta: -1, opId: 'seq-' + i })));
+  assert.equal(rs.filter(r => r.ok).length, 8, '8 次都该成功：' + JSON.stringify(rs.map(r => r.error || r.seq)));
+  // 先看真实表：这是唯一真正重要的不变量
+  const nums = m2.tables.tblTXN.rows.map(r => r['流水号']).sort();
+  assert.equal(nums.length, 9, '原有 1 条 + 新增 8 条，实测 ' + JSON.stringify(nums));
+  assert.equal(new Set(nums).size, 9, '真实表里绝不能有重复流水号：' + JSON.stringify(nums));
+  const seqs = rs.map(r => r.seq).sort((a, b) => a - b);
+  assert.equal(new Set(seqs).size, 8, '流水号绝不能重复：' + JSON.stringify(seqs));
+  assert.deepEqual(seqs, [8, 9, 10, 11, 12, 13, 14, 15], '必须接在 #000007 之后连续分配');
+});
+
+test('阶段0·mock 自检：延迟注入确实能造出读写交错（否则并发测试全是假的）', async (t) => {
+  const slow = await startStockMock({ delayOpts: { delay: (r) => (r.action === 'batch_create' ? 30 : 0) } });
+  t.after(() => { slow.server.close(); cleanupEnv(); });
+  const lib1 = loadLib(slow.port);
+  const t0 = Date.now();
+  await Promise.all([
+    lib1.writeStock({ matCode: 'A-1', delta: -1, opId: 'x1' }),
+    lib1.writeStock({ matCode: 'A-1', delta: -1, opId: 'x2' })
+  ]);
+  const elapsed = Date.now() - t0;
+  // 两个 create 各延迟 30ms；若 mock 仍是同步串行，这里会接近 60ms 且不可能交错
+  assert.ok(elapsed >= 30, '延迟必须真的生效，实测 ' + elapsed + 'ms');
+  const writes = slow.calls.requests.filter(r => r.action === 'batch_create');
+  assert.equal(writes.length, 2);
+  // 关键证据：两次「取 max seq」都发生在第一次 create 落库之前 —— 这正是竞态窗口
+  const reads = slow.calls.requests.filter(r => r.action === 'search').length;
+  assert.ok(reads >= 2, '两次写入都要有读路径，实测 ' + reads);
+});
+
+test('阶段0·写路径【核心】改 2 条记录不得整表拉取（写入开销不能随表增长）', async (t) => {
+  const mock = await startAllMock();
+  // 造一张「已经很大」的物料表：旧实现每写一条都要把它整张拉下来
+  for (let i = 0; i < 400; i++) mock.tables.tblMAT.rows.push({ '物料码': 'BULK-' + i, '名称': 'x' });
+  mock.tables.tblMAT.rows.push({ '物料码': 'A-1', '名称': '旧' });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+
+  mock.calls.requests.length = 0;
+  const r = await lib.upsertRecords('materials', [{ code: 'A-1', name: '新' }]);
+  assert.equal(r.updated, 1, JSON.stringify(r));
+
+  const fullList = mock.calls.requests.filter(q => q.tableId === 'tblMAT' && q.action === '');
+  assert.equal(fullList.length, 0, '写入路径不该再出现「整表 list」，实测 ' + fullList.length + ' 次');
+  assert.ok(mock.calls.requests.some(q => q.tableId === 'tblMAT' && q.action === 'search'), '应当用 search 精确查业务键');
+});
+
+test('阶段0·删除路径【核心】删 1 条记录不得整表拉取', async (t) => {
+  const mock = await startAllMock();
+  for (let i = 0; i < 400; i++) mock.tables.tblMAT.rows.push({ '物料码': 'BULK-' + i });
+  mock.tables.tblMAT.rows.push({ '物料码': 'DEL-1' });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+
+  mock.calls.requests.length = 0;
+  const r = await lib.deleteRecords('materials', ['DEL-1']);
+  assert.equal(r.deleted, 1, JSON.stringify(r));
+  const fullList = mock.calls.requests.filter(q => q.tableId === 'tblMAT' && q.action === '');
+  assert.equal(fullList.length, 0, '删除路径不该再出现「整表 list」');
+});
+
+test('阶段0·库存写路径【核心】连取号带改库存都不得整表扫流水表', async (t) => {
+  const mock = await startStockMock();
+  mock.tables.tblMAT.rows[0]['库存数量'] = 10;
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  mock.calls.requests.length = 0;
+  const r = await lib.writeStock({ matCode: 'A-1', delta: -2, opId: 'o1' });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const full = mock.calls.requests.filter(q => q.tableId === 'tblTXN' && q.action === '');
+  assert.equal(full.length, 0, '库存写入不该再整表扫流水（几万条时每次扫码要拉几 MB）');
+});
+
+/* ================= 工单取号（Phase 0 #7） ================= */
+
+test('阶段0·工单取号【核心】按「类型 + 当天」问飞书要最大号，不靠本地计数器', async (t) => {
+  const mock = await startAllMock();
+  mock.tables.tblWIP.rows.push(
+    { '工单号': 'LL20260915001', '类型': 'LL 领料' },
+    { '工单号': 'LL20260915007', '类型': 'LL 领料' },   // 另一台设备建过，本机不知道
+    { '工单号': 'LL20260914009', '类型': 'LL 领料' },   // 昨天的，不该影响今天
+    { '工单号': 'BH20260915099', '类型': 'BH 补货' }    // 别的类型，不该串号
+  );
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+
+  const r = await lib.maxCodeSuffix({ prefix: 'LL20260915', type: 'LL 领料' });
+  assert.equal(r.max, 7, '必须取到飞书侧当天同类型的最大号 7，实测 ' + JSON.stringify(r));
+  assert.equal(r.next, 8, '下一个号是 8 —— 这就是「两台设备同时建单撞号」的解药');
+});
+
+test('阶段0·工单取号：表里没有该前缀时从 1 开始', async (t) => {
+  const mock = await startAllMock();
+  mock.tables.tblWIP.rows.push({ '工单号': 'LL20260915001', '类型': 'LL 领料' });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+  const r = await lib.maxCodeSuffix({ prefix: 'TL20260915', type: 'TL 退料' });
+  assert.equal(r.next, 1);
+});
+
+test('阶段0·工单取号：只读，绝不写任何数据', async (t) => {
+  const mock = await startAllMock();
+  mock.tables.tblWIP.rows.push({ '工单号': 'LL20260915003', '类型': 'LL 领料' });
+  const before = JSON.stringify(mock.tables);
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+  await lib.maxCodeSuffix({ prefix: 'LL20260915', type: 'LL 领料' });
+  assert.equal(JSON.stringify(mock.tables), before, '取号必须是只读的');
+  assert.equal(mock.calls.updated.length + mock.calls.created.length + mock.calls.deleted.length, 0);
+});
+
 /* ================= 通用增删改查（8 张表共用） ================= */
 
 /* 这份定义**逐列对齐生产库的真实表结构**（2026-09 现状：列和选项都已补齐）。
@@ -410,7 +732,7 @@ const ALL_TABLE_TYPES = {
   tblITM: [{ name: '物品码', type: 1 }, { name: '名称', type: 1 }, { name: '规格型号', type: 1 }, { name: '库位码', type: 1 }],
   tblMAN: [{ name: '手册码', type: 1 }, { name: '名称', type: 1 }, { name: '版本', type: 1 }, { name: '库位码', type: 1 }],
   tblWIP: [{ name: '工单号', type: 1 }, { name: '类型', type: 3, options: ['LL 领料', 'BH 补货', 'JH 拣货', 'TL 退料'] }, { name: '日期', type: 5 }, { name: '明细', type: 1 }, { name: '状态', type: 3, options: ['未执行', '已执行', '部分执行', '已取消'] }, { name: '执行时间', type: 5 }, { name: '执行数量', type: 1 }, { name: '执行批次', type: 1 }, { name: '冲销记录', type: 1 }, { name: '取消记录', type: 1 }],
-  tblTXN: [{ name: '流水号', type: 1 }, { name: '时间', type: 5 }, { name: '操作人', type: 1 }, { name: '类型', type: 1 }, { name: '物料码', type: 1 }, { name: '变动', type: 2 }, { name: '余量', type: 2 }, { name: '关联单', type: 1 }, { name: '原因/备注', type: 1 }]
+  tblTXN: [{ name: '流水号', type: 1 }, { name: '时间', type: 5 }, { name: '操作人', type: 1 }, { name: '类型', type: 1 }, { name: '物料码', type: 1 }, { name: '变动', type: 2 }, { name: '余量', type: 2 }, { name: '关联单', type: 1 }, { name: '原因/备注', type: 1 }, { name: '操作ID', type: 1 }]
 };
 
 /** 造一份「还缺东西」的表结构，专门验证缺列 / 缺选项的处理路径 */

@@ -104,6 +104,57 @@ test('outbox【关键】记一次失败只增加计数，绝不自动删除条�
   }
 });
 
+test('outbox【Phase0】连续失败超过上限也只是转 needs_attention，条目必须还在', () => {
+  const ob = mk();
+  ob.append({ op: 'stock', matCode: 'A-1', qty: 3 });
+  const id = ob.list()[0].id;
+  // 远超上限：旧实现会在第 5 次之后被 prune 掉 —— 那就是静默丢用户操作
+  for (let i = 1; i <= 100; i++) ob.markAttempt(id, '一直失败 #' + i);
+  const q = ob.list();
+  assert.equal(q.length, 1, '失败 100 次后条目仍必须在，绝不自动丢弃');
+  assert.equal(q[0].tries, 100);
+  assert.equal(q[0].status, 'needs_attention', '超限必须置为 needs_attention，供人工裁决');
+  assert.equal(q[0].matCode, 'A-1', '操作内容必须完整保留，人工才能补交或放弃');
+});
+
+test('outbox【Phase0】markAttempt 本身绝不删条目（剔除只能由显式 prune 触发）', () => {
+  const ob = mk();
+  ob.append({ op: 'stock', matCode: 'A-1', qty: 3 });
+  ob.append({ op: 'stock', matCode: 'B-2', qty: 1 });
+  const ids = ob.list().map(x => x.id);
+  for (let i = 0; i < 50; i++) ids.forEach(id => ob.markAttempt(id, '全挂'));
+  assert.equal(ob.list().length, 2, '无论失败多少次，markAttempt 都不得减少队列长度');
+  // 未调用 prune 之前，存储里也必须是 2 条
+  const raw = JSON.parse(ob.storage.getItem(ob.key));
+  assert.equal(raw.length, 2);
+});
+
+test('outbox：summary 能把 needs_attention 单独数出来，供健康面板告警', () => {
+  const ob = mk();
+  ob.append({ op: 'stock', matCode: 'A-1', qty: 3 });
+  ob.append({ op: 'stock', matCode: 'B-2', qty: 1 });
+  const ids = ob.list().map(x => x.id);
+  for (let i = 0; i < 5; i++) ob.markAttempt(ids[0], '挂');
+  const s = ob.summary();
+  assert.equal(s.total, 2);
+  assert.equal(s.byStatus.needs_attention, 1, '必须有独立的待人工状态，否则告警无从下手');
+});
+
+test('outbox：prune 只剔除 needs_attention 的条目，正常待提交的绝不动', () => {
+  const ob = mk();
+  ob.append({ op: 'stock', matCode: 'A-1', qty: 3 });   // 会被打到超限
+  ob.append({ op: 'stock', matCode: 'B-2', qty: 1 });   // 只是偶发失败，未超限
+  const ids = ob.list().map(x => x.id);
+  for (let i = 0; i < 5; i++) ob.markAttempt(ids[0], '挂');
+  ob.markAttempt(ids[1], '偶发一次');
+  const r = ob.prune();
+  assert.equal(r.dropped.length, 1);
+  assert.equal(r.dropped[0].matCode, 'A-1');
+  const left = ob.list();
+  assert.equal(left.length, 1);
+  assert.equal(left[0].matCode, 'B-2', '未超限的条目不得被误剔除');
+});
+
 test('outbox：prune 才负责剔除，且把被剔除的条目交回调用方（供告警/审计）', () => {
   const ob = mk();
   ob.append({ op: 'stock', matCode: 'A-1', qty: 3 });
