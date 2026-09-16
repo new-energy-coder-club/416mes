@@ -545,7 +545,7 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 'use strict';
 
 /* 应用版本：改到用户看得见的行为时手动 +1，页脚会显示，方便确认线上跑的是哪一版 */
-const APP_VERSION = '2.0.0';   // Phase 5：同步健康面板 + 性能埋点 + 离线硬化验证
+const APP_VERSION = '2.0.1';   // Phase 5：健康面板（全量同步后刷新）
 
 /* ---------- 标签类型配置 ---------- */
 const TYPES = {
@@ -1737,6 +1737,7 @@ async function cloudSync({ silent = false } = {}) {
     await fsInitWatermarks();      // 同上：全量之后把水位顶到最新
     fsRebuildBase(pkg.state || pkg);
     fsStartPolling();
+    if (!state.__healthHidden) renderHealthPanel();
     if (!silent) alert('云端同步完成：' + mergeStatText2(stat));
     return stat;
   } catch (err) {
@@ -3932,6 +3933,7 @@ async function fsBoot() {
     await fsInitWatermarks();      // 全量拉完 → 水位顶到当前最新，之后走增量
     fsRebuildBase(remote);         // Phase 3：把「刚读到的飞书值」记成三方合并的基线
     fsStartPolling();              // Phase 2：10 秒探测一次，只有变了才拉内容
+    if (!state.__healthHidden) renderHealthPanel();   // 全量同步完刷新面板（否则停在启动那一刻的空状态）
   } catch (e) {
     fsOnline = false; refreshStatusHint();
     // 真源服务（feishu-server / 隧道）不可达时，退回云端接口 —— 同一份飞书数据。
