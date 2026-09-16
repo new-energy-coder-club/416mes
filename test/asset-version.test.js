@@ -36,3 +36,15 @@ test('index.html：库文件确实存在，避免写了个不存在的路径还�
     assert.ok(fs.existsSync(path.join(REPO, f)), f + ' 不存在');
   });
 });
+
+test('验收脚本的哨兵清理必须精确匹配，不能用「验收」这种常见词做子串匹配', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'feishu-crud-check.mjs'), 'utf8');
+  // 旧实现是 /哨兵|验收/ —— 子串匹配「验收」把两条真实流水（reason 含「P3验收…」）删掉了。
+  // 「验收」在仓库场景是常见正常词，子串匹配 = 静默数据丢失。
+  assert.ok(src.indexOf('TEST_TXN_RE = /哨兵|验收/') < 0,
+    'TEST_TXN_RE 仍在匹配合「验收」的子串 —— 会把用户正常写的「设备验收后入库」当成哨兵删掉');
+  assert.ok(/TEST_TXN_RE = \/\^\\s\*哨兵/.test(src),
+    'TEST_TXN_RE 必须是锚定的精确匹配（脚本自己写的就是「哨兵」两字）');
+});

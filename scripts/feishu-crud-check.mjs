@@ -119,7 +119,13 @@ const pass = (tbl, step, msg) => rows.push({ tbl, step, ok: true, msg });
    没人管，会一直躺在生产库里（实测踩过：一次中断留下 4 条，肉眼看不出来）。
    所以这里扫「任何 ZZ 开头的哨兵编码」，顺便把哨兵流水也带走。 */
 const TEST_CODE_RE = /^ZZ[TPNRD]/i;
-const TEST_TXN_RE = /哨兵|验收/;
+/* 流水哨兵必须**精确匹配**，不能是子串。
+   旧实现是 /哨兵|验收/ —— 子串匹配「验收」于是把**两条真实流水**当成哨兵删掉了：
+   它们的 reason 是「P3验收·序号回写」「P3验收·冲正」（我在 P3 阶段做序号回写验证时写的）。
+   更危险的是「验收」在仓库场景里是很常见的正常词（「设备验收后入库」「到货验收」），
+   真有人这么写原因，一跑这个验收脚本就会被删掉 —— 这是**静默数据丢失**。
+   现在只认脚本自己写的那个精确标记：operator 或 reason 恰好等于「哨兵」。 */
+const TEST_TXN_RE = /^\s*哨兵\s*$/;
 
 async function cleanup() {
   let removed = 0;
@@ -134,7 +140,8 @@ async function cleanup() {
       process.stdout.write(`  🧹 清理哨兵残留 ${LABEL[tbl]}：${keys.join(', ')}\n`);
     }
     const txnBad = (st.transactions || []).filter(t =>
-      TEST_CODE_RE.test(String(t.matCode || '')) || TEST_TXN_RE.test(String(t.reason || '') + String(t.operator || '')));
+      TEST_CODE_RE.test(String(t.matCode || ''))
+      || TEST_TXN_RE.test(String(t.reason || '')) || TEST_TXN_RE.test(String(t.operator || '')));
     if (txnBad.length) {
       const keys = txnBad.map(t => '#' + String(t.seq).padStart(6, '0'));
       const r = await post('/api/feishu/delete', { table: 'transactions', keys });
