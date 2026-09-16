@@ -148,3 +148,15 @@ test('P5-2「来历不明」必须被检测并报警，且不能在没基线时�
   assert.ok(/identityHtml/.test(HTML) && /renderAlignBox/.test(HTML), '身份结果没有接到「对齐」面板上');
   assert.ok(/来历不明/.test(HTML), '没有任何用户可见的报警文案');
 });
+
+test('P5-4 必需列（库存数量）的检查不能被「业务键命中」短路', () => {
+  const src = region('const keyColInfo =', 'const keyProblems').src;
+  // 必须先把 idx 找完、再统一查 required；不能在 for 循环里 return
+  assert.ok(/let idx = -1;/.test(src), 'keyColInfo 没有先算出业务键下标');
+  assert.ok(!/for \(const nm of names\) \{ const i = hdr\.indexOf\(nm\); if \(i >= 0\) return/.test(src),
+    '找到业务键就立刻 return —— 必需列永远查不到（「库存数量被改名」这种文件会直接过关，把全场库存清零）');
+  assert.ok(/const missingReq = \(required \|\| \[\]\)\.filter/.test(src), '缺少必需列检查');
+  // 必需列检查必须在业务键判断之前生效
+  assert.ok(src.indexOf('if (missingReq.length)') < src.indexOf('if (idx < 0) return { present: false'),
+    '必需列检查必须在「业务键缺失」判断之前');
+});
