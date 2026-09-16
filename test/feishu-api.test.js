@@ -1156,3 +1156,32 @@ test('类型转换：dropped 保留完整清单（含正常跳过），供日志
   assert.ok(r.dropped.some(d => /电话/.test(d)), '日志里仍要能看到跳过了电话列');
   assert.equal(Object.keys(r.droppedColumns).length, 0, '但不算问题');
 });
+
+/* ================= tenant token 缓存（Phase 5 性能前哨） ================= */
+
+test('token 缓存：一次进程内只申请一次，并发调用也只申请一次', async (t) => {
+  const mock = await startMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  lib.resetTokenCache();
+
+  // 并发 8 次（模拟 8 表并行探测）→ 只应有一次鉴权请求
+  await Promise.all(Array.from({ length: 8 }, () => lib.tenantToken()));
+  const authCalls = mock.calls.requests.filter(r => r.action === 'auth');
+  assert.equal(authCalls.length, 1, '并发申请必须去重，实测 ' + authCalls.length + ' 次');
+
+  await lib.tenantToken();
+  assert.equal(mock.calls.requests.filter(r => r.action === 'auth').length, 1, '缓存命中不该再申请');
+});
+
+test('token 缓存：拿到的 token 会被真正用上（后续请求不再带鉴权往返）', async (t) => {
+  const mock = await startMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  lib.resetTokenCache();
+  await lib.pullState();
+  const after = mock.calls.requests.filter(r => r.action === 'auth').length;
+  await lib.pullState();
+  const again = mock.calls.requests.filter(r => r.action === 'auth').length;
+  assert.equal(again, after, '第二次全量拉取不该再申请 token');
+});
