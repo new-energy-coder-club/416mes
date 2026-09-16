@@ -14,3 +14,5 @@ nec-wip-import.json
 人员导入-*.json
 人员导入*
 *-feishu.json
+.npmrc
+.npm-cache

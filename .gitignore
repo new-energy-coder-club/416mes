@@ -42,6 +42,10 @@ Thumbs.db
 # 本地验证残留（假 lark-cli 运行目录等）
 .verify/
 
+# 本地 npm 缓存（这台机器的 /root/.npm 只读，只能落到工作区）
+.npm-cache/
+.npmrc
+
 # 本地内部文档（不上传仓库；文件仍保留在本机）
 416MES分阶段开发计划.md
 416MES开发需求书.md
