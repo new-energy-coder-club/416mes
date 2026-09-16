@@ -139,7 +139,11 @@ function startMock(opts = {}) {
 
         const rowsWithIds = () => t.rows.map((r, i) => ({ record_id: t.ids[i], fields: r }));
         if (!action) {   // 列表（整表）
-          return json({ code: 0, data: { items: rowsWithIds(), has_more: false } });
+          const rows0 = rowsWithIds();
+          // 真飞书的「列出记录」响应里带 total；用 opts.lieTotal 谎报一个大数，
+          // 就能模拟「服务端说有 N 条、实际只给了这些」的静默截断。
+          const reported = (opts.lieTotal && opts.lieTotal[tableId]) || rows0.length;
+          return json({ code: 0, data: { items: rows0, total: reported, has_more: false } });
         }
         if (action === 'get') {   // 单条读（回读校验用）
           const i = t.ids.indexOf(recordId);
@@ -1184,4 +1188,52 @@ test('token 缓存：拿到的 token 会被真正用上（后续请求不再带�
   await lib.pullState();
   const again = mock.calls.requests.filter(r => r.action === 'auth').length;
   assert.equal(again, after, '第二次全量拉取不该再申请 token');
+});
+
+/* ================= P3-2：全量拉取必须如实报告完整性 ================= */
+
+test('pullState【P3】正常情况报 complete:true，让下游敢判删', async (t) => {
+  const mock = await startMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  const st = await lib.pullState();
+  assert.ok(st.completeness, 'pullState 必须把完整性随数据一起交出去');
+  assert.equal(st.completeness.materials.complete, true, '收到数 == total 才算完整');
+  assert.equal(st.completeness.materials.fetched, 1);
+  assert.equal(st.completeness.materials.total, 1);
+  assert.equal(st.completeness.transactions.complete, true, '空表也必须被证明完整（0 == 0）');
+});
+
+test('pullState【P3 关键】分页被截断时如实报 complete:false，但**不能抛错打断同步**', async (t) => {
+  // 飞书说物料表有 999 条，实际只给 1 条 —— 静默截断
+  const mock = await startMock({ lieTotal: { tblMAT: 999 } });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  const st = await lib.pullState();       // 不抛
+  assert.equal(st.completeness.materials.complete, false, '必须如实报告没拉全');
+  assert.equal(st.completeness.materials.fetched, 1);
+  assert.equal(st.completeness.materials.total, 999);
+  assert.equal(st.materials.length, 1, '数据照常返回（不完整也比没有好）');
+});
+
+test('pullState【P3 端到端】截断的半截数据 + 关闭删除闸门 → 本地一条都不能少', async (t) => {
+  const mock = await startMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  const Core = require('../mes-core.js');
+
+  // 本地有 3 条物料，基线说 3 条都在飞书里；这次只拉到 1 条（真被删了 2 条）
+  const local = { materials: [{ code: 'A-1' }, { code: 'B-2' }, { code: 'C-3' }], transactions: [], __syncedKeys: {} };
+  const remote = { materials: [{ code: 'A-1' }], completeness: { materials: false } };
+
+  // 旧行为（allowDelete:true + 拿不到完整证明）→ 本该删 2 条，现在必须拦住
+  const r = Core.mergeRemote(local, remote, {
+    syncedKeys: { materials: ['A-1', 'B-2', 'C-3'] },
+    allowDelete: false,
+    complete: { materials: remote.completeness.materials.complete }
+  });
+  assert.equal(r.deleted, 0, '没被证明拉全 → 一条都不许删');
+  assert.deepEqual(local.materials.map(m => m.code), ['A-1', 'B-2', 'C-3'], '本地数据完整保留');
+  assert.deepEqual(r.pendingDelete.map(p => p.id).sort(), ['B-2', 'C-3'], '转成待人工核删');
+  assert.deepEqual(r.pending, [], '待核删的不能被同时当成「本地新建」');
 });

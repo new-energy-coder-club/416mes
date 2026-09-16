@@ -1300,11 +1300,15 @@ test('合并【关键】飞书没有这一列 → 本地值原样保留（模块
   assert.equal(st.locations[0].kind, '模块区', '飞书该列为空时本地「模块区」不能被清成空');
 });
 
-test('合并：本地有、飞书没有、上次同步时有 → 判定为飞书侧删除，本地也删', () => {
+test('合并【显式删除】allowDelete:true 时才把「上次同步有、这次没有」的删掉', () => {
+  /* 注意：删除**不再是默认行为**（P3 改）。这里显式开 allowDelete 才走删的路径。
+     默认行为见下面那个「默认绝不删」的用例 —— 那次改动的原因是：
+     一次半截返回就能让全量拉取误删成批本地数据，且删完不留凭据。 */
   const st = mkSync({
     materials: [{ code: 'A' }, { code: 'GONE' }, { code: 'NEW' }]
   });
-  const r = Core.mergeRemote(st, { materials: [{ code: 'A' }] }, { syncedKeys: { materials: ['A', 'GONE'] } });
+  const r = Core.mergeRemote(st, { materials: [{ code: 'A' }] },
+    { syncedKeys: { materials: ['A', 'GONE'] }, allowDelete: true });
   const codes = st.materials.map(m => m.code).sort();
   assert.deepEqual(codes, ['A', 'NEW'], 'GONE 来自飞书且已被删 → 本地删；NEW 是本地新建 → 保留');
   assert.equal(r.deleted, 1);
@@ -1375,9 +1379,53 @@ test('合并【Phase0】无 seq 的旧流水同样不被丢弃', () => {
   assert.equal(st.transactions.filter(t => t.seq == null).length, 2100, '无 seq 的旧流水一条都不能少');
 });
 
-test('合并：流水被飞书侧删除时同样同步删除', () => {  const st = mkSync({ transactions: [{ seq: 1 }, { seq: 2 }], txnSeq: 2 });
-  Core.mergeRemote(st, { transactions: [{ seq: 1 }] }, { syncedKeys: { transactions: [1, 2] } });
+test('合并【显式删除】流水在 allowDelete:true 时同样同步删除', () => {
+  const st = mkSync({ transactions: [{ seq: 1 }, { seq: 2 }], txnSeq: 2 });
+  Core.mergeRemote(st, { transactions: [{ seq: 1 }] },
+    { syncedKeys: { transactions: [1, 2] }, allowDelete: true });
   assert.deepEqual(st.transactions.map(t => t.seq), [1]);
+});
+
+test('合并【P3 默认安全】不显式允许时绝不删，且把它记进 pendingDelete', () => {
+  const st = mkSync({ materials: [{ code: 'A' }, { code: 'GONE' }] });
+  const r = Core.mergeRemote(st, { materials: [{ code: 'A' }] }, { syncedKeys: { materials: ['A', 'GONE'] } });
+  assert.equal(r.deleted, 0, '默认必须一条都不删');
+  assert.deepEqual(st.materials.map(m => m.code).sort(), ['A', 'GONE'], '本地数据原样保留');
+  assert.deepEqual(r.pendingDelete, [{ table: 'materials', id: 'GONE' }], '要列成「待人工核删」而不是悄悄删');
+});
+
+test('合并【P3 关键】待核删的键必须留在基线里，否则会被当成「本地新建」推回飞书', () => {
+  const st = mkSync({ materials: [{ code: 'A' }, { code: 'GONE' }] });
+  const r = Core.mergeRemote(st, { materials: [{ code: 'A' }] }, { syncedKeys: { materials: ['A', 'GONE'] } });
+  assert.ok(r.syncedKeys.materials.includes('GONE'),
+    '飞书删掉的键要留在 __syncedKeys 里 —— 留不下的话下一轮 autoPushPending 会把它重新建回飞书');
+  assert.deepEqual(r.pending.map(p => p.id), [], '绝不能同时被当成待推送');
+  // 再跑一轮，确认不会突然变成 pending
+  const r2 = Core.mergeRemote(st, { materials: [{ code: 'A' }] }, { syncedKeys: r.syncedKeys });
+  assert.deepEqual(r2.pending.map(p => p.id), [], '第二轮仍然不能变成待推送');
+  assert.equal(r2.deleted, 0);
+  assert.deepEqual(st.materials.map(m => m.code).sort(), ['A', 'GONE']);
+});
+
+test('合并【P3 闸门】即使 allowDelete:true，该表被证明没拉全也绝不删', () => {
+  const st = mkSync({ materials: [{ code: 'A' }, { code: 'GONE' }] });
+  const r = Core.mergeRemote(st, { materials: [{ code: 'A' }] },
+    { syncedKeys: { materials: ['A', 'GONE'] }, allowDelete: true, complete: { materials: false } });
+  assert.equal(r.deleted, 0, '分页没拉全时必须放弃判删（否则一次截断就批量误删）');
+  assert.deepEqual(st.materials.map(m => m.code).sort(), ['A', 'GONE']);
+  assert.deepEqual(r.pendingDelete, [{ table: 'materials', id: 'GONE' }]);
+
+  // complete 为 null（拿不到 total，无法证明）同样不许删：「证明不了」不等于「没问题」
+  const st3 = mkSync({ materials: [{ code: 'A' }, { code: 'GONE' }] });
+  const r3 = Core.mergeRemote(st3, { materials: [{ code: 'A' }] },
+    { syncedKeys: { materials: ['A', 'GONE'] }, allowDelete: true, complete: { materials: null } });
+  assert.equal(r3.deleted, 0, 'complete=null 无法证明完整 → 不许删');
+
+  // 同一份数据，证明拉全了 → 允许删
+  const st2 = mkSync({ materials: [{ code: 'A' }, { code: 'GONE' }] });
+  const r2 = Core.mergeRemote(st2, { materials: [{ code: 'A' }] },
+    { syncedKeys: { materials: ['A', 'GONE'] }, allowDelete: true, complete: { materials: true } });
+  assert.equal(r2.deleted, 1);
 });
 
 test('合并：记录本次飞书键集合，供下次判断「删除」用', () => {
@@ -1412,7 +1460,7 @@ test('合并【端到端】飞书删一条、改一条、加一条，本地三�
   // syncedKeys = 上次同步时飞书有哪些键。MB-099 是本地新建、还没推上去，所以不在基线里。
   const r = Core.mergeRemote(st, {
     members: [{ code: 'MB-004', name: '卢王淳' }, { code: 'MB-500', name: '飞书新增' }]
-  }, { syncedKeys: { members: ['MB-001', 'MB-004'] } });
+  }, { syncedKeys: { members: ['MB-001', 'MB-004'] }, allowDelete: true });   // 删除路径已改为显式开启
   const by = Object.fromEntries(st.members.map(m => [m.code, m]));
   assert.equal(by['MB-001'], undefined, '飞书删了 → 本地也删');
   assert.equal(by['MB-004'].name, '卢王淳', '飞书改了 → 本地更新');
@@ -1420,4 +1468,108 @@ test('合并【端到端】飞书删一条、改一条、加一条，本地三�
   assert.equal(by['MB-099'].name, '本地新建', '本地新建还没推 → 保留');
   assert.deepEqual(r.pending.map(p => p.id), ['MB-099']);
   assert.equal(r.deleted, 1);
+});
+
+/* ============================================================================
+ * P3-1 流水号身份：服务端 seq 必须回写到本地那条乐观流水
+ *
+ * 背景：本地 recordTransaction 用自己的计数器分配 seq，服务端 writeStock 另有一套
+ * 「全表最大 +1」。两边在「另一台设备刚写过」或「超时重放被幂等挡回」时必然不同。
+ * 不回写的后果是账本里同一次操作变成两条流水 —— 下面第一个用例就是那个场景的复现。
+ * ========================================================================== */
+
+test('reconcileTxnSeq【复现原 bug】不回写会让同一次操作变成两条流水', () => {
+  // 本地乐观分配 seq=11；服务端（另一台设备刚写过）实际给了 seq=12
+  const st = mkState();
+  const txn = Core.recordTransaction(st, { type: '手工调整', matCode: 'MAT-A', delta: -2, balance: 3 });
+  assert.equal(txn.seq, 1, '新 state 的 txnSeq 从 0 起，第一笔是 1');
+
+  // 不调用 reconcileTxnSeq，直接按旧行为走一次 mergeRemote
+  const remoteTxn = { seq: 2, matCode: 'MAT-A', delta: -2, balance: 3, type: '手工调整', ts: txn.ts };
+  Core.mergeRemote(st, { transactions: [remoteTxn] }, { syncedKeys: {} });
+  const seqs = st.transactions.map(t => t.seq);
+  assert.equal(st.transactions.length, 2, '❌ 这就是 bug：一次操作在本地变成两条流水');
+  assert.deepEqual(seqs.slice().sort((a, b) => a - b), [1, 2]);
+});
+
+test('reconcileTxnSeq【修复】回写后不会产生重复流水，且 txnSeq 抬到服务端之上', () => {
+  const st = mkState();
+  const txn = Core.recordTransaction(st, { type: '手工调整', matCode: 'MAT-A', delta: -2, balance: 3 });
+  const r = Core.reconcileTxnSeq(st, { localSeq: txn.seq, serverSeq: 12, opId: 'op-1' });
+  assert.equal(r.ok, true);
+  assert.equal(r.action, 'updated');
+  assert.equal(txn.seq, 12, '本地那条要改成服务端分配的号');
+  assert.equal(txn.opId, 'op-1');
+  assert.equal(st.txnSeq, 12, 'txnSeq 必须抬到 12，否则下一笔又会撞号');
+
+  // 现在把服务端那条拉回来 → 不能再多出一条
+  Core.mergeRemote(st, { transactions: [{ seq: 12, matCode: 'MAT-A', delta: -2, balance: 3, type: '手工调整' }] }, { syncedKeys: {} });
+  assert.equal(st.transactions.length, 1, '回写之后不能出现第二条');
+  assert.equal(st.transactions[0].seq, 12);
+});
+
+test('reconcileTxnSeq：本地已经有服务端那个号时合并掉乐观那条，不删权威那条', () => {
+  const st = mkState();
+  const mine = Core.recordTransaction(st, { type: '盘点', matCode: 'MAT-A', delta: 0, balance: 5 });
+  // 自己写的那笔已经被拉回来了（服务端 seq=7），本地也有一条 7
+  st.transactions.unshift({ seq: 7, matCode: 'MAT-A', delta: 0, balance: 5, type: '盘点', reason: '来自服务端' });
+  const r = Core.reconcileTxnSeq(st, { localSeq: mine.seq, serverSeq: 7, opId: 'op-2' });
+  assert.equal(r.action, 'merged');
+  assert.equal(r.removed, 1);
+  assert.equal(st.transactions.length, 1, '只能剩一条');
+  assert.equal(st.transactions[0].seq, 7);
+  assert.equal(st.transactions[0].reason, '来自服务端', '保留的是服务端那条（字段是权威值）');
+});
+
+test('reconcileTxnSeq：同号是 noop；找不到本地那条是 missing；非法参数不抛', () => {
+  const st = mkState();
+  const t = Core.recordTransaction(st, { type: '手工调整', matCode: 'MAT-A', delta: 1, balance: 6 });
+  assert.equal(Core.reconcileTxnSeq(st, { localSeq: t.seq, serverSeq: t.seq }).action, 'noop');
+  assert.equal(Core.reconcileTxnSeq(st, { localSeq: 999, serverSeq: 1000 }).action, 'missing');
+  assert.equal(Core.reconcileTxnSeq(st, { localSeq: null, serverSeq: 3 }).ok, false);
+  assert.equal(Core.reconcileTxnSeq(st, {}).ok, false);
+  assert.equal(Core.reconcileTxnSeq(null, { localSeq: 1, serverSeq: 2 }).ok, false, 'state 不可用时要返回而不是抛');
+  assert.equal(st.transactions.length, 1, '这些边界都不该改动流水');
+});
+
+test('reconcileTxnSeq：多设备并发写后各自回写，两边账本一致', () => {
+  // 两台设备在同一个基线（txnSeq=5）上各写一笔；服务端仲裁成 6 与 7
+  const mk = () => {
+    const st = mkState();
+    st.transactions = [];
+    st.txnSeq = 5;
+    return st;
+  };
+  const A = mk(), B = mk();
+  const ta = Core.recordTransaction(A, { type: '手工调整', matCode: 'MAT-A', delta: -1, balance: 4 });
+  const tb = Core.recordTransaction(B, { type: '手工调整', matCode: 'MAT-B', delta: -1, balance: 9 });
+  assert.equal(ta.seq, 6); assert.equal(tb.seq, 6);       // 两边乐观号相同 —— 这正是要仲裁的原因
+  Core.reconcileTxnSeq(A, { localSeq: ta.seq, serverSeq: 6, opId: 'a' });
+  Core.reconcileTxnSeq(B, { localSeq: tb.seq, serverSeq: 7, opId: 'b' });
+
+  // 两台设备最终都拉到这两条
+  const all = [{ seq: 6, matCode: 'MAT-A', delta: -1, balance: 4 }, { seq: 7, matCode: 'MAT-B', delta: -1, balance: 9 }];
+  Core.mergeRemote(A, { transactions: all }, { syncedKeys: {} });
+  Core.mergeRemote(B, { transactions: all }, { syncedKeys: {} });
+  assert.deepEqual(A.transactions.map(t => t.seq).sort((x, y) => x - y), [6, 7]);
+  assert.deepEqual(B.transactions.map(t => t.seq).sort((x, y) => x - y), [6, 7]);
+  assert.equal(A.transactions.length, 2, 'A 不能有重复流水');
+  assert.equal(B.transactions.length, 2, 'B 不能有重复流水');
+});
+
+test('executeOrder / reverseOrder 的 applied 要带上 txn（否则调用方拿不到本地 seq 去回写）', () => {
+  const st = mkState();
+  st.workorders = [{ code: 'LL1', type: 'LL', date: '2026-01-01', status: '未执行', items: [{ matCode: 'MAT-A', qty: 2 }] }];
+  const w = st.workorders[0];
+  const r = Core.executeOrder(st, w, { execQtyByCode: { 'MAT-A': 2 } });
+  assert.equal(r.ok, true);
+  assert.ok(r.applied[0].txn && r.applied[0].txn.seq != null, 'executeOrder 必须把 txn 透出来');
+
+  const rv = Core.reverseOrder(st, w, { reason: '测' });
+  assert.equal(rv.ok, true);
+  assert.ok(rv.applied[0].txn && rv.applied[0].txn.seq != null, 'reverseOrder 必须把 txn 透出来');
+  const before = st.transactions.length;
+  Core.reconcileTxnSeq(st, { localSeq: rv.applied[0].txn.seq, serverSeq: 99, opId: 'rv' });
+  assert.equal(rv.applied[0].txn.seq, 99);
+  assert.equal(st.transactions.length, before, '回写不该增减流水条数');
 });

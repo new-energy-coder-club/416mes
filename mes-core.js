@@ -241,6 +241,58 @@
     return txn;
   }
 
+  /**
+   * 把服务端分配的流水号回写到本地那条乐观流水上。
+   *
+   * 为什么必须有这一步：本地 `recordTransaction` 用自己的计数器分配 seq，
+   * 而服务端 `writeStock` 另有一套「全表最大 +1」的分配。两边在下面两种情况
+   * **必然不同**：
+   *   · 另一台设备刚写过（本地计数器落后）
+   *   · 本次是超时重放，服务端按操作ID 返回上次那条的 seq
+   * 不回写的后果不是"序号难看"，而是**账本里同一次操作变成两条流水**：
+   * 下次拉取时远端那条 seq 在本地找不到 → 当成新记录插进来；本地那条乐观 seq
+   * 远端没有 → 被当成「本地新建、飞书还没有」→ 永久停在待推送列表里。
+   *
+   * @param {object} state
+   * @param {{localSeq:number, serverSeq:number, opId?:string}} opts
+   * @returns {{ok:boolean, action:string, seq?:number, removed?:number}}
+   *   action: 'updated'  已改号（正常路径）
+   *           'merged'   本地已存在该 seq（自己那笔被拉回来了）→ 删掉乐观那条
+   *           'missing'  找不到本地那条（已被用户撤回/已对好）→ 什么都不做
+   *           'noop'     两个号相同，本来就不用改
+   */
+  function reconcileTxnSeq(state, opts) {
+    opts = opts || {};
+    if (!state || !Array.isArray(state.transactions)) return { ok: false, action: 'missing' };
+    var localSeq = opts.localSeq == null ? null : Number(opts.localSeq);
+    var serverSeq = opts.serverSeq == null ? null : Number(opts.serverSeq);
+    if (localSeq === null || serverSeq === null || !isFinite(localSeq) || !isFinite(serverSeq)) {
+      return { ok: false, action: 'missing' };
+    }
+    var mine = state.transactions.find(function (t) { return t && Number(t.seq) === localSeq; });
+    if (!mine) return { ok: false, action: 'missing' };
+    if (localSeq === serverSeq) {
+      if (opts.opId) mine.opId = opts.opId;
+      return { ok: true, action: 'noop', seq: serverSeq };
+    }
+    var clash = state.transactions.find(function (t) { return t && t !== mine && Number(t.seq) === serverSeq; });
+    if (clash) {
+      /* 服务端那个号在本地已经有了 —— 说明这一笔（我们自己写的）已经被拉回来过。
+         乐观那条是重复的，删掉；保留拉回来的那条（它的字段是服务端权威值）。 */
+      state.transactions = state.transactions.filter(function (t) { return t !== mine; });
+      if (opts.opId) clash.opId = clash.opId || opts.opId;
+      return { ok: true, action: 'merged', seq: serverSeq, removed: 1 };
+    }
+    mine.seq = serverSeq;
+    if (opts.opId) mine.opId = opts.opId;
+    /* txnSeq 必须跟着抬到 serverSeq 之上，否则下一笔本地流水又会被分配一个
+       已经被占用的号 —— 那正是 Phase 0 撞号 bug 的复现路径。 */
+    if (!(Number(state.txnSeq) >= serverSeq)) state.txnSeq = serverSeq;
+    // 维持全局约定「新的在前」
+    if (typeof orderedTransactions === 'function') state.transactions = orderedTransactions(state);
+    return { ok: true, action: 'updated', seq: serverSeq };
+  }
+
   /* ================= 库存变动（唯一写入口） ================= */
 
   /**
@@ -360,7 +412,7 @@
         reason: opts.reason || '', operator: opts.operator, device: opts.device, now: now
       });
       if (!r.ok) return { ok: false, errors: [r.error], applied: applied };
-      applied.push({ matCode: a.matCode, qty: a.qty, planned: a.planned, executed: a.executed, remaining: a.remaining, delta: r.delta, balance: r.balance });
+      applied.push({ matCode: a.matCode, qty: a.qty, planned: a.planned, executed: a.executed, remaining: a.remaining, delta: r.delta, balance: r.balance, txn: r.txn });
     }
     if (!applied.length) return { ok: false, errors: ['本次没有需要执行的明细'], applied: [] };
 
@@ -437,7 +489,7 @@
         reason: reason, operator: opts.operator, device: opts.device, now: now
       });
       if (!r.ok) return { ok: false, error: r.error, applied: applied };
-      applied.push({ matCode: it.matCode, qty: it.executed, delta: r.delta, balance: r.balance });
+      applied.push({ matCode: it.matCode, qty: it.executed, delta: r.delta, balance: r.balance, txn: r.txn });
     }
 
     var at = now.toLocaleString();
@@ -1129,7 +1181,7 @@
     var synced = opts.syncedKeys || state.__syncedKeys || {};
     var protect = opts.protect || state.__pushBlocked || {};
     var nextSynced = {};
-    var stat = { created: 0, updated: 0, unchanged: 0, deleted: 0, keptLocal: 0, protected: 0, pending: [], changes: [], tables: {} };
+    var stat = { created: 0, updated: 0, unchanged: 0, deleted: 0, keptLocal: 0, protected: 0, pending: [], pendingDelete: [], changes: [], tables: {} };
 
     MERGE_TABLES.forEach(function (tbl) {
       var remoteArr = remote[tbl.key];
@@ -1152,7 +1204,7 @@
         if (v !== undefined && v !== null && v !== '') byKey[String(v)] = r;
       });
 
-      var t = { created: 0, updated: 0, unchanged: 0, deleted: 0, keptLocal: 0, protected: 0, pending: [] };
+      var t = { created: 0, updated: 0, unchanged: 0, deleted: 0, keptLocal: 0, protected: 0, pending: [], pendingDelete: [] };
 
       /* 1) 飞书 → 本地 */
       remoteArr.forEach(function (r) {
@@ -1183,14 +1235,33 @@
         if (held) t.protected++;
       });
 
-      /* 2) 本地多余 → 飞书删了 还是 本地还没推 */
+      /* 2) 本地多余 → 飞书删了 还是 本地还没推
+         **默认一律不删。** 删除权放在这一层是危险品：一次半截返回（分页没走完、
+         飞书侧限流截断、某页静默少几条）就能把本地成批删掉，而且删完不留任何凭据。
+         现在只有调用方**显式**给 allowDelete:true **且**这张表被证明拉全了
+         （opts.complete[key] !== false）才真的删；否则记进 pendingDelete，
+         交给「对账 → 人工确认删除」那条带闸门的路（fsRunCensus）去处理。
+         注意 pendingDelete 的键必须**留在基线里**——否则下一轮它就成了
+         「本地有、飞书没有、基线里也没有」，会被 autoPushPending 重新推回飞书，
+         等于把飞书刚删掉的记录又建回来。 */
+      /* 严格判定：**必须被证明读全了**才允许删。complete 为 false（证明确实截断）
+         或 null（拿不到 total，无法证明）都不许删 —— 「证明不了」不等于「没问题」。 */
+      var allowDel = opts.allowDelete === true && (!opts.complete || opts.complete[tbl.key] === true);
+      var keptSynced = [];
       var alive = [];
       localArr.forEach(function (r) {
         var v = r ? r[tbl.id] : null;
         var k = (v === undefined || v === null || v === '') ? null : String(v);
         if (k && !remoteKeys[k]) {
           if (wasSynced && wasSynced[k]) {
-            t.deleted++; stat.changes.push({ table: tbl.key, id: k, kind: 'delete', reason: '飞书侧已删除' });
+            if (allowDel) {
+              t.deleted++; stat.changes.push({ table: tbl.key, id: k, kind: 'delete', reason: '飞书侧已删除' });
+              return;
+            }
+            t.pendingDelete.push(k);
+            stat.pendingDelete.push({ table: tbl.key, id: k });
+            keptSynced.push(k);
+            alive.push(r);
             return;
           }
           t.pending.push(r);
@@ -1201,6 +1272,7 @@
         alive.push(r);
       });
       state[tbl.key] = alive;
+      if (keptSynced.length) nextSynced[tbl.key] = nextSynced[tbl.key].concat(keptSynced);
 
       stat.created += t.created; stat.updated += t.updated; stat.unchanged += t.unchanged;
       stat.deleted += t.deleted; stat.keptLocal += t.keptLocal; stat.protected += t.protected;
@@ -1260,6 +1332,7 @@
     mergedCodes: mergedCodes,
     createOrder: createOrder,
     recordTransaction: recordTransaction,
+    reconcileTxnSeq: reconcileTxnSeq,
     applyStockChange: applyStockChange,
     validateExecution: validateExecution,
     executeOrder: executeOrder,
