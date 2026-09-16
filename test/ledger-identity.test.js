@@ -86,6 +86,10 @@ test('P3-3 冲突池必须落在 conflicts store，不能借用 baselines', () =
   // 启动时两条恢复分支都要捞回来
   const init = fnSrc('initLocalStore');
   assert.equal((init.match(/await fsLoadConflicts\(\)/g) || []).length, 2, 'initLocalStore 的两条分支都要恢复冲突池');
+  // 恢复后必须重画面板：只塞回内存的话面板仍 display:none，用户看不到也无法裁决
+  const load = fnSrc('fsLoadConflicts');
+  assert.ok(/renderConflictPanel\(\)/.test(load),
+    'fsLoadConflicts 恢复后没有重画面板 → 冲突「存了但没人知道」（浏览器实测踩过）');
 });
 
 test('P3-3 删除必须留凭据，而且要能查能导出（不能又变成只写不读）', () => {
