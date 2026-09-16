@@ -746,7 +746,9 @@ const ALL_TABLE_TYPES = {
   tblMBR: [{ name: '编号', type: 1 }, { name: '姓名', type: 1 }, { name: '学号', type: 1 }, { name: '部门/SIG', type: 1 }, { name: '职务', type: 3, options: ['负责人', '成员', '本科生'] }, { name: '电话', type: 13 }, { name: '备注', type: 1 }, { name: '标签', type: 1 }, { name: 'PIN码', type: 1 }, { name: '最后更新时间', type: 1002 }],
   tblITM: [{ name: '物品码', type: 1 }, { name: '名称', type: 1 }, { name: '规格型号', type: 1 }, { name: '库位码', type: 1 }, { name: '最后更新时间', type: 1002 }],
   tblMAN: [{ name: '手册码', type: 1 }, { name: '名称', type: 1 }, { name: '版本', type: 1 }, { name: '库位码', type: 1 }, { name: '最后更新时间', type: 1002 }],
-  tblWIP: [{ name: '工单号', type: 1 }, { name: '类型', type: 3, options: ['LL 领料', 'BH 补货', 'JH 拣货', 'TL 退料'] }, { name: '日期', type: 5 }, { name: '明细', type: 1 }, { name: '状态', type: 3, options: ['未执行', '已执行', '部分执行', '已取消'] }, { name: '执行时间', type: 5 }, { name: '执行数量', type: 1 }, { name: '执行批次', type: 1 }, { name: '冲销记录', type: 1 }, { name: '取消记录', type: 1 }, { name: '最后更新时间', type: 1002 }],
+  // 与**生产**逐列对齐（生产 2026-09-16 加了「自动编号」→ 夹具也要有，
+  // 否则「补列后不应再丢字段」这条会假失败，也会掩盖真实的缺列问题）
+  tblWIP: [{ name: '工单号', type: 1 }, { name: '类型', type: 3, options: ['LL 领料', 'BH 补货', 'JH 拣货', 'TL 退料'] }, { name: '日期', type: 5 }, { name: '明细', type: 1 }, { name: '状态', type: 3, options: ['未执行', '已执行', '部分执行', '已取消'] }, { name: '执行时间', type: 5 }, { name: '执行数量', type: 1 }, { name: '执行批次', type: 1 }, { name: '冲销记录', type: 1 }, { name: '取消记录', type: 1 }, { name: '自动编号', type: 1005 }, { name: '最后更新时间', type: 1002 }],
   tblTXN: [{ name: '流水号', type: 1 }, { name: '时间', type: 5 }, { name: '操作人', type: 1 }, { name: '类型', type: 1 }, { name: '物料码', type: 1 }, { name: '变动', type: 2 }, { name: '余量', type: 2 }, { name: '关联单', type: 1 }, { name: '原因/备注', type: 1 }, { name: '操作ID', type: 1 }, { name: '最后更新时间', type: 1002 }]
 };
 
@@ -1361,4 +1363,60 @@ test('写库【P7 关键】并行预读里任何一支失败都不能变成 unha
   await new Promise(res => setTimeout(res, 300));   // 给在飞的那几支一点时间来"暴露"
   assert.deepEqual(seen, [],
     '有并行分支的 rejection 没人处理 —— 提前 return 时必须先给每一支挂兜底 catch：' + seen.join(' | '));
+});
+
+/* ================= 自动编号 → 重复业务键巡检 ================= */
+
+test('重复巡检【P7-3】同码但自动编号不同 → 飞书里确实有两行，必须报出来', () => {
+  const lib = require('../lib/feishu-api.js');
+  const def = { key: '工单号', fields: [['code', '工单号', 'text'], ['autoNo', '自动编号', 'text']] };
+  const rows = [
+    { record_id: 'r1', fields: { '工单号': 'LL20260916001', '自动编号': '101' } },
+    { record_id: 'r2', fields: { '工单号': 'LL20260916001', '自动编号': '102' } },   // ← 并发建单的后果
+    { record_id: 'r3', fields: { '工单号': 'LL20260916002', '自动编号': '103' } }
+  ];
+  const dups = lib.findDuplicateKeys(def, rows);
+  assert.equal(dups.length, 1, '应报出 1 组重复');
+  assert.equal(dups[0].key, 'LL20260916001');
+  assert.equal(dups[0].count, 2);
+  assert.deepEqual(dups[0].autoNos.sort(), ['101', '102']);
+});
+
+test('重复巡检【P7-3】同一行被读两次（自动编号相同）不算重复', () => {
+  const lib = require('../lib/feishu-api.js');
+  const def = { key: '工单号', fields: [['code', '工单号', 'text'], ['autoNo', '自动编号', 'text']] };
+  const dups = lib.findDuplicateKeys(def, [
+    { record_id: 'r1', fields: { '工单号': 'X', '自动编号': '7' } },
+    { record_id: 'r1', fields: { '工单号': 'X', '自动编号': '7' } }
+  ]);
+  assert.deepEqual(dups, [], '自动编号相同 → 是同一行，不是重复');
+});
+
+test('重复巡检【P7-3】拿不到自动编号时退回「整行是否完全相同」', () => {
+  const lib = require('../lib/feishu-api.js');
+  const def = { key: '工单号', fields: [['code', '工单号', 'text']] };   // 没有自动编号列
+  assert.deepEqual(lib.findDuplicateKeys(def, [
+    { fields: { '工单号': 'X' } }, { fields: { '工单号': 'X' } }
+  ]), [], '整行完全一样 → 视为同一行');
+
+  const dups = lib.findDuplicateKeys(def, [
+    { fields: { '工单号': 'X', '状态': '未执行' } },
+    { fields: { '工单号': 'X', '状态': '已执行' } }
+  ]);
+  assert.equal(dups.length, 1, '拿不到自动编号时，内容不同就要报出来（宁可多报，也不要漏掉一条永远不会被发现的重复单）');
+});
+
+test('自动编号【P7-3】只读列：能拉下来，但**绝不推送**（飞书自己分配）', async (t) => {
+  const mock = await startAllMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
+  const r = await lib.upsertRecords('workorders', [{
+    code: 'LL-AUTO-1', type: 'LL', date: '2026-09-15', items: [{ matCode: 'X', qty: 1 }], status: '未执行'
+  }]);
+  assert.deepEqual(r.dropped, [], '不该再因为「自动编号不接受空值」报丢列：' + JSON.stringify(r.dropped));
+  assert.equal(mock.tables.tblWIP.rows[0]['自动编号'], undefined, '客户端绝不能自己写自动编号');
+  // 但读的时候要能拿到（下拉映射里必须有它）
+  const def = lib.TABLE_DEFS.workorders;
+  assert.ok(def.fields.some(f => f[1] === '自动编号'), '要能从飞书拉下来');
+  assert.deepEqual(def.downOnly, ['自动编号'], '必须显式声明为只读列');
 });

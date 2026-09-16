@@ -83,3 +83,17 @@ test('P6-6 打印前要有守卫：区卡在标签纸模式下是隐藏的，不
   assert.ok(body.indexOf("contains('a4paper')") < body.lastIndexOf('window.print()'),
     '守卫必须在 window.print() 之前生效');
 });
+
+test('P6-6 补：inventree 库位树必须按「类型」选根，不能把模块区/站点塞进货架区', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'inventree-sync.mjs'), 'utf8');
+  // 真实库位码：货架 B-01-01-01 / 工位 W01-G01 / 站点 X-11B-1403 / 模块区 M-01
+  assert.ok(/KIND_TO_ROOT = \{[^}]*'货架': 'shelf'[^}]*'工位': 'workstation'[^}]*'模块区': 'zone'[^}]*'站点': 'site'/.test(src),
+    'KIND_TO_ROOT 必须按真实类型映射（模块区/站点要各有根）');
+  assert.ok(/LOC_ROOTS = \{[^}]*zone: '模块区'[^}]*site: '站点区'/.test(src), 'LOC_ROOTS 要含模块区/站点区');
+  // 不能再用「非工位就是货架」的二分法
+  assert.ok(!/if \(l\.kind === '工位' \|\| \/\^W\\d\/\.test\(l\.code\)\) \{\s*parent = cfg\.loc_root_ids\.workstation; prefix = parts\[0\];[\s\S]{0,400}\} else \{\s*parent = cfg\.loc_root_ids\.shelf;/.test(src),
+    '还是「工位 / 其它→货架」的二分法 —— 模块区和站点会被塞进货架区');
+  assert.ok(/unknownKinds/.test(src) && /missingRoots/.test(src), '未知类型/缺根必须告警，不能静默');
+});

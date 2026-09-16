@@ -27,7 +27,18 @@ const CONFIG_FILE = path.join(DIR, 'inventree-sync.config.json');
 
 const MAT_CATEGORY = { GJ: '工具', HC: '耗材', PJ: '配件', DZ: '电子件' };
 const ROOT_CATEGORY = '416MES物料';
-const LOC_ROOTS = { shelf: '货架区', workstation: '工位区', container: '容器区' };
+/* 根库位按**种类**分，不按代码前缀猜。
+   实测 416MES 的真实库位码（188 条）：
+     货架   B-01-01-01 / C-01-03-04（4 段，170 条）
+     工位   W01-G01（2 段，12 条，kind 就是「工位」）
+     站点   X-11B-1403（3 段，1 条）
+     模块区 M-01（2 段，5 条）
+   原来的实现只认「工位 / 其它」两种：模块区和站点会被静默塞进**货架区**树的下面，
+   于是 InvenTree 里「货架区」下多出 M-01~M-05 和 X-11B 这些根本不是货架的节点。
+   现在按 kind 精确映射；kind 缺失时才退回代码前缀启发式（并提示）。 */
+const LOC_ROOTS = { shelf: '货架区', workstation: '工位区', container: '容器区', zone: '模块区', site: '站点区' };
+/** 416MES 的「类型」→ 根库位 key。缺省（kind 为空或未知）按货架处理。 */
+const KIND_TO_ROOT = { '货架': 'shelf', '工位': 'workstation', '模块区': 'zone', '站点': 'site' };
 
 /** 解析数字单元格：空 / 非数字 → null（绝不返回 0 冒充「数量就是 0」） */
 function numOrNull(v) {
@@ -226,27 +237,57 @@ async function push(file, dryRun) {
 
   // 1) 库位树：货架 B-ss-ll-pp → 货架区/B-ss/B-ss-ll/B-ss-ll-pp；工位 Www-Ggg → 工位区/Www/Www-Ggg
   console.log('① 库位树');
+  const unknownKinds = new Set();
+  const missingRoots = new Set();
+  /** 取某个 kind 对应的根库位 pk；配置里没有就退回货架区并记下来（打印告警，不静默） */
+  const rootFor = kind => {
+    const key = KIND_TO_ROOT[kind];
+    if (key && cfg.loc_root_ids && cfg.loc_root_ids[key]) return { pk: cfg.loc_root_ids[key], key };
+    if (kind && !key) unknownKinds.add(kind);
+    // 老配置里没有 zone/site 这两个根 → 退回货架区，但要明确告诉用户怎么修好
+    if (key && !(cfg.loc_root_ids && cfg.loc_root_ids[key])) missingRoots.add(key);
+    return { pk: cfg.loc_root_ids.shelf, key: 'shelf' };
+  };
   for (const l of [...locations].sort((a, b) => a.code.localeCompare(b.code))) {
     const parts = l.code.split('-');
     let parent, prefix;
-    if (l.kind === '工位' || /^W\d/.test(l.code)) {
+    const isWorkstation = l.kind === '工位' || (!l.kind && /^W\d/.test(l.code));
+    if (isWorkstation) {
       parent = cfg.loc_root_ids.workstation; prefix = parts[0];
       const g1 = await ensureLocation(cfg, prefix, parent, { dryRun }); if (g1.created) stat.loc++;
       const leaf = await ensureLocation(cfg, l.code, g1.pk, { dryRun, description: l.desc }); if (leaf.created) stat.loc++;
       locIdByCode[l.code] = leaf.pk;
     } else {
-      parent = cfg.loc_root_ids.shelf;
-      let p = parent;
-      for (let i = 1; i <= parts.length - 1; i++) {
-        const sub = parts.slice(0, i + 1).join('-');
-        const node = await ensureLocation(cfg, sub, p, { dryRun, description: i === parts.length - 1 ? l.desc : '' });
+      /* 按 kind 选根：货架 → 货架区；模块区 → 模块区；站点 → 站点区。
+         只有「货架」和未知 kind 才进多级货架树（模块区/站点是一级节点，不该被拆成 B-ss 那种层级）。 */
+      const root = rootFor(l.kind);
+      parent = root.pk;
+      if (root.key !== 'shelf') {
+        const node = await ensureLocation(cfg, l.code, parent, { dryRun, description: l.desc });
         if (node.created) stat.loc++;
-        p = node.pk;
+        locIdByCode[l.code] = node.pk;
+      } else {
+        let p = parent;
+        for (let i = 1; i <= parts.length - 1; i++) {
+          const sub = parts.slice(0, i + 1).join('-');
+          const node = await ensureLocation(cfg, sub, p, { dryRun, description: i === parts.length - 1 ? l.desc : '' });
+          if (node.created) stat.loc++;
+          p = node.pk;
+        }
+        locIdByCode[l.code] = p;
       }
-      locIdByCode[l.code] = p;
     }
     await ensureBarcode(cfg, 'LOC:' + l.code, { stocklocation: locIdByCode[l.code] }, { dryRun });
     console.log(`  📍 ${l.code} → #${locIdByCode[l.code]}`);
+  }
+
+  if (unknownKinds.size) {
+    console.log('  ⚠️ 这些「类型」没有对应的根库位，已按货架处理：' + [...unknownKinds].join('、') +
+      '\n     若要分开，请在 inventree-sync.mjs 的 KIND_TO_ROOT 里加映射并重跑 init。');
+  }
+  if (missingRoots.size) {
+    console.log('  ⚠️ 配置里缺少根库位 ' + [...missingRoots].map(k => LOC_ROOTS[k]).join('、') +
+      '，这些种类暂时挂在「货架区」下面。跑一次 `node inventree-sync.mjs init` 就会补上（已存在的根会复用，不会重建）。');
   }
 
   // 2) 容器：挂在实际库位下，无库位则挂容器区
