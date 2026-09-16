@@ -3280,6 +3280,63 @@ async function fsInitWatermarks() {
 }
 
 /** 一次增量同步：先探测，只有真变了才拉内容。返回实际拉到的行数 */
+/* 探测健康：连续失败到阈值就做一次完整全量拉
+   （方案 §五「启动 / 手动刷新 / 探测连续失败 → 完整全量拉」）。
+   为什么不能只重试探测：增量通道坏掉（列被删、排序不被支持、权限变化）时探测会一直失败，
+   而全量路径（pullState）不需要「最后更新时间」列，是唯一能恢复的通路。
+   退避 30s → 60s → 120s → 上限 5 分钟，避免全量这种重操作打出请求风暴。 */
+const PROBE_FAIL_THRESHOLD = 3;
+const FULL_RESYNC_BACKOFF = [30000, 60000, 120000, 300000];
+let _fullResyncBusy = false;
+
+function fsProbeState() {
+  state.__probeFail = state.__probeFail || { n: 0, lastAt: 0, lastErr: '', lastOkAt: 0, resyncAt: 0, resyncCount: 0 };
+  return state.__probeFail;
+}
+function fsProbeFailed(why) {
+  const p = fsProbeState();
+  p.n++; p.lastAt = Date.now(); p.lastErr = String(why || '');
+  HEALTH.probeFailStreak = p.n;
+  healthError('变更探测', new Error(String(why || '')));
+  if (p.n >= PROBE_FAIL_THRESHOLD) {
+    const wait = FULL_RESYNC_BACKOFF[Math.min(p.resyncCount, FULL_RESYNC_BACKOFF.length - 1)];
+    if (Date.now() - p.resyncAt > wait && !_fullResyncBusy) fsFullResync(why);
+  }
+}
+function fsProbeSucceeded() {
+  const p = fsProbeState();
+  if (p.n > 0) log('✅ 变更探测已恢复（此前连续失败 ' + p.n + ' 轮）');
+  p.n = 0; p.lastOkAt = Date.now(); p.resyncCount = 0;
+  HEALTH.probeFailStreak = 0;
+}
+/** 完整全量拉：探测通道连续失败时的自愈通路 */
+async function fsFullResync(why) {
+  if (_fullResyncBusy) return;
+  _fullResyncBusy = true;
+  const p = fsProbeState();
+  p.resyncAt = Date.now(); p.resyncCount++;
+  log('🔄 变更探测连续失败（' + why + '），改为完整全量拉取一次');
+  try {
+    if (_pollTimer) { clearTimeout(_pollTimer); _pollTimer = null; }
+    const remote = await fsPullState();
+    fsOnline = true;
+    fsMerge(remote);
+    await fsInitWatermarks();
+    fsRebuildBase(remote);
+    await fsFlushQueue();
+    save();
+    renderLedger(); renderTxns(); renderOperators(); renderMembers(); renderWip();
+    p.n = 0;
+    log('✅ 全量重同步完成');
+  } catch (e) {
+    log('⚠️ 全量重同步也失败：' + e.message);
+    healthError('全量重同步', e);
+  } finally {
+    _fullResyncBusy = false;
+    fsSchedulePoll();
+  }
+}
+
 async function fsIncrementalSync() {
   if (_pollBusy || (!fsOnline && !cloudOnline)) return 0;
   _pollBusy = true;
@@ -3291,6 +3348,20 @@ async function fsIncrementalSync() {
     const d = await fsPostIncremental({ mode: 'sync', watermarks: fsWatermarks() });
     HEALTH.lastProbeMs = Date.now() - tProbe;
     HEALTH.pollCount++;
+
+    /* 服务端把「某张表探测失败」放进 probe.tables[k].error 后**仍然返回 ok:true**，
+       客户端过去只读 d.changed —— 于是 8 张表全部探测失败时表现为"零变化"，
+       完全静默、连一条日志都没有。这里显式检查，并累计连续失败次数。 */
+    const probeTables = (d.probe && d.probe.tables) || {};
+    const probeErrs = Object.entries(probeTables)
+      .filter(([, v]) => v && v.error)
+      .map(([k, v]) => (TABLE_LABEL[k] || k) + '：' + String(v.error).slice(0, 60));
+    if (probeErrs.length) {
+      fsProbeFailed(probeErrs.length + '/' + Object.keys(probeTables).length + ' 张表探测失败');
+      log('⚠️ 变更探测部分失败：' + probeErrs.slice(0, 3).join('；') + (probeErrs.length > 3 ? ' …' : ''));
+    } else {
+      fsProbeSucceeded();
+    }
     const wms = fsWatermarks();
     const changed = d.changed || [];
     Object.assign(wms, d.watermarks || {});
@@ -3489,6 +3560,7 @@ function renderHealthPanel() {
     '离线队列：' + (q === null ? 'IndexedDB（异步）' : q.length + ' 条') +
     '　轮询次数 <b>' + HEALTH.pollCount + '</b>　增量次数 <b>' + HEALTH.pullCount + '</b>' +
     '　最近同步 ' + (HEALTH.lastSyncAt || '—') +
+    (fsProbeState().n ? '　' + badge(false, '探测连续失败 ' + fsProbeState().n + ' 轮') : '') +
     '　同步频率 <b>' + (pollActiveMs() / 1000) + ' 秒</b><br>' +
     '本机存储：' + (localStore ? badge(true, 'IndexedDB 已启用') : badge(false, '仅 localStorage（主数据有 5MB 上限）')) +
     '　设备 ' + esc(state.deviceId || '—') +
