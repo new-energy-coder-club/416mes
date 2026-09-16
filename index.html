@@ -541,7 +541,7 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 'use strict';
 
 /* 应用版本：改到用户看得见的行为时手动 +1，页脚会显示，方便确认线上跑的是哪一版 */
-const APP_VERSION = '1.3.0';   // Phase 0：并发正确性（seq 撞号 / 库存丢更新 / 队列不丢 / 跨标签互斥 / 工单取号）
+const APP_VERSION = '1.4.0';   // Phase 1：IndexedDB 主存储 / coverage / checkpoint / Worker / 5万流水
 
 /* ---------- 标签类型配置 ---------- */
 const TYPES = {
