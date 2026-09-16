@@ -953,14 +953,20 @@ function orderedTxns() { return CORE.orderedTransactions(state); }
 function replayAudit() {
   const rep = CORE.replayAudit(state);
   const bad = rep.mismatches;
+  const cov = rep.coverage || {};
   const lines = ['回放校验完成：物料 ' + rep.materials + ' 个，流水 ' + rep.transactions + ' 条，比对 ' + rep.compared + ' 条。'];
+  if (cov.status === 'incomplete') {
+    const gs = (cov.gaps || []).map(g => '#' + g.from + (g.to !== g.from ? '~#' + g.to : '')).join('、');
+    lines.push('⛔ 数据不完整：缺 ' + (gs || '未知流水') + '。覆盖度不足时不能把余额链显示为「完整可信」。');
+  }
   if (bad.length) {
     lines.push('⚠ 发现 ' + bad.length + ' 条链式余量不一致：',
       ...bad.slice(0, 10).map(b => '#' + b.seq + ' ' + b.matCode + ' ' + b.type + ' 应为' + b.expected + ' 实为' + b.actual + '（' + b.time + '）'),
       bad.length > 10 ? '…共 ' + bad.length + ' 条' : '');
-  } else lines.push('✅ 链式余量全部一致，审计日志完整可信。');
+  } else if (cov.status === 'complete') lines.push('✅ 流水号连续且链式余量一致，审计日志完整可信。');
+  else if (cov.status !== 'incomplete') lines.push('ℹ 链式余量在当前保留范围内一致；缺少完整覆盖度，不能宣称全量完整。');
   alert(lines.filter(Boolean).join('\n'));
-  log('回放校验：' + rep.transactions + ' 条流水，' + (bad.length ? '发现 ' + bad.length + ' 条不一致' : '全部一致'));
+  log('回放校验：' + rep.transactions + ' 条流水，状态 ' + (rep.status || 'unknown') + (bad.length ? '，发现 ' + bad.length + ' 条不一致' : ''));
   return bad.map(b => '#' + b.seq + ' ' + b.matCode + ' ' + b.type + ' 应为' + b.expected + ' 实为' + b.actual);
 }
 function renderTxns() {
