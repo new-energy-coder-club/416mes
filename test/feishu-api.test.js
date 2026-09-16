@@ -803,12 +803,15 @@ test('通用 upsert：已存在的按业务键更新，不重复建', async (t) 
   const lib = loadLib(mock.port, { FEISHU_TABLES: ALL_TABLES });
 
   await lib.upsertRecords('materials', [{ code: 'JG-001', name: '旧名', qty: 1 }]);
+  assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 1, '新建物料时期初库存允许随建档写入');
   const r = await lib.upsertRecords('materials', [{ code: 'JG-001', name: '新名', qty: 5 }]);
   assert.equal(r.created, 0);
   assert.equal(r.updated, 1);
   assert.equal(mock.tables.tblMAT.rows.length, 1, '不应产生重复行');
   assert.equal(mock.tables.tblMAT.rows[0]['名称'], '新名');
-  assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 5);
+  // P4：已存在物料的库存数量**不能**由 upsert 改（那是绕过账本的绝对值覆盖）
+  assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 1, '库存数量必须保持不变；要改就走库存直写');
+  assert.ok(r.dropped.some(d => /库存数量/.test(d)), '被忽略的字段要如实回报');
 });
 
 test('通用 upsert【关键】表里没有的列被丢弃并回报，而不是整批失败', async (t) => {
@@ -1279,4 +1282,24 @@ test('飞书写【P3】账本为空的新物料：余量仍然等于 before + �
   assert.equal(r.ok, true, r.error);
   assert.equal(mock.calls.created[0]['余量'], 3, '无账本时没有隐含期初，退回 before + δ');
   assert.equal(r.balance, 3);
+});
+
+/* ================= P4-1：服务端兜底 —— 物料 upsert 不得改库存 ================= */
+
+test('upsert【P4 兜底】物料表的「库存数量」一律不写，并如实报进 dropped', async (t) => {
+  const mock = await startMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  // 先建一条物料
+  await lib.upsertRecords('materials', [{ code: 'A-1', name: '螺丝刀', qty: 5 }]);
+  assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 5, '新建时 qty 是初值，允许作为初值写入');
+
+  // 再「更新」它并带一个绝对 qty —— 必须被服务端挡掉
+  const upd = mock.tables.tblMAT.rows.length;
+  const r = await lib.upsertRecords('materials', [{ code: 'A-1', name: '改名', qty: 999 }]);
+  assert.equal(r.updated, 1);
+  assert.equal(mock.tables.tblMAT.rows[0]['名称'], '改名', '其它字段照常更新');
+  assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 5, '库存数量不能被 upsert 改（必须走账本）');
+  assert.ok(r.dropped.some(d => /库存数量/.test(d)), '要如实回报被忽略的字段，不能静默');
+  assert.equal(r.blocked['A-1'], undefined, '不能记进 blocked（那会让合并永远不采纳飞书的库存值）');
 });

@@ -265,3 +265,98 @@ test('applyMerge【P1】无 seq 的旧流水仍拼在尾部，不被排序打乱
   assert.deepEqual(state.transactions.map(t => t.seq), [4, 3, null], '带 seq 的降序在前，无 seq 的旧数据在后');
   assert.equal(state.txnSeq, 4);
 });
+
+/* ============================================================================
+ * P4-1 qty 冲突必须换算成增量走账本，不能写绝对值
+ *
+ * 为什么：qty 是**派生量**（= 账本期初 + Σ变动），不是可以直接覆盖的普通字段。
+ * 「保留本地」的真正含义是「把本地这次改动也应用上去」。直接写 c.local 会在
+ * 两端并发时把对方在我们读快照之后做的改动整段抹掉，而且不记流水、无从追溯。
+ * ========================================================================== */
+
+test('applyMerge【P4 核心】qty「保留本地」必须写成 远端 + (本地 − 基线)，并产出库存直写', () => {
+  const st = { materials: [{ code: 'M', qty: 10 }] } ;
+  const conflicts = [{ table: 'materials', key: 'M', field: 'qty', base: 8, local: 10, remote: 13, kind: 'update' }];
+  const r = TWM.applyMerge(st, { writes: [], conflicts }, { 'materials\u0000M\u0000qty': 'local' });
+  // 本地相对基线 +2；对方在我们读取之后把它改到了 13 → 结果必须是 15，而不是本地的 10
+  assert.equal(st.materials[0].qty, 15, '必须是 remote + (local - base) = 13 + 2 = 15');
+  assert.equal(r.stockWrites.length, 1, '必须产出一条库存直写（走账本、记流水）');
+  assert.deepEqual(
+    { matCode: r.stockWrites[0].matCode, qty: r.stockWrites[0].qty, delta: r.stockWrites[0].delta },
+    { matCode: 'M', qty: 15, delta: 2 });
+});
+
+test('applyMerge【P4】qty「采用飞书」不产出库存直写（本地对齐即可，飞书本来就是这个值）', () => {
+  const st = { materials: [{ code: 'M', qty: 10 }] };
+  const conflicts = [{ table: 'materials', key: 'M', field: 'qty', base: 8, local: 10, remote: 13, kind: 'update' }];
+  const r = TWM.applyMerge(st, { writes: [], conflicts }, { 'materials\u0000M\u0000qty': 'remote' });
+  assert.equal(st.materials[0].qty, 13);
+  assert.equal(r.stockWrites.length, 0, '采用飞书不需要写回账本');
+  assert.equal(r.needsStocktake.length, 0);
+});
+
+test('applyMerge【P4】qty 降级模式（无基线）不猜增量，要求走盘点', () => {
+  const st = { materials: [{ code: 'M', qty: 10 }] };
+  const conflicts = [{ table: 'materials', key: 'M', field: 'qty', base: undefined, local: 10, remote: 13, kind: 'update' }];
+  const r = TWM.applyMerge(st, { writes: [], conflicts }, { 'materials\u0000M\u0000qty': 'local' });
+  assert.equal(r.needsStocktake.length, 1, '缺基线 → 必须列为「需要盘点」而不是硬猜');
+  assert.equal(r.stockWrites.length, 0, '绝不能凭猜写回飞书');
+  assert.equal(st.materials[0].qty, 10, '保持本地原值不动');
+});
+
+test('applyMerge【P4】非 qty 字段仍然按绝对值落地（不能一刀切）', () => {
+  const st = { materials: [{ code: 'M', name: '本地名', qty: 10 }] };
+  const conflicts = [{ table: 'materials', key: 'M', field: 'name', base: '旧', local: '本地名', remote: '飞书名', kind: 'update' }];
+  const r = TWM.applyMerge(st, { writes: [], conflicts }, { 'materials\u0000M\u0000name': 'local' });
+  assert.equal(st.materials[0].name, '本地名');
+  assert.equal(r.stockWrites.length, 0);
+});
+
+test('applyMerge【P4 闸门】plan.writes 里「更新型」的绝对 qty 必须被剥掉', () => {
+  const st = { materials: [{ code: 'M', qty: 10, name: 'X' }] };
+  const r = TWM.applyMerge(st, {
+    writes: [{ table: 'materials', key: 'M', kind: 'update', fields: { qty: 999, name: 'Y' } }],
+    conflicts: []
+  }, {});
+  assert.equal(st.materials[0].qty, 10, '绝对 qty 绝不能通过 updates 路径写进本地');
+  assert.equal(st.materials[0].name, 'Y', '其它字段照常');
+  assert.deepEqual(r.strippedQty, [{ key: 'M', qty: 999 }], '要如实报出来，不能静默');
+});
+
+test('applyMerge【P4】create 路径的 qty 是新建记录的初值，允许落地', () => {
+  const st = { materials: [] };
+  const r = TWM.applyMerge(st, {
+    writes: [{ table: 'materials', key: 'NEW', kind: 'create', fields: { qty: 7, name: '新' } }], conflicts: []
+  }, {});
+  assert.equal(st.materials[0].qty, 7, '新建物料时 qty 就是它的初值（此时账本为空，不存在覆盖问题）');
+  assert.equal(r.strippedQty.length, 0);
+});
+
+test('applyMerge【P4-4 核心】回滚必须连 __base 一起回退，否则旧值会被当成新改动推回飞书', () => {
+  const st = { materials: [{ code: 'M', name: '本地' }], __base: { materials: [{ code: 'M', name: '基线' }] } };
+  const before = JSON.stringify(st);
+  const r = TWM.applyMerge(st, {
+    writes: [{ table: 'materials', key: 'M', kind: 'update', fields: { name: '飞书新值' } }], conflicts: []
+  }, {});
+  st.__base = { materials: [{ code: 'M', name: '飞书新值' }] };   // 模拟 pull 期间基线前进了
+  assert.equal(st.materials[0].name, '飞书新值');
+  TWM.undoMerge(st, r.snapshot);
+  assert.equal(st.materials[0].name, '本地', '数据要回退');
+  assert.equal(JSON.stringify(st.__base), JSON.stringify({ materials: [{ code: 'M', name: '基线' }] }),
+    '__base 也必须回到快照里的样子 —— 不回退的话「本地没改」会被误判成「本地改过」');
+  assert.equal(JSON.stringify(st), before, '回滚后整体必须与原来完全一致');
+});
+
+test('applyMerge【P4-4】原本没有 __base 时，回滚不能凭空留一个 __base:null', () => {
+  const st = { materials: [{ code: 'M', name: '本地' }] };
+  const r = TWM.applyMerge(st, { writes: [{ table: 'materials', key: 'M', kind: 'update', fields: { name: 'R' } }], conflicts: [] }, {});
+  TWM.undoMerge(st, r.snapshot);
+  assert.equal('__base' in st, false, '键本来就没有 → 回滚后也不能有');
+});
+
+test('applyMerge【P4-4】旧格式快照（没有 hadBase）仍然可用，不抛错', () => {
+  const st = { materials: [{ code: 'M', name: 'R' }], __base: { materials: [] } };
+  TWM.undoMerge(st, { tables: { materials: [{ code: 'M', name: '旧' }] } });
+  assert.equal(st.materials[0].name, '旧');
+  assert.deepEqual(st.__base, { materials: [] }, '旧快照不回退 __base（兼容）');
+});

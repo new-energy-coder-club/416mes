@@ -205,9 +205,22 @@ test('接口 upsert：按业务键写入并回读一致（回归，确认 handle
   t.after(() => { mock.server.close(); cleanupEnv(); });
   const upsert = loadHandler('api/feishu/upsert.js', mock.port);
   const res = fakeRes();
+  // A-1 在 mock 里已存在（库存 10）→ 走更新分支 → 库存数量必须**不被 upsert 改**
   await upsert(fakeReq('POST', '/api/feishu/upsert', { table: 'materials', records: [{ code: 'A-1', qty: 42 }] }), res);
   assert.equal(res.statusCode, 200, JSON.stringify(res.body));
-  assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 42);
+  assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 10,
+    'P4：已存在物料的库存数量只能由库存直写/账本改，upsert 一律忽略（否则绕过账本覆盖并发改动）');
+  assert.ok((res.body.dropped || []).some(d => /库存数量/.test(d)), '被忽略的字段要如实回报');
+
+  // 但**新建**物料时期初库存要能随建档写入（全新物料没有账本，期初只能从建档带进来）
+  const res2 = fakeRes();
+  await upsert(fakeReq('POST', '/api/feishu/upsert', { table: 'materials', records: [{ code: 'ZZ-NEW-1', qty: 7 }] }), res2);
+  assert.equal(res2.statusCode, 200, JSON.stringify(res2.body));
+  const nu = mock.tables.tblMAT.rows.find(r => r['物料码'] === 'ZZ-NEW-1');
+  assert.ok(nu, '新物料应被创建');
+  assert.equal(nu['库存数量'], 7, '新建时 qty 就是它的期初库存，必须保留');
+  // 清掉哨兵，别把假数据留在 mock 里影响别的断言
+  mock.tables.tblMAT.rows = mock.tables.tblMAT.rows.filter(r => r['物料码'] !== 'ZZ-NEW-1');
 });
 
 /* ================= mode=sync：探测+拉取合并 ================= */
