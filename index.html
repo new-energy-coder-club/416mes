@@ -2770,8 +2770,17 @@ function newOpId() {
 }
 /** 顶部离线队列角标：待冲刷条数常驻显示 */
 function fsQueueChip() {
-  const q = fsQueue();
   const chip = document.getElementById('fsQueueChip');
+  const asyncOb = _outboxAsync;
+  if (asyncOb) {
+    asyncOb.list().then(q => {
+      if (!chip) return;
+      chip.textContent = q.length ? ('☁️ 离线队列 ' + q.length + ' 条') : '';
+      chip.style.display = q.length ? 'inline-block' : 'none';
+    }).catch(() => {});
+    return 0;
+  }
+  const q = fsQueue();
   if (chip) {
     chip.textContent = q.length ? ('☁️ 离线队列 ' + q.length + ' 条') : '';
     chip.style.display = q.length ? 'inline-block' : 'none';
@@ -3100,8 +3109,10 @@ function fsDescribeItem(x) {
 }
 
 /** 入队；同一操作重复入队只保留一条（去重与存储都在 lib/outbox.js 里，可单测） */
-function fsEnqueue(item) {
-  fsOutbox().append(item);
+async function fsEnqueue(item) {
+  const ob = await fsOutboxAsync();
+  if (ob) await ob.append(item);
+  else fsOutbox().append(item);     // IDB 初始化失败时，旧 LS 源仍是安全回退
   fsQueueChip();
 }
 /**
@@ -3112,25 +3123,29 @@ function fsEnqueue(item) {
  * 现在队列只进不出：超限的条目进入「待人工处理」，由人显式补交或显式放弃
  * （放弃要走 index.html 的「放弃并导出」入口，导出留底之后才删）。
  */
-function fsQueueFail(item, err) {
-  const ob = fsOutbox();
-  const before = (item.tries || 0);
-  const q = ob.markAttempt(item.id, err);
-  const now = (q.find(x => x.id === item.id) || {});
-  if (now.status === 'needs_attention' && before < QUEUE_MAX_TRIES) {
-    log('⛔ 同步连续失败 ' + now.tries + ' 次，已转「待人工处理」（队列保留，不会自动丢弃）：' + fsDescribeItem(item) + '　原因：' + (err || '未知'));
+async function fsQueueFail(item, err) {
+  const ob = await fsOutboxAsync();
+  if (ob) {
+    const before = (item.tries || 0);
+    const q = await ob.markAttempt(item.id, err);
+    const now = (q.find(x => x.id === item.id) || {});
+    if (now.status === 'needs_attention' && before < QUEUE_MAX_TRIES) log('⛔ 同步连续失败 ' + now.tries + ' 次，已转「待人工处理」（队列保留，不会自动丢弃）：' + fsDescribeItem(item) + '　原因：' + (err || '未知'));
+  } else {
+    const legacy = fsOutbox();
+    const before = (item.tries || 0); const q = legacy.markAttempt(item.id, err); const now = q.find(x => x.id === item.id) || {};
+    if (now.status === 'needs_attention' && before < QUEUE_MAX_TRIES) log('⛔ 同步连续失败 ' + now.tries + ' 次，已转「待人工处理」（队列保留，不会自动丢弃）：' + fsDescribeItem(item) + '　原因：' + (err || '未知'));
   }
   fsQueueChip();
-  return 0;   // 自动流程永远不丢弃条目
+  return 0;
 }
 
 /**
  * 人工显式放弃：把条目导出留底后从队列移除。
  * 这是**唯一**能让条目离开队列的失败路径，且必须是人点的。
  */
-function fsGiveUpItem(id) {
-  const ob = fsOutbox();
-  const it = ob.list().find(x => x.id === id);
+async function fsGiveUpItem(id) {
+  const ob = await fsOutboxAsync();
+  const it = ob ? (await ob.list()).find(x => x.id === id) : fsOutbox().list().find(x => x.id === id);
   if (!it) return null;
   const dump = JSON.stringify(it);
   try {
@@ -3142,7 +3157,7 @@ function fsGiveUpItem(id) {
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   } catch (e) { log('⚠️ 导出放弃条目失败（仍会保留在日志里）：' + e.message); }
   log('🗑️ 人工放弃同步操作：' + fsDescribeItem(it) + '　原始内容：' + dump);
-  ob.removeById(id);
+  if (ob) await ob.removeById(id); else fsOutbox().removeById(id);
   fsQueueChip();
   return it;
 }
@@ -3188,12 +3203,12 @@ async function fsExecItem(item) {
 
 /** 写库：任一通路可用就直写，都不可用才入队（不再无限重试）；同一张表串行 */
 async function fsPush(item) {
-  if (!fsOnline && !cloudOnline) { fsEnqueue(item); return; }
+  if (!fsOnline && !cloudOnline) { await fsEnqueue(item); return; }
   return fsSerialize(fsChainKey(item), async () => {
     try { await fsExecItem(item); save(); }
     catch (e) {
       log('⚠️ 飞书写入失败（已入离线队列）：' + (item.matCode || item.table || '') + '　' + e.message);
-      fsEnqueue(item);
+      await fsEnqueue(item);
     }
   });
 }
@@ -3261,26 +3276,27 @@ async function fsFlushQueueLocked() {
   return fsFlushQueueInner();
 }
 async function fsFlushQueueInner() {
-  const q = fsQueue();
+  const ob = await fsOutboxAsync();
+  const q = ob ? await ob.list() : fsQueue();
   if (!q.length) return 0;
   let ok = 0;
   // 逐条处理：成功的从队列移除，失败的累计次数。同样走串行链，避免和正在进行的用户写入打架。
   for (const item of q) {
     // 拿到锁之后队列可能已经被别的标签页改过，逐条复核还在不在
-    if (!fsQueue().some(x => x.id === item.id)) continue;
+    const current = ob ? await ob.list() : fsQueue();
+    if (!current.some(x => x.id === item.id)) continue;
     try {
       await fsSerialize(fsChainKey(item), () => fsExecItem(item));
-      // 必须按 id 删除。旧版写的是 fsQueue().filter(x => x !== item) —— 但 fsQueue() 每次都
-      // 重新解析 JSON、返回全新对象，x !== item 永远成立，于是**成功的条目从来没被移除过**：
-      // 角标永远显示旧数字，而且每次开机都会重放，对 stock 就是重复记账。
-      fsOutbox().removeById(item.id);
+      // 成功才按 id 出队；异步 IDB adapter 与 legacy 路径均不依赖对象引用。
+      if (ob) await ob.removeById(item.id); else fsOutbox().removeById(item.id);
       fsQueueChip();
       ok++;
     } catch (e) {
-      fsQueueFail(item, e.message);
+      await fsQueueFail(item, e.message);
     }
   }
-  if (ok) { log('☁️ 离线队列冲刷成功 ' + ok + ' 条，剩余 ' + fsQueue().length + ' 条'); save(); fsBroadcast({ type: 'queue-changed' }); }
+  const left = ob ? (await ob.list()).length : fsQueue().length;
+  if (ok) { log('☁️ 离线队列冲刷成功 ' + ok + ' 条，剩余 ' + left + ' 条'); save(); fsBroadcast({ type: 'queue-changed' }); }
   return ok;
 }
 
