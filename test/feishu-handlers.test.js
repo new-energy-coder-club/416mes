@@ -22,7 +22,7 @@ function startMock() {
     tblWIP: { rows: [], ids: [] }
   };
   const fieldTypes = {
-    tblMAT: [{ name: '物料码', type: 1 }, { name: '库存数量', type: 2 }],
+    tblMAT: [{ name: '物料码', type: 1 }, { name: '库存数量', type: 2 }, { name: '最后更新时间', type: 1002 }],
     tblTXN: [
       { name: '流水号', type: 1 }, { name: '时间', type: 5 }, { name: '操作人', type: 1 },
       { name: '类型', type: 1 }, { name: '物料码', type: 1 }, { name: '变动', type: 2 },
@@ -208,4 +208,42 @@ test('接口 upsert：按业务键写入并回读一致（回归，确认 handle
   await upsert(fakeReq('POST', '/api/feishu/upsert', { table: 'materials', records: [{ code: 'A-1', qty: 42 }] }), res);
   assert.equal(res.statusCode, 200, JSON.stringify(res.body));
   assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 42);
+});
+
+/* ================= mode=sync：探测+拉取合并 ================= */
+
+test('接口 incremental[mode=sync]：零变化时只探测，不返回任何内容行', async (t) => {
+  const mock = await startMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const inc = loadHandler('api/feishu/incremental.js', mock.port);
+  const now = Date.now();
+  const res = fakeRes();
+  await inc(fakeReq('POST', '/api/feishu/incremental', {
+    mode: 'sync',
+    watermarks: { materials: { ts: now, total: 1 }, transactions: { ts: now, total: 0 }, workorders: { ts: now, total: 0 } }
+  }), res);
+  assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+  assert.equal(res.body.ok, true);
+  assert.equal(res.body.count, 0, '零变化不该返回任何行');
+  assert.deepEqual(res.body.changed, [], '零变化不该判定任何表变了');
+  assert.ok(res.body.probe, '仍要返回探测报告，便于健康面板显示耗时');
+  assert.equal(typeof res.body.probe.timing.totalMs, 'number');
+});
+
+test('接口 incremental[mode=sync]：探测到变化就顺手拉回来，一次调用搞定', async (t) => {
+  const mock = await startMock();
+  mock.tables.tblMAT.rows[0]['最后更新时间'] = Date.now();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const inc = loadHandler('api/feishu/incremental.js', mock.port);
+  const res = fakeRes();
+  await inc(fakeReq('POST', '/api/feishu/incremental', {
+    mode: 'sync',
+    watermarks: { materials: { ts: 1, seen: [], total: 1 } }
+  }), res);
+  assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+  assert.ok(res.body.changed.indexOf('materials') >= 0, '水位很旧 → 应判定 materials 变了');
+  assert.ok((res.body.changes.materials || []).length > 0, '应把变化的行一并带回');
+  assert.ok(res.body.watermarks.materials.ts > 1, '水位要前进');
+  assert.equal(typeof res.body.probe.timing.probeMs, 'number');
+  assert.equal(typeof res.body.probe.timing.pullMs, 'number');
 });

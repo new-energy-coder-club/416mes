@@ -6,6 +6,7 @@
  *   ② mode=pull    按「最后更新时间 desc」只拉变了的行（倒序翻页到水位）
  *   ③ mode=census  键集合对账（翻完全表只取业务主键，用于发现飞书侧硬删）
  *   ④ mode=bench   延迟归因诊断（只读）：拆出网络基线 / 排序开销 / 数据量开销
+ *   ⑤ mode=sync    一次调用完成「探测 → 对变化的表立刻拉取」（省一次往返）
  *
  * 请求体：
  *   { mode:'probe' }
@@ -16,7 +17,7 @@
  * 而 sort 在文本与日期（含系统字段 1002）上都被验证可用。
  */
 'use strict';
-const { probeAllChanges, probeTableChange, pullChangesBySort, censusTable, benchFeishu, setCors, readBody, tenantToken, TABLES } = require('../../lib/feishu-api.js');
+const { probeAllChanges, probeTableChange, pullChangesBySort, censusTable, benchFeishu, syncChanges, setCors, readBody, tenantToken, TABLES } = require('../../lib/feishu-api.js');
 
 module.exports = async (req, res) => {
   setCors(res);
@@ -30,6 +31,17 @@ module.exports = async (req, res) => {
     // mode=bench：延迟归因诊断（只读）——把一次探测拆成网络基线 / 排序开销 / 数据量开销
     if (mode === 'bench') {
       res.status(200).json({ ok: true, mode, bench: await benchFeishu() });
+      return;
+    }
+
+    // mode=sync：一次调用完成「探测 → 对变化的表立刻拉取」。
+    // 原来客户端要打两次接口（probe + pull），各占一次往返与一次 serverless 调用。
+    if (mode === 'sync') {
+      const r = await syncChanges(p.watermarks || {});
+      res.status(200).json({
+        ok: true, mode, probe: r.probe, changed: r.changed, changes: r.changes,
+        watermarks: r.watermarks, count: Object.values(r.changes).reduce((a, v) => a + v.length, 0)
+      });
       return;
     }
 
