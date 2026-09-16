@@ -952,8 +952,31 @@ function recordTxn(type, matCode, delta, ref, reason) {
 /* 全量流水按时间正序 */
 function orderedTxns() { return CORE.orderedTransactions(state); }
 /* 回放校验：从首条余量反推期初，逐条重算链式余量，与记录值比对，定位篡改/丢数 */
-function replayAudit() {
-  const rep = CORE.replayAudit(state);
+async function replayAuditAsync(opts) {
+  opts = opts || {};
+  // Worker 只收纯 state 数据，不传 IDB connection。错误/超时/浏览器不支持均回退到同一纯函数。
+  if (typeof Worker === 'undefined' || opts.forceMain) return CORE.replayAudit(state, opts);
+  return new Promise(resolve => {
+    const requestId = 'audit-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+    let done = false;
+    const finish = result => { if (done) return; done = true; try { worker.terminate(); } catch (_) {} resolve(result); };
+    let worker;
+    try {
+      worker = new Worker('lib/replay-audit-worker.js');
+      const timer = setTimeout(() => finish(CORE.replayAudit(state, opts)), opts.timeoutMs || 15000);
+      worker.onmessage = ev => {
+        const d = ev.data || {};
+        if (d.requestId !== requestId) return;
+        clearTimeout(timer);
+        finish(d.ok ? d.result : CORE.replayAudit(state, opts));
+      };
+      worker.onerror = () => { clearTimeout(timer); finish(CORE.replayAudit(state, opts)); };
+      worker.postMessage({ requestId, state: state, options: opts });
+    } catch (_) { resolve(CORE.replayAudit(state, opts)); }
+  });
+}
+async function replayAudit() {
+  const rep = await replayAuditAsync();
   const bad = rep.mismatches;
   const cov = rep.coverage || {};
   const lines = ['回放校验完成：物料 ' + rep.materials + ' 个，流水 ' + rep.transactions + ' 条，比对 ' + rep.compared + ' 条。'];
