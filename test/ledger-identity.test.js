@@ -64,6 +64,16 @@ test('P3-2 生产调用方必须显式关闭全量路径的删除权，并把待
   assert.ok(/complete:/.test(fm), 'fsMerge 没有把完整性透给 mergeRemote');
 });
 
+test('P3-1 自动补推的阈值只能统计「真会被推送的表」', () => {
+  const a = fnSrc('autoPushPending');
+  // 只统计 PUSHABLE：流水不进 PUSHABLE 却会被 mergeRemote 报成 pending，
+  // 计进去的话几十条本地流水就能让整批物料/工单的自动补推罢工。
+  assert.ok(/PUSHABLE\.indexOf\(t\) >= 0/.test(a),
+    'autoPushPending 的计数没有按 PUSHABLE 过滤 → 流水会把补推阈值撑爆');
+  assert.ok(!/const count = Object\.values\(pending\)/.test(a),
+    '又用全表 pending 计数了（流水会被算进去）');
+});
+
 test('P3-3 冲突池必须落在 conflicts store，不能借用 baselines', () => {
   assert.ok(/localStore\.put\('conflicts'/.test(CODE), '冲突池没有写进 conflicts store');
   const persist = fnSrc('fsPersistConflicts');

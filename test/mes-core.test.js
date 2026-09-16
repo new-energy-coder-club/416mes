@@ -1573,3 +1573,13 @@ test('executeOrder / reverseOrder 的 applied 要带上 txn（否则调用方拿
   assert.equal(rv.applied[0].txn.seq, 99);
   assert.equal(st.transactions.length, before, '回写不该增减流水条数');
 });
+
+test('reconcileTxnSeq：重试时若服务端那个号已在本地，报 noop 而不是 missing（别刷假故障日志）', () => {
+  const st = mkState();
+  st.transactions = [{ seq: 12, matCode: 'MAT-A', delta: -2, balance: 3, opId: 'op-1' }];
+  st.txnSeq = 12;
+  const r = Core.reconcileTxnSeq(st, { localSeq: 6, serverSeq: 12, opId: 'op-1' });
+  assert.equal(r.ok, true);
+  assert.equal(r.action, 'noop', '已经对好了就是 noop，不是 missing');
+  assert.equal(st.transactions.length, 1, '不该增减流水');
+});

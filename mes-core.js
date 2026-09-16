@@ -270,7 +270,13 @@
       return { ok: false, action: 'missing' };
     }
     var mine = state.transactions.find(function (t) { return t && Number(t.seq) === localSeq; });
-    if (!mine) return { ok: false, action: 'missing' };
+    if (!mine) {
+      /* 找不到乐观那条，但服务端那个号在本地已经存在 → 说明**上一轮已经对好了**
+         （典型：响应丢了导致同一个条目被重试，而本地那条早已改成服务端号）。
+         这不是异常，报 noop 而不是 missing，免得每次重试都刷一行看起来像故障的日志。 */
+      var already = state.transactions.find(function (t) { return t && Number(t.seq) === serverSeq; });
+      return already ? { ok: true, action: 'noop', seq: serverSeq } : { ok: false, action: 'missing' };
+    }
     if (localSeq === serverSeq) {
       if (opts.opId) mine.opId = opts.opId;
       return { ok: true, action: 'noop', seq: serverSeq };
