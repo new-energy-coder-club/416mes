@@ -137,3 +137,10 @@ test('B5【阶段二实测】已自行收敛的陈旧冲突必须被丢弃，不
   const set = fnSrc('fsSetConflicts');
   assert.ok(/fsPruneStaleConflicts\(list/.test(set), 'fsSetConflicts 必须走这道过滤');
 });
+
+test('B5 补【阶段七实测】冲突指向的记录已不存在时必须丢弃（否则永远挂着让人裁决不存在的记录）', () => {
+  const p = fnSrc('fsPruneStaleConflicts');
+  assert.ok(/const rec = findRec\(c\.table, c\.key\)/.test(p), '要先取当前记录');
+  assert.ok(/if \(!rec\) \{ dropped\.push\(c\); return; \}/.test(p),
+    '记录不存在（被删掉了）→ 必须丢弃这条冲突；实测删掉一条测试物料后，关于它 qty 的冲突一直挂在面板上');
+});
