@@ -365,3 +365,19 @@ test('outbox：部分成功时只移除成功的那些', () => {
   assert.equal(left[0].tries, 1);
   assert.equal(left[0].lastError, '网络超时');
 });
+
+/* ---------- P5-2：delta-only 条目的投影 ---------- */
+
+test('project【P5】只给 delta 的库存条目要投影成「快照值 + 增量」，不能变成 undefined', () => {
+  const s0 = snap();                                   // A-1 初始 qty=10
+  const r = Outbox.project(s0, [{ op: 'stock', matCode: 'A-1', delta: -3, type: '领料', id: 'd1' }]);
+  const m = r.view.materials.find(x => x.code === 'A-1');
+  assert.equal(m.qty, 7, '10 + (-3) = 7；旧实现会写成 undefined');
+  assert.equal(m.name, '甲', '其它字段不受影响');
+  assert.equal(s0.materials.find(x => x.code === 'A-1').qty, 10, '快照本身不能被改（投影是只读视图）');
+});
+
+test('project【P5】带绝对 qty 的条目仍然以 qty 为准（两种写法都要对）', () => {
+  const r = Outbox.project(snap(), [{ op: 'stock', matCode: 'A-1', qty: 42, delta: -3, id: 'd2' }]);
+  assert.equal(r.view.materials.find(x => x.code === 'A-1').qty, 42, '给了绝对 qty 就用它（那是本地算好的目标值）');
+});
