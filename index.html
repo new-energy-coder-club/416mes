@@ -541,7 +541,7 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 'use strict';
 
 /* 应用版本：改到用户看得见的行为时手动 +1，页脚会显示，方便确认线上跑的是哪一版 */
-const APP_VERSION = '1.4.0';   // Phase 1：IndexedDB 主存储 / coverage / checkpoint / Worker / 5万流水
+const APP_VERSION = '1.5.0';   // Phase 2：自动补推本地新建 + 逐表数据一致性面板
 
 /* ---------- 标签类型配置 ---------- */
 const TYPES = {
@@ -2918,6 +2918,33 @@ function pendingSummary() {
   return out;
 }
 
+/**
+ * 逐表「本地 ↔ 飞书」数据一致性表。
+ * 这是「数据也统一」的可视化保证：结构对齐只说明**能**同步，
+ * 这张表才说明**是否已经**一致 —— 本地多=待推送，飞书多=待拉取。
+ */
+function dataConsistencyHtml() {
+  const rep = _lastReport;
+  if (!rep || !rep.tables) return '';
+  const rows = SYNC_TABLES.filter(k => rep.tables[k]).map(k => {
+    const t = rep.tables[k];
+    const L = t.localRecords, R = t.feishuRecords;
+    const diff = L - R;
+    const mark = diff === 0 ? '<b style="color:#2d9d4f">✓ 一致</b>'
+      : (diff > 0 ? '<b style="color:#e8a020">本地多 ' + diff + '</b>' : '<b style="color:#d33a2c">飞书多 ' + (-diff) + '</b>');
+    return '<tr><td>' + (TABLE_LABEL[k] || k) + '</td><td style="text-align:right">' + L + '</td>' +
+      '<td style="text-align:right">' + R + '</td><td>' + mark + '</td></tr>';
+  });
+  const bad = rows.length && SYNC_TABLES.filter(k => rep.tables[k] &&
+    (rep.tables[k].localRecords !== rep.tables[k].feishuRecords)).length;
+  return '<div style="margin-bottom:6px">' + (bad
+    ? '⚠️ <b>数据不一致：' + bad + ' 张表本地与飞书条数不同</b>'
+    : '✅ <b>8 张表数据条数全部一致（本地 ↔ 飞书）</b>') + '</div>' +
+    '<table class="grid" style="max-width:520px;margin-bottom:8px"><thead><tr>' +
+    '<th>表</th><th style="text-align:right">本地</th><th style="text-align:right">飞书</th><th>状态</th>' +
+    '</tr></thead><tbody>' + rows.join('') + '</tbody></table>';
+}
+
 function renderAlignBox() {
   const box = document.getElementById('cloudGapBox');
   if (!box) return;
@@ -2927,9 +2954,10 @@ function renderAlignBox() {
   const rep = _lastReport;
   const missingCols = rep ? Object.entries(rep.tables).filter(([, t]) => t.missingColumns.length) : [];
   const missingOpts = rep ? Object.entries(rep.tables).filter(([, t]) => t.missingOptions.length) : [];
-  if (!pendingCount && !blocked.length && !missingCols.length && !missingOpts.length) { box.style.display = 'none'; return; }
+  // 只要核对过就常显一致性表：一致本身也是要让人看见的信息
+  if (!rep && !pendingCount && !blocked.length) { box.style.display = 'none'; return; }
 
-  let html = '';
+  let html = dataConsistencyHtml();
   if (missingCols.length || missingOpts.length) {
     html += '⚠️ <b>飞书表结构要补齐，否则这些内容永远同步不上去</b><br>';
     missingCols.forEach(([k, t]) => {
