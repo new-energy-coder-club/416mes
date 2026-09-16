@@ -890,6 +890,7 @@ async function initLocalStore() {
       state = saved.value;
       state.__freshSeed = false;
       hydrateState();
+      await migrateOutboxToIdb();
       renderLedger(); renderTxns(); renderNec(); renderMembers(); renderOperators(); refreshMatDatalist(); refreshMemberDatalist();
       return;
     }
@@ -898,6 +899,7 @@ async function initLocalStore() {
       await tx.put('syncMeta', { key: IDB_STATE_KEY, value: state, migratedAt: new Date().toISOString() });
       await tx.put('syncMeta', { key: IDB_MIGRATION_KEY, value: { done: true, at: new Date().toISOString() } });
     });
+    await migrateOutboxToIdb();
   } catch (e) {
     localStore = null;
     log('⚠️ IndexedDB 不可用，暂按旧 localStorage 运行（未丢数据）：' + e.message);
@@ -2735,11 +2737,27 @@ let fsWriteBase = '';
    这里只做薄封装：Phase 1 要求**行为不变**，所以仍用旧键 mes416_fs_queue，
    条目结构也兼容旧格式（读出来会自动补 id）。换新键 + 迁移旧数据是 Phase 2。 */
 let _outbox = null;
+let _outboxAsync = null;
+async function fsOutboxAsync() {
+  if (!localStore) return null;
+  if (!_outboxAsync) _outboxAsync = OUTBOX.createAsync({ store: localStore, maxTries: QUEUE_MAX_TRIES });
+  return _outboxAsync;
+}
 function fsOutbox() {
   if (!_outbox) _outbox = OUTBOX.create({ key: FS_QUEUE_LS, maxTries: QUEUE_MAX_TRIES });
   return _outbox;
 }
 function fsQueue() { return fsOutbox().list(); }
+/* IDB 队列迁移：源 localStorage 在复制成功前绝不删除；每条含 id 的旧记录原样写入。 */
+async function migrateOutboxToIdb() {
+  const ob = await fsOutboxAsync();
+  if (!ob) return;
+  const existing = await ob.list();
+  if (existing.length) return;
+  const legacy = fsOutbox().list();
+  for (const item of legacy) await ob.append(item);
+  if (legacy.length) log('💾 已迁移离线队列 ' + legacy.length + ' 条到 IndexedDB（localStorage 源保留作为安全回退）');
+}
 
 /* ---------- 幂等键（操作ID）----------
    飞书没有事务，「已写入但响应丢失」时重试会重复扣一次库存。
