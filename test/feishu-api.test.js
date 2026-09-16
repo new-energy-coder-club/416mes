@@ -1237,3 +1237,46 @@ test('pullState【P3 端到端】截断的半截数据 + 关闭删除闸门 → 
   assert.deepEqual(r.pendingDelete.map(p => p.id).sort(), ['B-2', 'C-3'], '转成待人工核删');
   assert.deepEqual(r.pending, [], '待核删的不能被同时当成「本地新建」');
 });
+
+/* ================= P3-1：流水「余量」必须由账本推出 ================= */
+
+test('飞书写【P3 复现线上 id#18】物料行 qty 过期时，流水余量必须按账本算', async (t) => {
+  /* 现场：账本 cumulative 已到 12 而物料行还停在 5（上一次写入的 qty 没落或被覆盖）。
+     旧实现写 余量 = before + delta = 5 + 1 = 6，于是链式校验永远报 mismatch
+     （线上 seq#18 就是这样：delta=+1、余量 13、真实 14）。 */
+  const mock = await startMock({
+    tables: {
+      // ← 故意过期的库存数量
+      tblMAT: { fields: ['物料码', '名称', '库存数量'], rows: [{ '物料码': 'JG-001', '名称': '狂徒', '库存数量': 5 }] },
+      tblTXN: {
+        fields: ['流水号', '时间', '操作人', '类型', '物料码', '变动', '余量', '关联单', '原因/备注'],
+        rows: [
+          // 期初 = 余量 - 变动 = 2 - 1 = 1；累计 δ = 1 + 10 = 11
+          { '流水号': '#000001', '时间': 1700000000000, '操作人': '', '类型': '手工调整', '物料码': 'JG-001', '变动': 1, '余量': 2, '关联单': '', '原因/备注': '' },
+          { '流水号': '#000002', '时间': 1700000001000, '操作人': '', '类型': '手工调整', '物料码': 'JG-001', '变动': 10, '余量': 12, '关联单': '', '原因/备注': '' }
+        ]
+      }
+    }
+  });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+
+  const r = await lib.writeStock({ matCode: 'JG-001', delta: 1, operator: '测试' });
+  assert.equal(r.ok, true, r.error);
+  const txn = mock.calls.created[0];
+  assert.equal(txn['变动'], 1);
+  assert.equal(txn['余量'], 13, '余量必须 = 账本期初(1) + 累计(11) + 本次(1) = 13，而不是 before(5)+1=6');
+  assert.equal(r.balance, 13);
+  // 物料行也要被收敛到账本值
+  assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 13);
+});
+
+test('飞书写【P3】账本为空的新物料：余量仍然等于 before + 变动（退化为物料行反推）', async (t) => {
+  const mock = await startMock();   // tblMAT 只有 A-1，qty=5，流水表空
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  const r = await lib.writeStock({ matCode: 'A-1', qty: 3, delta: -2, operator: '管理员' });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(mock.calls.created[0]['余量'], 3, '无账本时没有隐含期初，退回 before + δ');
+  assert.equal(r.balance, 3);
+});
