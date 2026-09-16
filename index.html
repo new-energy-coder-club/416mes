@@ -535,6 +535,7 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 <script src="mes-core.js"></script>
 <script src="lib/outbox.js"></script>
 <script src="lib/store.js"></script>
+<script src="lib/replay-checkpoint.js"></script>
 <script>
 /* ================= 416MES 应用逻辑 ================= */
 'use strict';
@@ -565,6 +566,7 @@ if (!CORE) {
    缺了它「离线期间的改动」就无处存放，宁可当场报错也不要静默丢数据。 */
 const OUTBOX = window.Outbox;
 const STORE = window.MesStore;
+const CHECKPOINT = window.MesReplayCheckpoint;
 if (!OUTBOX) {
   document.body.insertAdjacentHTML('afterbegin',
     '<div style="background:#d33a2c;color:#fff;padding:12px 20px;font-size:14px">⚠️ 缺少 lib/outbox.js，离线队列无法工作（离线期间的改动会丢）。请确认 lib/outbox.js 与 index.html 一起部署后刷新。</div>');
@@ -575,6 +577,7 @@ if (!STORE) {
     '<div style="background:#d33a2c;color:#fff;padding:12px 20px;font-size:14px">⚠️ 缺少 lib/store.js，本地数据安全迁移无法工作。请确认完整部署后刷新。</div>');
   throw new Error('缺少 lib/store.js（本地真源仓储模块）');
 }
+if (!CHECKPOINT) throw new Error('缺少 lib/replay-checkpoint.js（账本 checkpoint 模块）');
 const NEC_TYPE_NAMES = { RW: '任务', LL: '领料', CG: '采购', WX: '维修', HD: '活动', QT: '其他' };
 const NEC_STATUS = ['待处理', '进行中', '已完成', '已取消'];
 const LS_KEY = 'mes416_state_v1';
@@ -928,6 +931,9 @@ async function persistStateToIdb() {
     }));
     await tx.replaceAll('records', records);
     await tx.replaceAll('transactions', (state.transactions || []).filter(t => t && t.seq != null));
+    const cp = CHECKPOINT.build(state.transactions || []);
+    await tx.replaceAll('baselines', cp.checkpoints);
+    await tx.put('syncMeta', { key: 'checkpoint-meta', value: { reason: cp.reason, coverage: cp.coverage, at: new Date().toISOString() } });
     await tx.put('syncMeta', { key: IDB_STATE_KEY, value: state, savedAt: new Date().toISOString() });
   });
 }
