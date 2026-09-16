@@ -13,13 +13,15 @@
  * 响应：{ ok:true, report:{ tables: { materials:{…}, … } } }
  */
 'use strict';
-const { probeChangeDetection, setCors } = require('../../lib/feishu-api.js');
+const { probeChangeDetection, dumpSearchShape, setCors } = require('../../lib/feishu-api.js');
 
 module.exports = async (req, res) => {
   setCors(res);
   if (req.method === 'OPTIONS') { res.status(204).end(); return; }
   if (req.method !== 'GET') { res.status(405).json({ ok: false, error: 'method not allowed' }); return; }
   try {
+    // ?dump=1 只转储一张表的原始 search 报文，用来确认参数是否被尊重（诊断用，只读）
+    if (req.query && req.query.dump) { res.status(200).json({ ok: true, dump: await dumpSearchShape() }); return; }
     const report = await probeChangeDetection();
     res.status(200).json({ ok: true, report });
   } catch (e) {
