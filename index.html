@@ -545,7 +545,7 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 'use strict';
 
 /* 应用版本：改到用户看得见的行为时手动 +1，页脚会显示，方便确认线上跑的是哪一版 */
-const APP_VERSION = '2.1.0';   // Phase 5：IDB 游标导出 + 健康面板 + 区域改香港
+const APP_VERSION = '2.1.1';   // Phase 5：IDB 游标导出（上一版提交信息名不副实，本次才是真的）
 
 /* ---------- 标签类型配置 ---------- */
 const TYPES = {
@@ -1450,10 +1450,39 @@ document.getElementById('btnExport').addEventListener('click', () => {
     ...state.necOrders.map(o => [o.code, o.title, o.type, o.owner, o.priority, o.due, o.status, o.materials, o.note, o.createdAt, o.doneAt || ''])]), 'NEC工单');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ['流水号', '时间', '操作人', '类型', '物料码', '变动', '余量', '关联单', '原因/备注', '设备'],
-    ...state.transactions.map(t => [t.seq == null ? '' : '#' + pad(t.seq, 6), t.time, t.operator, t.type, t.matCode, t.delta, t.balance, t.ref, t.reason, t.device || ''])]), '库存流水');
+    ...txnSheetRows()]), '库存流水');
   XLSX.writeFile(wb, '416MES_台账_' + ymdCompact(today()) + '.xlsx');
   localStorage.setItem('mes416_last_backup', Date.now());   // 门户页备份提醒数据源
 });
+/**
+ * 库存流水的数据行。
+ * 优先用从 IndexedDB 游标读出来的那份（_idxTxn）——
+ * 内存里的 state.transactions 将来可能只是窗口切片，直接拿它导出会
+ * **静默漏掉窗口外的流水**，而对账凭据少一条都是大事。
+ */
+function txnSheetRows() {
+  let src = state.transactions, from = '内存';
+  if (_idxTxn && _idxTxn.length >= (state.transactions || []).length) { src = _idxTxn; from = 'IndexedDB 游标'; }
+  const head = ['流水号', '时间', '操作人', '类型', '物料码', '变动', '余量', '关联单', '原因/备注', '设备'];
+  void head;
+  const ord = (src || []).slice().sort((a, b) => (a.seq || 0) - (b.seq || 0));   // 按 seq 正序，便于人眼对账
+  log('📤 导出库存流水 ' + ord.length + ' 条（来源：' + from + '）');
+  return ord.map(t => [t.seq == null ? '' : '#' + pad(t.seq, 6), t.time, t.operator, t.type, t.matCode, t.delta, t.balance, t.ref, t.reason, t.device || '']);
+}
+
+/** IDB 游标分批读出来的流水（全量同步后预热；状态一变就失效） */
+let _idxTxn = null;
+async function fsPreloadTransactions() {
+  if (!localStore) return 0;
+  try {
+    const rows = [];
+    await localStore.iterate('transactions', chunk => { chunk.forEach(r => rows.push(r)); }, { chunk: 1000 });
+    rows.sort((a, b) => (a.seq || 0) - (b.seq || 0));
+    _idxTxn = rows;
+    return rows.length;
+  } catch (e) { log('⚠️ 从 IndexedDB 预读流水失败（导出会退回内存副本）：' + e.message); return 0; }
+}
+
 document.getElementById('btnImport').addEventListener('click', () => document.getElementById('fileImport').click());
 document.getElementById('fileImport').addEventListener('change', e => {
   const f = e.target.files[0]; if (!f) return;
@@ -3935,6 +3964,7 @@ async function fsBoot() {
     fsRebuildBase(remote);         // Phase 3：把「刚读到的飞书值」记成三方合并的基线
     fsStartPolling();              // Phase 2：10 秒探测一次，只有变了才拉内容
     if (!state.__healthHidden) renderHealthPanel();   // 全量同步完刷新面板（否则停在启动那一刻的空状态）
+    await fsPreloadTransactions();                    // Phase 5：预热 IDB 流水，导出即取即用
   } catch (e) {
     fsOnline = false; refreshStatusHint();
     // 真源服务（feishu-server / 隧道）不可达时，退回云端接口 —— 同一份飞书数据。
