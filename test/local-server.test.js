@@ -310,3 +310,28 @@ test('本地模式：未实现路由回 501 JSON，静态/穿越/坏 URL 的守�
     assert.match(await r.text(), /416MES/);
   });
 });
+
+/* ============================================================================
+ * 四、路由清单与 api/feishu/ 目录必须一一对应（防止以后加了接口本地漏挂）
+ * ========================================================================== */
+
+test('本地模式【P8 防漂移】api/feishu/ 里的每个 handler 都必须挂在本地路由表上', () => {
+  const fs = require('node:fs');
+  const server = fs.readFileSync(SERVER, 'utf8');
+  const apiDir = path.join(__dirname, '..', 'api', 'feishu');
+  const files = fs.readdirSync(apiDir).filter(f => f.endsWith('.js')).map(f => f.replace(/\.js$/, ''));
+  assert.ok(files.length >= 10, 'api/feishu/ 下的 handler 数量异常：' + files.length);
+
+  // 从 feishu-server.mjs 的路由表里把文件名抠出来
+  const mounted = new Set([...server.matchAll(/'\.\/api\/feishu\/([A-Za-z0-9_-]+)\.js'/g)].map(m => m[1]));
+  const missing = files.filter(f => !mounted.has(f));
+  assert.deepEqual(missing, [],
+    '这些 handler 没有挂到本地路由表上 → 局域网下会 501，而云端正常（行为悄悄分叉）：' + missing.join('、'));
+
+  const extra = [...mounted].filter(f => !files.includes(f));
+  assert.deepEqual(extra, [], '路由表里挂了不存在的 handler：' + extra.join('、'));
+
+  // 路径必须相对于 feishu-server.mjs 自己（写成 ../api/... 会解析到仓库外面去）
+  assert.ok(!/'\.\.\/api\/feishu\//.test(server),
+    "require 路径写成了 '../api/feishu/...' —— createRequire(import.meta.url) 是相对本文件的，会解析到仓库外");
+});
