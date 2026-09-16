@@ -541,7 +541,7 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 'use strict';
 
 /* 应用版本：改到用户看得见的行为时手动 +1，页脚会显示，方便确认线上跑的是哪一版 */
-const APP_VERSION = '1.5.1';   // Phase 2：自动补推 + 数据一致性面板 + 启动顺序修复
+const APP_VERSION = '1.5.2';   // Phase 2：自动补推 + 数据一致性面板 + 启动顺序修复
 
 /* ---------- 标签类型配置 ---------- */
 const TYPES = {
@@ -3037,7 +3037,17 @@ async function autoPushPending() {
   }
   try {
     const n = await pushPending(pending);
-    if (n) log('☁️ 自动补推本地新建记录 ' + n + ' 条到飞书');
+    if (n) {
+      log('☁️ 自动补推本地新建记录 ' + n + ' 条到飞书');
+      // 推完就把这些条目从「待推送」里摘掉，否则面板会一直挂着已经推上去的数字
+      Object.keys(pending).forEach(tbl => {
+        if (!_pendingPush || !_pendingPush[tbl]) return;
+        const done = new Set(pending[tbl].map(r => tableKeyOf(tbl, r)));
+        _pendingPush[tbl] = _pendingPush[tbl].filter(r => !done.has(tableKeyOf(tbl, r)));
+        if (!_pendingPush[tbl].length) delete _pendingPush[tbl];
+      });
+      renderAlignBox();
+    }
     return n;
   } catch (e) {
     log('⚠️ 自动补推失败（已入离线队列，稍后会重试）：' + e.message);
