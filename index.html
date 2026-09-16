@@ -210,6 +210,7 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
       </div>
       <div id="cloudGapBox" class="panel" style="display:none;border-left:5px solid #e8a020;background:#fffbf0;margin-top:10px"></div>
       <div id="conflictBox" class="panel" style="display:none;border-left:5px solid #d33a2c;background:#fff6f5;margin-top:10px"></div>
+      <div id="healthBox" class="panel" style="display:none;border-left:5px solid #2d9d4f;background:#f4fbf6;margin-top:10px"></div>
       <div id="locateAuditBox" style="display:none"></div>
       <p class="hint" style="margin-top:8px">所有修改自动保存到浏览器本地；换电脑/换浏览器前请「导出备份 JSON」（全量含流水）或「导出 Excel 台账」。库存数量带<b>黄底=低于安全库存，红底=负库存</b>；手工改数量会要求填写调整原因并写入流水。</p>
       <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;color:#445" id="txnSummary">📜 库存流水</summary>
@@ -3120,7 +3121,10 @@ async function fsIncrementalSync() {
   if (_pollBusy || (!fsOnline && !cloudOnline)) return 0;
   _pollBusy = true;
   try {
+    const tProbe = Date.now();
     const d = await fsPostIncremental({ mode: 'probe' });
+    HEALTH.lastProbeMs = Date.now() - tProbe;
+    HEALTH.pollCount++;
     const wms = fsWatermarks();
     const changed = [];
     Object.entries(d.report.tables || {}).forEach(([k, p]) => {
@@ -3130,6 +3134,7 @@ async function fsIncrementalSync() {
     if (!changed.length) return 0;        // 零变化：一个内容请求都不发
 
     let total = 0;
+    const tPull = Date.now();
     for (const key of changed) {
       let r;
       try { r = await fsPostIncremental({ mode: 'pull', table: key, watermark: wms[key] || { ts: 0, seen: [] } }); }
@@ -3138,7 +3143,9 @@ async function fsIncrementalSync() {
 
       // 三方合并：base(上次同步的飞书值) + local + remote(本次变化行)
       // 分得出「飞书改的」和「本地改的」——远端单方改动自动快进，只有真双改才进冲突池
+      const tMerge = Date.now();
       const tw = fsThreeWayApply(key, r.records);
+      HEALTH.lastMergeMs = Date.now() - tMerge;
 
       // syncedKeys 并进基线，否则下一轮会把远端已有记录当成「本地新建」
       const idf = TABLE_KEY_FIELD[key];
@@ -3158,11 +3165,15 @@ async function fsIncrementalSync() {
       if (key === 'workorders') mergeSerials({ workorders: r.records });   // 工单号计数器跟上
       if (key === 'materials') refreshMatDatalist();
     }
+    HEALTH.lastPullMs = Date.now() - tPull;
     if (total) {
+      HEALTH.pullCount++;
+      HEALTH.lastSyncAt = new Date().toLocaleTimeString();
       save();
       renderLedger(); renderTxns(); renderOperators(); renderMembers(); renderWip();
       log('⚡ 增量同步：' + changed.map(k => TABLE_LABEL[k] || k).join('、') + ' 共 ' + total + ' 行');
       runReconcile();   // 让「数据一致性」面板反映最新条数
+      if (!state.__healthHidden) renderHealthPanel();
     }
     return total;
   } finally { _pollBusy = false; }
@@ -3180,6 +3191,7 @@ async function fsIncrementalSync() {
  */
 async function fsRunCensus(opts) {
   opts = opts || {};
+  const tCensus = Date.now();
   const synced = state.__syncedKeys || {};
   const prevMissingAll = state.__censusMissing || {};
   const nextMissingAll = {};
@@ -3234,6 +3246,7 @@ async function fsRunCensus(opts) {
 
   state.__censusMissing = nextMissingAll;
   _lastCensusAt = Date.now();
+  HEALTH.lastCensusMs = Date.now() - tCensus;
   if (deleted) { save(); renderLedger(); renderTxns(); renderMembers(); renderWip(); renderNec(); }
   const confirmCount = Object.values(_censusPending).reduce((a, v) => a + v.keys.length, 0);
   if (confirmCount) log('⚠️ 有 ' + confirmCount + ' 条记录在飞书里找不到了，需人工确认后才删除（见「对齐」面板）');
@@ -3246,6 +3259,81 @@ async function fsRunCensus(opts) {
 async function fsCensusNow() {
   const r = await fsRunCensus();
   return r;
+}
+
+/* ================= Phase 5：健康面板与性能埋点 =================
+   为什么要有：同步出问题时，现场只看到「数据没变」，看不出卡在哪一层。
+   把「探测多久 / 拉了多少 / 队列几条 / 覆盖度够不够 / 三方合并是不是降级了」
+   全部摆出来，问题一眼可定位，而不是靠猜。 */
+
+const HEALTH = {
+  bootMs: null,            // 首屏（load → 第一次渲染完成）
+  lastProbeMs: null,       // 一次 8 表探测耗时
+  lastPullMs: null,        // 一次增量拉取耗时
+  lastMergeMs: null,       // 一次增量合并耗时
+  lastCensusMs: null,
+  lastSyncAt: null,
+  pollCount: 0,
+  pullCount: 0,
+  errors: []
+};
+function healthError(where, e) {
+  HEALTH.errors.unshift({ at: new Date().toLocaleTimeString(), where: where, msg: String((e && e.message) || e) });
+  HEALTH.errors = HEALTH.errors.slice(0, 20);
+}
+
+function renderHealthPanel() {
+  const box = document.getElementById('healthBox');
+  if (!box) return;
+  const cov = CORE.replayAudit(state, { expectedMaxSeq: state.txnSeq || null });
+  const q = _outboxAsync ? null : fsQueue();       // 异步队列长度用最近一次快照，避免面板闪烁
+  const chips = [];
+  const ms = v => v == null ? '—' : (v < 1000 ? Math.round(v) + 'ms' : (v / 1000).toFixed(2) + 's');
+  const badge = (ok, text) => '<b style="color:' + (ok ? '#2d9d4f' : '#d33a2c') + '">' + text + '</b>';
+
+  chips.push('首屏 ' + ms(HEALTH.bootMs) + (HEALTH.bootMs == null ? '' : (HEALTH.bootMs < 2000 ? ' ' + badge(true, '✓') : ' ' + badge(false, '偏慢'))));
+  chips.push('探测 ' + ms(HEALTH.lastProbeMs) + (HEALTH.lastProbeMs == null ? '' : (HEALTH.lastProbeMs < 200 ? ' ' + badge(true, '✓') : ' ' + badge(false, '偏慢'))));
+  chips.push('增量拉取 ' + ms(HEALTH.lastPullMs));
+  chips.push('增量合并 ' + ms(HEALTH.lastMergeMs) + (HEALTH.lastMergeMs == null ? '' : (HEALTH.lastMergeMs < 500 ? ' ' + badge(true, '✓') : ' ' + badge(false, '偏慢'))));
+  chips.push('键对账 ' + ms(HEALTH.lastCensusMs));
+
+  const covText = cov.status === 'complete-valid' ? badge(true, '账本完整且一致')
+    : cov.status === 'incomplete' ? badge(false, '数据不完整') : '仅当前范围一致';
+  const degrade = fsMergeBase() ? badge(true, '三方合并可用') : badge(false, '无基线，已降级为两方保守策略');
+
+  box.innerHTML = '<b>🩺 同步健康</b><br>' +
+    '<div class="hint" style="line-height:1.9">' +
+    chips.join(' · ') + '<br>' +
+    '覆盖度：' + covText + '（流水 ' + cov.transactions + ' 条，比对 ' + cov.compared + ' 条）' +
+    (cov.coverage && cov.coverage.gaps && cov.coverage.gaps.length
+      ? '　缺 <code>' + cov.coverage.gaps.map(g => '#' + g.from + (~g.to ? '~#' + g.to : '')).join('、') + '</code>' : '') + '<br>' +
+    '三方合并：' + degrade + '　待裁决冲突 <b>' + _conflicts.length + '</b> 条' +
+    '　待人工删除 <b>' + Object.values(_censusPending).reduce((a, v) => a + v.keys.length, 0) + '</b> 条<br>' +
+    '离线队列：' + (q === null ? 'IndexedDB（异步）' : q.length + ' 条') +
+    '　轮询次数 <b>' + HEALTH.pollCount + '</b>　增量次数 <b>' + HEALTH.pullCount + '</b>' +
+    '　最近同步 ' + (HEALTH.lastSyncAt || '—') + '<br>' +
+    '本机存储：' + (localStore ? badge(true, 'IndexedDB 已启用') : badge(false, '仅 localStorage（主数据有 5MB 上限）')) +
+    '　设备 ' + esc(state.deviceId || '—') +
+    (HEALTH.errors.length ? '<br>最近异常：<code>' + esc(HEALTH.errors[0].where + '：' + HEALTH.errors[0].msg).slice(0, 120) + '</code>' : '') +
+    '</div>' +
+    '<div class="toolbar" style="margin-top:6px">' +
+    '<button class="btn small ghost" id="btnHealthRefresh">刷新</button>' +
+    '<button class="btn small ghost" id="btnHealthProbe">测一次探测</button>' +
+    '<button class="btn small ghost" id="btnHealthHide">收起</button></div>';
+
+  document.getElementById('btnHealthHide').addEventListener('click', () => { state.__healthHidden = true; save(); box.style.display = 'none'; });
+  document.getElementById('btnHealthRefresh').addEventListener('click', renderHealthPanel);
+  document.getElementById('btnHealthProbe').addEventListener('click', async e => {
+    e.target.disabled = true; e.target.textContent = '探测中…';
+    try {
+      const t = Date.now();
+      const d = await fsPostIncremental({ mode: 'probe' });
+      HEALTH.lastProbeMs = Date.now() - t;
+      log('🩺 探测一次耗时 ' + HEALTH.lastProbeMs + 'ms（8 表，' + JSON.stringify(d.report.tables).length + ' 字节量级）');
+    } catch (err) { healthError('探测', err); }
+    e.target.disabled = false; e.target.textContent = '测一次探测';
+    renderHealthPanel();
+  });
 }
 
 /* ================= Phase 3：三方合并（base / local / remote） =================
@@ -3413,7 +3501,7 @@ function fsSchedulePoll() {
     try { await fsIncrementalSync(); } catch (e) { log('⚠️ 增量同步失败：' + e.message); }
     // 键对账是低频的：增量走完之后，隔一段时间才做一次完整对账
     if (Date.now() - _lastCensusAt > CENSUS_INTERVAL_MS) {
-      try { await fsRunCensus(); } catch (e) { log('⚠️ 键对账失败：' + e.message); }
+      try { await fsRunCensus(); } catch (e) { log('⚠️ 键对账失败：' + e.message); healthError('键对账', e); }
     }
     fsSchedulePoll();
   }, idle ? POLL_IDLE_MS : POLL_ACTIVE_MS);
@@ -3899,6 +3987,10 @@ if (state.scanLog.length) document.getElementById('scanLog').textContent = state
    __syncedKeys 还是空的（于是「本地新建」判定失真），基线整份被冲掉。 */
 (async function boot() {
   try { await localStoreReady; } catch (e) { /* initLocalStore 内部已兜底，这里只保证顺序 */ }
+  // 首屏 = 从导航开始到本地数据渲染完成（不含飞书往返 —— 那不该挡住首屏）
+  // performance.now() 就是「距导航开始」的毫秒数，这里正是本地数据渲染完的时刻
+  try { HEALTH.bootMs = Math.round(performance.now()); } catch (e) { HEALTH.bootMs = null; }
+  if (!state.__healthHidden) { const hb = document.getElementById('healthBox'); if (hb) hb.style.display = 'block'; renderHealthPanel(); }
   fsBoot();   // 飞书真源：可达则拉取合并 + 冲刷离线队列，不可达自动离线
 })();
 
