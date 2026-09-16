@@ -158,3 +158,68 @@ test('增量·删除：没有缺失时什么也不做', () => {
   assert.equal(r.reason, 'none');
   assert.deepEqual(r.deletions, []);
 });
+
+/* ================= 增量合并（绝不是全量合并） ================= */
+
+const Core = require('../mes-core.js');
+
+test('增量合并【核心】只带变化行的部分数据，绝不能触发删除判定', () => {
+  const st = { materials: [{ code: 'A', name: '甲' }, { code: 'B', name: '乙' }, { code: 'C', name: '丙' }],
+               transactions: [], txnSeq: 0, __syncedKeys: { materials: ['A', 'B', 'C'] } };
+  // 只有 A 变了，部分数据里只有 A
+  const r = Core.applyRemoteChanges(st, { materials: [{ code: 'A', name: '甲改' }] },
+    { syncedKeys: st.__syncedKeys });
+  assert.equal(st.materials.length, 3, 'B、C 不在增量里，绝不能被当成「飞书删了」');
+  assert.equal(st.materials.find(m => m.code === 'A').name, '甲改');
+  assert.equal(r.updated, 1);
+  assert.equal(r.created, 0);
+});
+
+test('增量合并：增量里的新记录会被加入', () => {
+  const st = { materials: [{ code: 'A' }], transactions: [], txnSeq: 0 };
+  const r = Core.applyRemoteChanges(st, { materials: [{ code: 'A' }, { code: 'NEW', name: '新来的' }] }, {});
+  assert.equal(r.created, 1);
+  assert.equal(st.materials.length, 2);
+  assert.equal(st.materials.find(m => m.code === 'NEW').name, '新来的');
+});
+
+test('增量合并：飞书空值不覆盖本地非空值（与全量合并同语义）', () => {
+  const st = { materials: [{ code: 'A', name: '本地名', zone: 'M-01' }], transactions: [], txnSeq: 0 };
+  Core.applyRemoteChanges(st, { materials: [{ code: 'A', name: '', zone: 'M-01' }] }, {});
+  assert.equal(st.materials[0].name, '本地名', '空值不能把本地真值清掉');
+});
+
+test('增量合并：protect 名单里的字段以本地为准', () => {
+  const st = { workorders: [{ code: 'W1', status: '部分执行' }], transactions: [], txnSeq: 0 };
+  Core.applyRemoteChanges(st, { workorders: [{ code: 'W1', status: '未执行' }] },
+    { protect: { workorders: { W1: ['status'] } } });
+  assert.equal(st.workorders[0].status, '部分执行', '推不上去的字段不能被飞书旧值打回');
+});
+
+test('增量合并：未出现在增量里的表完全不动', () => {
+  const st = { materials: [{ code: 'A' }], members: [{ code: 'M1', name: '甲' }], transactions: [], txnSeq: 0 };
+  Core.applyRemoteChanges(st, { materials: [{ code: 'A', name: 'x' }] }, {});
+  assert.equal(st.members.length, 1);
+  assert.equal(st.members[0].name, '甲');
+});
+
+test('增量合并：流水合并后仍然新的在前、txnSeq 单调递增', () => {
+  const st = { transactions: [{ seq: 1, matCode: 'A', delta: 1 }], txnSeq: 1, materials: [] };
+  Core.applyRemoteChanges(st, { transactions: [{ seq: 3, matCode: 'A', delta: 1 }, { seq: 2, matCode: 'A', delta: 1 }] }, {});
+  assert.deepEqual(st.transactions.map(t => t.seq), [3, 2, 1]);
+  assert.equal(st.txnSeq, 3);
+});
+
+test('增量合并：syncedKeys 取并集（增量见过的键要并进基线）', () => {
+  const st = { materials: [{ code: 'A' }, { code: 'B' }], transactions: [], txnSeq: 0, __syncedKeys: { materials: ['A'] } };
+  const r = Core.applyRemoteChanges(st, { materials: [{ code: 'B' }] }, { syncedKeys: st.__syncedKeys });
+  assert.deepEqual(r.syncedKeys.materials.sort(), ['A', 'B']);
+});
+
+test('增量合并【关键】不修改传入的远端对象（避免共享引用后被本地编辑污染）', () => {
+  const st = { materials: [], transactions: [], txnSeq: 0 };
+  const remote = { materials: [{ code: 'A', name: '来自网络' }] };
+  Core.applyRemoteChanges(st, remote, {});
+  st.materials[0].name = '本地改过';
+  assert.equal(remote.materials[0].name, '来自网络', 'state 里的对象不能和响应体共享引用');
+});

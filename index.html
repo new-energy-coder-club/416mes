@@ -536,12 +536,13 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 <script src="lib/outbox.js"></script>
 <script src="lib/store.js"></script>
 <script src="lib/replay-checkpoint.js"></script>
+<script src="lib/incremental.js"></script>
 <script>
 /* ================= 416MES 应用逻辑 ================= */
 'use strict';
 
 /* 应用版本：改到用户看得见的行为时手动 +1，页脚会显示，方便确认线上跑的是哪一版 */
-const APP_VERSION = '1.5.2';   // Phase 2：自动补推 + 数据一致性面板 + 启动顺序修复
+const APP_VERSION = '1.6.0';   // Phase 2：增量协议（10 秒探测 / 只拉变化行 / 隐藏暂停 / 恢复即拉）
 
 /* ---------- 标签类型配置 ---------- */
 const TYPES = {
@@ -567,6 +568,7 @@ if (!CORE) {
 const OUTBOX = window.Outbox;
 const STORE = window.MesStore;
 const CHECKPOINT = window.MesReplayCheckpoint;
+const INC = window.MesIncremental;
 if (!OUTBOX) {
   document.body.insertAdjacentHTML('afterbegin',
     '<div style="background:#d33a2c;color:#fff;padding:12px 20px;font-size:14px">⚠️ 缺少 lib/outbox.js，离线队列无法工作（离线期间的改动会丢）。请确认 lib/outbox.js 与 index.html 一起部署后刷新。</div>');
@@ -578,6 +580,7 @@ if (!STORE) {
   throw new Error('缺少 lib/store.js（本地真源仓储模块）');
 }
 if (!CHECKPOINT) throw new Error('缺少 lib/replay-checkpoint.js（账本 checkpoint 模块）');
+if (!INC) throw new Error('缺少 lib/incremental.js（增量协议模块）');
 const NEC_TYPE_NAMES = { RW: '任务', LL: '领料', CG: '采购', WX: '维修', HD: '活动', QT: '其他' };
 const NEC_STATUS = ['待处理', '进行中', '已完成', '已取消'];
 const LS_KEY = 'mes416_state_v1';
@@ -1719,6 +1722,8 @@ async function cloudSync({ silent = false } = {}) {
     await fsFlushQueue();          // 这条通路也能写，积压的离线队列在这里补上
     await autoPushPending();       // 「本地有、飞书没有」的新建记录同样自动补推
     runReconcile();
+    await fsInitWatermarks();      // 同上：全量之后把水位顶到最新
+    fsStartPolling();
     if (!silent) alert('云端同步完成：' + mergeStatText2(stat));
     return stat;
   } catch (err) {
@@ -3006,6 +3011,118 @@ function renderAlignBox() {
   });
 }
 
+/* ================= Phase 2：增量协议（探测 → 只拉变化的 → 低频键对账） =================
+   三层读路径：
+     ① probe   每表 pageSize=1 取最新时间戳 + 条数，8 表合计约 1KB。零变化时**不发任何内容请求**。
+     ② pull    只拉「最后更新时间」比水位新的行，倒序翻页到水位就停。
+     ③ census  低频完整键集合对账，用于发现飞书侧硬删（删除三重闸门在 lib/incremental.js）。
+   只用 sort 不用 filter：实测飞书 filter 的日期比较 5 种写法全部失败。 */
+
+const POLL_ACTIVE_MS = 10000;    // 可见 + 2 分钟内有操作
+const POLL_IDLE_MS = 60000;      // 可见但闲置
+const POLL_IDLE_AFTER = 120000;  // 超过这么久没操作就算闲置
+
+let _pollTimer = null;
+let _pollBusy = false;
+let _lastUserActionAt = Date.now();
+
+/** 水位随 state 一起落盘（IndexedDB），刷新/换页面不会丢 */
+function fsWatermarks() {
+  state.__watermarks = state.__watermarks || {};
+  return state.__watermarks;
+}
+function markUserAction() { _lastUserActionAt = Date.now(); }
+
+async function fsPostIncremental(body) {
+  const r = await fetch(fsWriteBase + '/api/feishu/incremental', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
+    body: JSON.stringify(body)
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!d.ok) throw new Error(d.error || ('HTTP ' + r.status));
+  return d;
+}
+
+/**
+ * 初始化水位：全量拉完之后把水位顶到「当前最新」，
+ * 这样第一次增量就是真正的增量，不会又退化成一次全量。
+ */
+async function fsInitWatermarks() {
+  try {
+    const d = await fsPostIncremental({ mode: 'probe' });
+    const wms = fsWatermarks();
+    Object.entries(d.report.tables || {}).forEach(([k, p]) => {
+      if (p && !p.error) wms[k] = { ts: Number(p.latest || 0), seen: [], total: Number(p.total || 0) };
+    });
+    save();
+  } catch (e) { log('⚠️ 增量水位初始化失败（下次会退化成一次全量拉取）：' + e.message); }
+}
+
+/** 一次增量同步：先探测，只有真变了才拉内容。返回实际拉到的行数 */
+async function fsIncrementalSync() {
+  if (_pollBusy || (!fsOnline && !cloudOnline)) return 0;
+  _pollBusy = true;
+  try {
+    const d = await fsPostIncremental({ mode: 'probe' });
+    const wms = fsWatermarks();
+    const changed = [];
+    Object.entries(d.report.tables || {}).forEach(([k, p]) => {
+      if (!p || p.error) return;
+      if (INC.probeSaysChanged({ latest: p.latest, total: p.total }, wms[k] || { ts: 0, seen: [] })) changed.push(k);
+    });
+    if (!changed.length) return 0;        // 零变化：一个内容请求都不发
+
+    let total = 0;
+    for (const key of changed) {
+      let r;
+      try { r = await fsPostIncremental({ mode: 'pull', table: key, watermark: wms[key] || { ts: 0, seen: [] } }); }
+      catch (e) { log('⚠️ 增量拉取 ' + (TABLE_LABEL[key] || key) + ' 失败：' + e.message); continue; }
+      if (!r.records || !r.records.length) { wms[key] = r.watermark; continue; }
+
+      const partial = {}; partial[key] = r.records;
+      // 增量合并**绝不判删**：部分数据不知道整表键集合，拿它判删会清空整张表
+      const stat = CORE.applyRemoteChanges(state, partial, {
+        syncedKeys: state.__syncedKeys, protect: state.__pushBlocked
+      });
+      state.__syncedKeys = stat.syncedKeys;
+      wms[key] = r.watermark;
+      total += r.records.length;
+
+      if (key === 'workorders') mergeSerials({ workorders: r.records });   // 工单号计数器跟上
+      if (key === 'materials') refreshMatDatalist();
+    }
+    if (total) {
+      save();
+      renderLedger(); renderTxns(); renderOperators(); renderMembers(); renderWip();
+      log('⚡ 增量同步：' + changed.map(k => TABLE_LABEL[k] || k).join('、') + ' 共 ' + total + ' 行');
+      runReconcile();   // 让「数据一致性」面板反映最新条数
+    }
+    return total;
+  } finally { _pollBusy = false; }
+}
+
+/** 轮询档位：可见才跑，闲置降频，隐藏暂停 */
+function fsSchedulePoll() {
+  if (_pollTimer) { clearTimeout(_pollTimer); _pollTimer = null; }
+  if (document.visibilityState === 'hidden') return;   // 页面藏起来就不打扰飞书
+  if (!fsOnline && !cloudOnline) return;               // 离线时不空转
+  const idle = Date.now() - _lastUserActionAt > POLL_IDLE_AFTER;
+  _pollTimer = setTimeout(async () => {
+    _pollTimer = null;
+    try { await fsIncrementalSync(); } catch (e) { log('⚠️ 增量同步失败：' + e.message); }
+    fsSchedulePoll();
+  }, idle ? POLL_IDLE_MS : POLL_ACTIVE_MS);
+}
+function fsStartPolling() { fsSchedulePoll(); }
+document.addEventListener('visibilitychange', () => { fsSchedulePoll(); });
+['click', 'keydown', 'change'].forEach(ev => document.addEventListener(ev, markUserAction, true));
+window.addEventListener('online', async () => {
+  log('🌐 网络恢复：先补交离线队列，再拉最新');
+  try { await fsFlushQueue(); } catch (e) { /* 下面单独告警 */ }
+  try { await fsIncrementalSync(); } catch (e) { log('⚠️ 恢复后增量同步失败：' + e.message); }
+  fsSchedulePoll();
+});
+
 /** 自动补推的上限：超过这个数就不敢自动推，必须人在「对齐」面板确认 */
 const AUTO_PUSH_MAX = 50;
 /** 本机是否已经与飞书对齐过（有基线）。首次同步时不敢自动补推，见下 */
@@ -3419,6 +3536,8 @@ async function fsBoot() {
     refreshStatusHint();
     runReconcile();                // 只读核对飞书缺列 / 缺选项，呈现到对齐面板
     log('☁️ 飞书同步：' + mergeStatText2(stat));
+    await fsInitWatermarks();      // 全量拉完 → 水位顶到当前最新，之后走增量
+    fsStartPolling();              // Phase 2：10 秒探测一次，只有变了才拉内容
   } catch (e) {
     fsOnline = false; refreshStatusHint();
     // 真源服务（feishu-server / 隧道）不可达时，退回云端接口 —— 同一份飞书数据。

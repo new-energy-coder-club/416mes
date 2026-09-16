@@ -524,6 +524,99 @@
     return { ok: true, delta: r.delta, before: r.before, balance: r.balance, txn: r.txn };
   }
 
+  /* ================= 增量合并（Phase 2） ================= */
+
+  /**
+   * 增量合并：把「只包含变化行」的远端数据应用到本地。
+   *
+   * 与 mergeRemote 的关键区别：**这里绝不做删除判定**。
+   * 增量数据天然不知道整张表的键集合，拿它当全量去比会得出
+   * 「本地多出来的全部被删了」—— 一次增量就能清空整张表。
+   * 删除只能由 censusTable（完整键集合对账）判定，且要过三重闸门。
+   *
+   * 字段合并语义与 mergeRemote 保持一致（飞书空值不覆盖本地非空值；
+   * protect 名单里的字段以本地为准）。
+   *
+   * @returns {{created,updated,unchanged,keptLocal,protected,changes,syncedKeys,byTable}}
+   */
+  function applyRemoteChanges(state, partial, opts) {
+    opts = opts || {};
+    var synced = opts.syncedKeys || {};
+    var protect = opts.protect || {};
+    var stat = { created: 0, updated: 0, unchanged: 0, keptLocal: 0, protected: 0, changes: [], byTable: {} };
+    var nextSynced = {};
+    MERGE_TABLES.forEach(function (tbl) {
+      if (Array.isArray(synced[tbl.key])) nextSynced[tbl.key] = synced[tbl.key].slice();
+    });
+
+    MERGE_TABLES.forEach(function (tbl) {
+      var remoteArr = partial[tbl.key];
+      if (!Array.isArray(remoteArr)) return;                 // 这张表本次没变 → 完全不碰
+
+      var protTbl = protect[tbl.key] || {};
+      if (!Array.isArray(state[tbl.key])) state[tbl.key] = [];
+      var localArr = state[tbl.key];
+      var byKey = Object.create(null);
+      localArr.forEach(function (r) {
+        var v = r ? r[tbl.id] : null;
+        if (v !== undefined && v !== null && v !== '') byKey[String(v)] = r;
+      });
+      var seen = Object.create(null);
+      (nextSynced[tbl.key] || []).forEach(function (k) { seen[String(k)] = true; });
+
+      var t = { created: 0, updated: 0, unchanged: 0, keptLocal: 0, protected: 0 };
+      remoteArr.forEach(function (r) {
+        if (!r) return;
+        var v = r[tbl.id];
+        if (v === undefined || v === null || v === '') return;
+        var k = String(v);
+        seen[k] = true;
+        var local = byKey[k];
+        if (!local) {
+          // 深拷贝：增量记录来自网络响应，直接塞进 state 会与响应对象共享引用
+          var copy = JSON.parse(JSON.stringify(r));
+          localArr.push(copy); byKey[k] = copy; t.created++;
+          stat.changes.push({ table: tbl.key, id: k, kind: 'create' });
+          return;
+        }
+        var guarded = Object.create(null);
+        (protTbl[k] || []).forEach(function (f) { guarded[f] = true; });
+        var changed = [], kept = 0, held = 0;
+        Object.keys(r).forEach(function (f) {
+          var rv = r[f], lv = local[f];
+          if (guarded[f]) { held++; return; }
+          if (isBlank(rv) && !isBlank(lv)) { kept++; return; }
+          if (rv === lv) return;
+          if (typeof rv === 'number' && typeof lv === 'number' && Math.abs(rv - lv) < EPS) return;
+          local[f] = rv; changed.push(f);
+        });
+        if (changed.length) { t.updated++; stat.changes.push({ table: tbl.key, id: k, kind: 'update', fields: changed }); }
+        else t.unchanged++;
+        if (kept) t.keptLocal++;
+        if (held) t.protected++;
+      });
+
+      stat.created += t.created; stat.updated += t.updated; stat.unchanged += t.unchanged;
+      stat.keptLocal += t.keptLocal; stat.protected += t.protected;
+      stat.byTable[tbl.key] = t;
+      nextSynced[tbl.key] = Object.keys(seen);
+    });
+
+    // 流水仍然保持「新的在前」，否则界面顺序会乱
+    if (Array.isArray(state.transactions)) {
+      var withSeq = state.transactions.filter(function (x) { return x && x.seq != null; });
+      var noSeq = state.transactions.filter(function (x) { return !x || x.seq == null; });
+      withSeq.sort(function (a, b) { return (b.seq || 0) - (a.seq || 0); });
+      state.transactions = withSeq.concat(noSeq);
+      var mx = state.txnSeq || 0;
+      state.transactions.forEach(function (x) { if ((x.seq || 0) > mx) mx = x.seq || 0; });
+      state.txnSeq = mx;
+    }
+
+    stat.syncedKeys = nextSynced;
+    return stat;
+  }
+
   /* ================= 回放校验 ================= */
 
   /** 全量流水按时间正序（旧数据无 seq 视为在 seq 之前） */
@@ -1175,6 +1268,7 @@
     applyManualAdjust: applyManualAdjust,
     orderedTransactions: orderedTransactions,
     replayAudit: replayAudit,
+    applyRemoteChanges: applyRemoteChanges,
     recordScan: recordScan,
     scanHistoryFor: scanHistoryFor,
     lastTransactionFor: lastTransactionFor,
