@@ -29,7 +29,9 @@ function startMock() {
       { name: '余量', type: 2 }, { name: '关联单', type: 1 }, { name: '原因/备注', type: 1 },
       { name: '操作ID', type: 1 }
     ],
-    tblWIP: [{ name: '工单号', type: 1 }, { name: '类型', type: 1 }]
+    // 「类型」在**生产**里是单选，选项是全名（'LL 领料'）。之前这里写成普通文本、
+    // 值也写短码 'LL'，于是「拿短码去 filter 单选列」这个 bug 在测试里根本显不出来。
+    tblWIP: [{ name: '工单号', type: 1 }, { name: '类型', type: 3, options: ['LL 领料', 'BH 补货', 'JH 拣货', 'TL 退料'] }]
   };
   let idSeq = 100;
   const server = http.createServer((req, res) => {
@@ -173,17 +175,41 @@ test('接口 stock：非 POST 拒绝（405）', async (t) => {
 
 /* ================= /api/feishu/nextcode ================= */
 
-test('接口 nextcode：GET 取号，只读返回 next', async (t) => {
+test('接口 nextcode：GET 取号，只读返回 next（调用方传内部短码 LL）', async (t) => {
   const mock = await startMock();
-  mock.tables.tblWIP.rows.push({ '工单号': 'LL20260915004', '类型': 'LL' });
+  // 生产里这一列存的是单选选项全名 'LL 领料'，不是短码
+  mock.tables.tblWIP.rows.push({ '工单号': 'LL20260915004', '类型': 'LL 领料' });
   t.after(() => { mock.server.close(); cleanupEnv(); });
   const nextcode = loadHandler('api/feishu/nextcode.js', mock.port);
   const res = fakeRes();
   await nextcode(fakeReq('GET', '/api/feishu/nextcode?prefix=LL20260915&type=LL'), res);
   assert.equal(res.statusCode, 200, JSON.stringify(res.body));
   assert.equal(res.body.ok, true);
-  assert.equal(res.body.max, 4);
+  assert.equal(res.body.max, 4, '短码 LL 必须被换算成选项名「LL 领料」才查得到 —— 否则 max 恒为 0，跨设备防撞号形同虚设');
   assert.equal(res.body.next, 5);
+});
+
+test('接口 nextcode【P6 回归】传单选选项全名也要能查到（两种写法都支持）', async (t) => {
+  const mock = await startMock();
+  mock.tables.tblWIP.rows.push({ '工单号': 'BH20260915007', '类型': 'BH 补货' });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const nextcode = loadHandler('api/feishu/nextcode.js', mock.port);
+  const res = fakeRes();
+  await nextcode(fakeReq('GET', '/api/feishu/nextcode?prefix=BH20260915&type=' + encodeURIComponent('BH 补货')), res);
+  assert.equal(res.body.max, 7);
+});
+
+test('接口 nextcode【P6 关键】另一台设备建过单时，本机必须能取到更大的号', async (t) => {
+  const mock = await startMock();
+  // 本机计数器是 0（换浏览器/新设备），飞书里已经有 12 张当天的 LL 单
+  mock.tables.tblWIP.rows.push({ '工单号': 'LL20260915012', '类型': 'LL 领料' });
+  mock.tables.tblWIP.rows.push({ '工单号': 'LL20260915003', '类型': 'LL 领料' });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const nextcode = loadHandler('api/feishu/nextcode.js', mock.port);
+  const res = fakeRes();
+  await nextcode(fakeReq('GET', '/api/feishu/nextcode?prefix=LL20260915&type=LL'), res);
+  assert.equal(res.body.max, 12, '必须取飞书里的当天最大号');
+  assert.equal(res.body.next, 13, '取到 1 就会和已有工单撞号，而工单按业务键 upsert → 两张单互相覆盖');
 });
 
 test('接口 nextcode：缺 prefix → 400；非 GET/POST → 405', async (t) => {

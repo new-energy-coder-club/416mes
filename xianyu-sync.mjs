@@ -45,8 +45,14 @@ function loadConfig({ quiet = false } = {}) {
   catch (e) { throw new Error('xianyu-sync.config.json 解析失败：' + e.message); }
 }
 
-/* ---------- CSV 解析（支持引号包裹、逗号、双引号转义、CRLF） ---------- */
-function parseCsv(text) {
+/* ---------- 分隔符文本解析（CSV / TSV 共用） ----------
+ * 旧实现把 TSV「全局把 \t 换成 ,」再按 CSV 解析 —— 那是**数据损坏**：
+ *   行: XY-9 <TAB> 全新,未拆封 <TAB> 3 <TAB> 1290 <TAB> u
+ *   替换后: XY-9,全新,未拆封,3,1290,u   → 标题被逗号切成两列，后面全部右移/错位
+ *   实测结果：stock='未拆封'、售价=3、首图='1290'，真正的图片列被丢掉。
+ * 现在按**真实分隔符**解析（TSV 用 \t、CSV 用 ,），字段内的逗号/tab 都不再是分隔符。
+ */
+function parseDelimited(text, delim) {
   const rows = [];
   let row = [], field = '', inQuotes = false;
   const src = String(text).replace(/^\uFEFF/, '');   // 去 BOM
@@ -58,24 +64,53 @@ function parseCsv(text) {
         else inQuotes = false;
       } else field += c;
     } else if (c === '"') inQuotes = true;
-    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === delim) { row.push(field); field = ''; }
     else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
     else if (c === '\r') { /* 忽略，等 \n */ }
     else field += c;
   }
   if (field !== '' || row.length) { row.push(field); rows.push(row); }
+  /* 引号没闭合会把**后面所有行**吞进同一个字段（静默丢行）。
+     与其猜，不如明说 —— 这类文件通常是导出时标题里带了单个双引号（15"显示器）。 */
+  if (inQuotes) throw new Error('引号没有闭合：文件里有一个未配对的 \"（常见于标题含英寸符号，如 15\"显示器）。请把它写成 \"\" 或删掉。');
   if (!rows.length) return [];
   const header = rows[0].map(h => String(h).trim());
-  return rows.slice(1)
+  const ragged = [];
+  const out = rows.slice(1)
     .filter(r => r.some(v => String(v).trim() !== ''))
-    .map(r => { const o = {}; header.forEach((h, i) => o[h] = r[i] === undefined ? '' : String(r[i]).trim()); return o; });
+    .map((r, idx) => {
+      // 列数与表头不一致 → 记下来告警，不再静默错列/丢列
+      if (r.length !== header.length) ragged.push({ line: idx + 2, got: r.length, want: header.length });
+      const o = {};
+      header.forEach((h, i) => o[h] = r[i] === undefined ? '' : String(r[i]).trim());
+      return o;
+    });
+  if (ragged.length) {
+    const eg = ragged.slice(0, 3).map(x => '第 ' + x.line + ' 行 ' + x.got + '/' + x.want).join('、');
+    out.__ragged = ragged;   // 调用方读走后再删（数组上挂个非索引属性不影响遍历）
+    process.stderr.write('⚠️ 有 ' + ragged.length + ' 行列数与表头不一致（' + eg + '）—— 可能是分隔符或引号有问题，请核对\n');
+  }
+  return out;
+}
+function parseCsv(text) { return parseDelimited(text, ','); }
+function parseTsv(text) { return parseDelimited(text, '\t'); }
+
+/** 按内容猜分隔符：表头里 tab 比逗号多就是 TSV（不再只看扩展名） */
+function sniffDelim(text) {
+  const firstLine = String(text).split(/\r?\n/, 1)[0] || '';
+  const tabs = (firstLine.match(/\t/g) || []).length;
+  const commas = (firstLine.match(/,/g) || []).length;
+  return tabs > commas ? '\t' : ',';
 }
 
 /** 读外部数据文件：按扩展名 / 内容自动识别 JSON 或 CSV */
 function readRows(file) {
   const text = fs.readFileSync(file, 'utf8');
   const ext = path.extname(file).toLowerCase();
-  if (ext === '.csv' || ext === '.tsv') return parseCsv(ext === '.tsv' ? text.replace(/\t/g, ',') : text);
+  // .tsv 用真 tab 解析；.csv 用逗号。其它扩展名（如 .txt）按内容猜，而不是一律当 CSV ——
+  // 旧实现让 tab 分隔的 .txt 整行变成一个字段，全部行都被当成「缺 outer_id」静默跳过。
+  if (ext === '.tsv') return parseTsv(text);
+  if (ext === '.csv') return parseCsv(text);
   const trimmed = text.trim();
   if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
     const j = JSON.parse(trimmed);
@@ -85,7 +120,7 @@ function readRows(file) {
     }
     throw new Error('JSON 里找不到数组（支持的键：items / data / list / rows / products / result）');
   }
-  return parseCsv(text);
+  return sniffDelim(text) === '\t' ? parseTsv(text) : parseCsv(text);
 }
 
 /** 读备份文件；不存在时视为空台账 */
@@ -128,8 +163,31 @@ const argv = process.argv.slice(2);
 const cmd = argv[0];
 const dryRun = argv.includes('--dry-run');
 const positional = argv.filter(a => !a.startsWith('--'));
-const cfg = loadConfig({ quiet: true });
-const mergeOpts = { priceDivisor: cfg.priceDivisor == null ? 100 : cfg.priceDivisor };
+/* loadConfig 在 try 之外会绕过下面的 die()：配置文件写坏时直接抛未捕获异常、
+   打印一堆栈，用户看不到那句人话错误。这里就地兜住。 */
+let cfg;
+try { cfg = loadConfig({ quiet: true }); }
+catch (e) {
+  console.error('\n❌ ' + e.message);
+  console.error('   修好 xianyu-sync.config.json 里的 JSON 语法，或删掉它改用默认设置。');
+  process.exit(1);
+}
+/* 售价除数必须校验。旧实现来者不拒：配成 0 或 "" 时 `price / div` 得到 Infinity，
+   配成 "abc" 得 NaN —— 两者都 !== null，于是被当成合法成本写进物料，
+   最后 JSON.stringify 把 Infinity/NaN 序列化成 null，**把原有的成本静默抹成 null**
+   （备份文件里就写成了 "cost": null，没有任何告警，退出码还是 0）。
+   合理取值是 >0 的有限数；不合法就退回默认 100 并明确告知。 */
+const rawDivisor = cfg.priceDivisor;
+let priceDivisor = 100;
+if (rawDivisor == null) {
+  priceDivisor = 100;
+} else {
+  const d = Number(rawDivisor);
+  if (Number.isFinite(d) && d > 0) priceDivisor = d;
+  else process.stderr.write('⚠️ 配置里的 priceDivisor=' + JSON.stringify(rawDivisor) +
+    ' 不是大于 0 的有限数，已退回默认 100（否则会把成本算成 Infinity/NaN，落盘时静默变成 null）\n');
+}
+const mergeOpts = { priceDivisor };
 
 const DEFAULT_BACKUP = path.join(DIR, '416MES_备份.json');
 

@@ -29,6 +29,14 @@ const MAT_CATEGORY = { GJ: '工具', HC: '耗材', PJ: '配件', DZ: '电子件'
 const ROOT_CATEGORY = '416MES物料';
 const LOC_ROOTS = { shelf: '货架区', workstation: '工位区', container: '容器区' };
 
+/** 解析数字单元格：空 / 非数字 → null（绝不返回 0 冒充「数量就是 0」） */
+function numOrNull(v) {
+  const t = String(v == null ? '' : v).trim();
+  if (t === '') return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
 /* ---------- 配置 ---------- */
 function loadConfig() {
   if (!fs.existsSync(CONFIG_FILE)) return null;
@@ -43,6 +51,11 @@ function ask(question) {
 }
 
 /* ---------- InvenTree API 封装 ---------- */
+/** 单次请求超时（毫秒）。没有超时的话，对端黑洞会让 push 永久挂住。 */
+const API_TIMEOUT_MS = Number(process.env.INVENTREE_TIMEOUT_MS) > 0 ? Number(process.env.INVENTREE_TIMEOUT_MS) : 20000;
+/** 分页最多翻多少页（防御：服务端 next 指回自己时不能无限循环） */
+const MAX_LIST_PAGES = 200;
+
 async function api(cfg, method, urlPath, body, { dryRun = false } = {}) {
   const url = cfg.base_url.replace(/\/$/, '') + urlPath;
   if (dryRun && method !== 'GET') {
@@ -52,7 +65,8 @@ async function api(cfg, method, urlPath, body, { dryRun = false } = {}) {
   const res = await fetch(url, {
     method,
     headers: { 'Authorization': 'Token ' + cfg.token, 'Content-Type': 'application/json', 'Accept': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(API_TIMEOUT_MS)
   });
   if (!res.ok) {
     const text = await res.text();
@@ -64,11 +78,54 @@ async function api(cfg, method, urlPath, body, { dryRun = false } = {}) {
   const text = await res.text();
   return text ? JSON.parse(text) : {};
 }
-// 列表查询（兼容分页），返回数组
+/**
+ * 列表查询，**真的翻页**。
+ *
+ * 旧实现只发一次 GET，拿到第一页就返回 —— 而 InvenTree 的列表接口是 DRF 分页
+ * （返回 {count, next, results}）。四处「存在性检查」全都只看第一页，于是远程集合
+ * 超过一页时：已有 Part/库位/分类不在首页 → 判定「不存在」→ **重复创建**。
+ * 最严重的是库存：同一 part+location 的 StockItem 会越攒越多，读数时重复累加，
+ * 直接把库存算多。
+ *
+ * 翻页依据 next 字段（DRF 的标准做法），并带三个保险：
+ *  · 绝对 URL / 相对路径都认；
+ *  · 单页最多 MAX_LIST_PAGES 页，且 next 与上一页相同就停（防服务端自指死循环）；
+ *  · 拿不到 next 但拿到了 count 时，按已收条数补 offset 继续（有些配置不给 next）。
+ */
 async function apiList(cfg, urlPath, params = {}) {
-  const qs = new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString();
-  const data = await api(cfg, 'GET', urlPath + (qs ? '?' + qs : ''));
-  return Array.isArray(data) ? data : (data.results || []);
+  const base = new URL(cfg.base_url.replace(/\/$/, '') + urlPath);
+  Object.entries(params).forEach(([k, v]) => base.searchParams.set(k, String(v)));
+  const out = [];
+  let url = base.toString();
+  let expected = null;
+  const seen = new Set();
+  for (let page = 0; page < MAX_LIST_PAGES; page++) {
+    if (seen.has(url)) break;           // next 指回自己 → 停，别死循环
+    seen.add(url);
+    const data = await api(cfg, 'GET', url.replace(cfg.base_url.replace(/\/$/, ''), ''));
+    if (Array.isArray(data)) {          // 非分页（裸数组）：一次就是全部
+      out.push(...data);
+      return out;
+    }
+    out.push(...(data.results || []));
+    if (typeof data.count === 'number') expected = data.count;
+    if (!data.next) {
+      // 没有 next：如果 count 说明还有更多，就按 offset 继续要（兼容不返回 next 的配置）
+      if (expected !== null && out.length < expected) {
+        const u = new URL(url);
+        u.searchParams.set('limit', u.searchParams.get('limit') || '100');
+        u.searchParams.set('offset', String(out.length));
+        url = u.toString();
+        continue;
+      }
+      return out;
+    }
+    url = /^https?:/i.test(String(data.next))
+      ? String(data.next)
+      : new URL(String(data.next), cfg.base_url.replace(/\/$/, '') + urlPath).toString();
+  }
+  process.stderr.write('⚠️ ' + urlPath + ' 翻页超过 ' + MAX_LIST_PAGES + ' 页仍未结束，已停止（结果可能不全）\n');
+  return out;
 }
 
 /* ---------- init ---------- */
@@ -136,7 +193,11 @@ function readLedger(file) {
     materials: rows('物料台账').map(r => ({
       code: String(r['物料码']).trim(), name: String(r['名称']).trim(), spec: String(r['规格型号']).trim(),
       xy: String(r['闲鱼XY编号'] ?? '').trim(), loc: String(r['当前库位码']).trim(),
-      container: String(r['容器码'] ?? '').trim(), qty: Number(r['库存数量']) || 0, cost: Number(r['成本']) || 0
+      container: String(r['容器码'] ?? '').trim(),
+      /* 数量/成本**不能**写成 `Number(x) || 0`：空白或写错的单元格会变成 NaN，`|| 0`
+         把它吞成 0，然后 push 时 PATCH `quantity: 0` 上去 —— 远端库存被静默清零。
+         旧实现正是这样。这里保留 null 表示「这个格子没有有效数字」，由 push 决定跳过。 */
+      qty: numOrNull(r['库存数量']), cost: numOrNull(r['成本'])
     })).filter(m => m.code),
     locations: rows('库位').map(r => ({
       code: String(r['库位码']).trim(), kind: String(r['类型']).trim(), desc: String(r['说明'] ?? '').trim()
@@ -230,17 +291,21 @@ async function push(file, dryRun) {
     await ensureBarcode(cfg, 'MAT:' + m.code, { part: partIdByCode[m.code] }, { dryRun });
   }
 
+  stat.badQty = stat.badQty || 0;
   // 4) 库存 → StockItem（数量以台账为准；库位优先容器）
   console.log('④ 库存 StockItem');
   for (const m of materials) {
     const partPk = partIdByCode[m.code];
     const locPk = locIdByCode[m.container] || locIdByCode[m.loc] || null;
     if (!partPk || partPk < 0) { console.log(`  ⚠️  ${m.code} 无 part（dry-run 下跳过库存）`); continue; }
+    /* 数量没解析出来（Excel 那格是空的或写错了）→ **跳过**，绝不推到远端。
+       旧实现把非法值当 0，然后 PATCH quantity:0 —— 远端库存被静默清零。 */
+    if (m.qty === null) { console.log(`  ⚠️  ${m.code} 台账里「库存数量」不是有效数字，已跳过（不改远端库存）`); stat.badQty++; continue; }
     const found = await apiList(cfg, '/api/stock/', { part: partPk, location: locPk ?? '' });
     const hit = found.find(s => s.part === partPk && (s.location ?? null) === locPk);
     if (!hit) {
       if (m.qty > 0) {
-        await api(cfg, 'POST', '/api/stock/', { part: partPk, location: locPk, quantity: m.qty, purchase_price: m.cost || undefined, status: 10 }, { dryRun });
+        await api(cfg, 'POST', '/api/stock/', { part: partPk, location: locPk, quantity: m.qty, purchase_price: m.cost == null ? undefined : m.cost, status: 10 }, { dryRun });
         stat.stock++;
         console.log(`  🆕 ${m.code} ×${m.qty} @ ${m.container || m.loc || '(无库位)'}`);
       }
@@ -251,7 +316,10 @@ async function push(file, dryRun) {
     } else { console.log(`  ⏭  ${m.code} 库存一致`); }
   }
 
-  console.log(`\n完成：新建分类 ${stat.cat}，新建库位/容器 ${stat.loc}，新建物料 ${stat.part}，库存变更 ${stat.stock}，物料无变化 ${stat.skip}${dryRun ? '（均未实际执行）' : ''}`);
+  console.log(`\n完成：新建分类 ${stat.cat}，新建库位/容器 ${stat.loc}，新建物料 ${stat.part}，库存变更 ${stat.stock}，物料无变化 ${stat.skip}` +
+    (stat.badQty ? `，**跳过数量非法 ${stat.badQty} 条**（远端库存未改动，请回台账修数字）` : '') +
+    (stat.barcodeFail ? `，条码关联失败 ${stat.barcodeFail} 条` : '') +
+    (dryRun ? '（均未实际执行）' : ''));
 }
 
 /* ---------- status ---------- */
