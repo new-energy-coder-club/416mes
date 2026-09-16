@@ -160,3 +160,23 @@ test('P5-4 必需列（库存数量）的检查不能被「业务键命中」短
   assert.ok(src.indexOf('if (missingReq.length)') < src.indexOf('if (idx < 0) return { present: false'),
     '必需列检查必须在「业务键缺失」判断之前');
 });
+
+test('B8【关键】导入的快照/回滚声明必须在 try 之外，否则 catch 里够不着（回滚形同虚设）', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const onload = src.indexOf('rd.onload = ev => {');
+  assert.ok(onload > 0, '找不到 rd.onload 导入处理器');
+  const win = src.slice(onload, onload + 4000);
+  const iDecl = win.indexOf('const rollbackImport');
+  const iTry = win.indexOf('try {');
+  assert.ok(iDecl > 0, '找不到 const rollbackImport');
+  assert.ok(iTry > 0, '找不到 try {');
+  assert.ok(iDecl < iTry,
+    'const rollbackImport 写在 try 块内 —— const 是块级作用域，catch 里的 rollbackImport() ' +
+    '会抛 "rollbackImport is not defined"，回滚从来没生效过（实测故障注入抓到过）');
+  assert.ok(win.indexOf('const takeImportSnapshot') < iTry, 'takeImportSnapshot 同样必须提到 try 之外');
+  // catch 里确实调用了它（否则提出来也没意义）
+  const iCatch = src.indexOf('rollbackImport(); save();', onload);
+  assert.ok(iCatch > iTry, 'catch 里应当调用 rollbackImport()');
+});
