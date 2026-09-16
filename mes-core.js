@@ -682,28 +682,39 @@
    * 按 seq 升序排列流水（无 seq 的旧数据排在最后，保持原相对顺序）。
    *
    * @param {object} state
-   * @param {boolean} [assumeOrdered] 调用方**保证** state.transactions 已经按
-   *   「seq 降序、无 seq 的排在尾部」排列（这正是全站的约定：recordTransaction 用
-   *   unshift、mergeRemote / applyMerge / applyMerge 的流水后处理都会重新降序排）。
-   *   为真时跳过排序，直接反向遍历 —— 实测 10 万条时排序占总耗时的 20% 左右。
-   *   名字里带 "assume" 是因为这里**不做校验**（校验本身要 O(n) 且要做比较，
-   *   省下来的时间就没了）；传错只会让顺序不对，不会算错余额链，
-   *   因为链式校验是按物料分组、组内按 seq 升序做的。
+   * @param {boolean} [assumeOrdered] 提示「state.transactions 大概已经是 seq 降序」
+   *   （全站约定：recordTransaction 用 unshift、mergeRemote/applyMerge 的流水后处理
+   *   都会重新降序排）。为真时**先花 O(n) 次纯数字比较确认**，确认通过才跳过排序。
+   *
+   *   ⚠️ 这里必须校验，不能信任调用方 —— 第一版就是不校验直接反向遍历，
+   *   结果传进来一个升序数组时，链式校验的「起算点」变成了最后一条，
+   *   于是把一个**完全健康**的账本报成 2497 条不一致。这个模块的全部意义就是
+   *   判断账本对不对，一个能因为参数顺序就把结论反转的"优化"是不能接受的。
+   *   校验用简单数值比较（发现逆序立刻退出、不分配、不调比较器），
+   *   比 sort 便宜得多，所以仍然有净收益。
    */
+  /** 严格 seq 降序？（纯数值比较，发现逆序立刻返回 false；任何一条没有 seq 就返回 false） */
+  function isDescendingBySeq(all) {
+    var last = Infinity;
+    for (var i = 0; i < all.length; i++) {
+      var t = all[i];
+      if (!t) continue;
+      var s = t.seq;
+      if (s === null || s === undefined) return false;   // 有 legacy 行 → 交给慢路径
+      if (typeof s !== 'number' || !isFinite(s)) return false;
+      if (s > last) return false;
+      last = s;
+    }
+    return true;
+  }
+
   function orderedTransactions(state, assumeOrdered) {
     var all = ((state && state.transactions) || []).slice();
-    if (assumeOrdered) {
-      var legacy0 = [], seqd0 = [];
-      for (var i = all.length - 1; i >= 0; i--) {
-        var t = all[i];
-        if (t && t.seq !== null && t.seq !== undefined) seqd0.push(t);
-      }
-      // legacy（无 seq）在全站约定里排在尾部 → 反向遍历时最先遇到，需还原原顺序
-      for (var j = 0; j < all.length; j++) {
-        var u = all[j];
-        if (!u || u.seq === null || u.seq === undefined) legacy0.push(u);
-      }
-      return legacy0.concat(seqd0);
+    if (assumeOrdered && isDescendingBySeq(all)) {
+      var seqd0 = new Array(all.length);
+      // 已确认严格降序且无 legacy → 反向遍历即得升序
+      for (var i = all.length - 1, k = 0; i >= 0; i--) seqd0[k++] = all[i];
+      return seqd0;
     }
     var legacy = all.filter(function (t) { return t.seq === null || t.seq === undefined; }).reverse();
     var seqd = all.filter(function (t) { return t.seq !== null && t.seq !== undefined; })

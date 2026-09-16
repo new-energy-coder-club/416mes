@@ -1583,3 +1583,42 @@ test('reconcileTxnSeq：重试时若服务端那个号已在本地，报 noop �
   assert.equal(r.action, 'noop', '已经对好了就是 noop，不是 missing');
   assert.equal(st.transactions.length, 1, '不该增减流水');
 });
+
+/* ---------- P7：assumeOrdered 必须自证，不能信任调用方 ---------- */
+
+test('replayAudit【P7 关键】assumeOrdered 传错顺序时不能把健康账本报成不一致', () => {
+  // 升序数组 + assumeOrdered：第一版实现会报告 2497 条"不一致"（把健康账本判成坏的）
+  const txns = [];
+  for (let i = 1; i <= 2500; i++) txns.push({ seq: i, matCode: 'M' + (i % 3), delta: 1, balance: Math.ceil(i / 3), type: 'x', time: 't' });
+  const st = { materials: [], transactions: txns, txnSeq: 2500 };   // ← 升序（不符合全站约定）
+  const full = Core.replayAudit(st);
+  const ass = Core.replayAudit(st, { assumeOrdered: true });
+  assert.equal(full.mismatches.length, 0, '这份账本本身是健康的');
+  assert.equal(ass.mismatches.length, 0, 'assumeOrdered 传错顺序时必须自动退回排序，绝不能把健康账本报成坏的');
+  assert.equal(ass.status, full.status);
+
+  // 降序（全站约定）+ assumeOrdered：走快路径，结论同样要一致
+  const st2 = { materials: [], transactions: txns.slice().reverse(), txnSeq: 2500 };
+  const a2 = Core.replayAudit(st2, { assumeOrdered: true });
+  assert.equal(a2.mismatches.length, 0);
+  assert.equal(a2.status, full.status);
+});
+
+test('replayAudit【P7】有 legacy（无 seq）流水时 assumeOrdered 自动走慢路径', () => {
+  const st = {
+    materials: [],
+    transactions: [
+      { seq: 2, matCode: 'M', delta: 1, balance: 2, type: 'x', time: 't' },
+      { seq: 1, matCode: 'M', delta: 1, balance: 1, type: 'x', time: 't' },
+      { matCode: 'M', delta: 0, balance: 2, type: 'x', time: 't' }     // 无 seq
+    ],
+    txnSeq: 2
+  };
+  // 真正要保证的是「加了 assumeOrdered 之后结论不变」，而不是这份构造数据本身一致：
+  // legacy 行的排序规则决定了期初从哪里取，那是既有语义，不在本次改动范围内。
+  const full = Core.replayAudit(st);
+  const r = Core.replayAudit(st, { assumeOrdered: true });
+  assert.equal(r.mismatches.length, full.mismatches.length, 'legacy 在飞时必须自动走慢路径，结论与全量一致');
+  assert.deepEqual(r.mismatches.map(m => m.seq), full.mismatches.map(m => m.seq));
+  assert.equal(r.status, full.status);
+});
