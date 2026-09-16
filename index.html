@@ -1717,6 +1717,7 @@ async function cloudSync({ silent = false } = {}) {
     // 若这里不改状态，部署在 Vercel 上时会出现「数据明明同步了，顶部却显示 ⚪ 离线」。
     cloudOnline = true; refreshStatusHint();
     await fsFlushQueue();          // 这条通路也能写，积压的离线队列在这里补上
+    await autoPushPending();       // 「本地有、飞书没有」的新建记录同样自动补推
     runReconcile();
     if (!silent) alert('云端同步完成：' + mergeStatText2(stat));
     return stat;
@@ -2977,7 +2978,45 @@ function renderAlignBox() {
   });
 }
 
-/** 把合并时记下的「本地新建、飞书还没有」的记录推到飞书 */
+/** 自动补推的上限：超过这个数就不敢自动推，必须人在「对齐」面板确认 */
+const AUTO_PUSH_MAX = 50;
+/** 本机是否已经与飞书对齐过（有基线）。首次同步时不敢自动补推，见下 */
+let _hadFeishuBaseline = false;
+
+/**
+ * 自动补推「本地有、飞书没有」的记录。
+ *
+ * 为什么需要：mergeRemote 会把这类记录标成 pending，旧版**只显示不推送** ——
+ * 于是它们永远停在本地（人员台账里多出来的人就是这么来的）。
+ *
+ * 两条安全边界：
+ *   ① **首次同步不自动推**。本机从未与飞书对齐过时，本地所有记录都算「待推送」，
+ *      此时无法区分「用户有意导入」和「走错浏览器看到的旧数据」，
+ *      贸然全推等于把一整份旧数据灌进真源 —— 必须人工确认。
+ *   ② **超过 AUTO_PUSH_MAX 条转人工**，避免一次异常批量灌数据。
+ */
+async function autoPushPending() {
+  const pending = pendingSummary();
+  const count = Object.values(pending).reduce((a, v) => a + v.length, 0);
+  if (!count) return 0;
+  if (!_hadFeishuBaseline) {
+    log('ℹ️ 本机还没有与飞书对齐过，「对齐」面板已列出 ' + count + ' 条本地记录，请确认后手动推送');
+    return 0;
+  }
+  if (count > AUTO_PUSH_MAX) {
+    log('⚠️ 本地有 ' + count + ' 条记录飞书里没有（超过自动补推上限 ' + AUTO_PUSH_MAX + ' 条），已在「对齐」面板列出，请确认后手动推送');
+    return 0;
+  }
+  try {
+    const n = await pushPending(pending);
+    if (n) log('☁️ 自动补推本地新建记录 ' + n + ' 条到飞书');
+    return n;
+  } catch (e) {
+    log('⚠️ 自动补推失败（已入离线队列，稍后会重试）：' + e.message);
+    return 0;
+  }
+}
+
 async function pushPending(list) {
   const src = list || pendingSummary();
   let n = 0;
@@ -3054,6 +3093,8 @@ function dropSeedDemoRecords(remote) {
 /** 云端 → 本地：统一走 mes-core 的 mergeRemote，并把「本地新建」记下来待推送 */
 function fsMerge(remote) {
   dropSeedDemoRecords(remote);   // 出厂示例不属于「本地新建」，先清掉再合并，否则会被当成待推送
+  // 必须**在合并之前**判断本机有没有基线：合并后 __syncedKeys 就被本次结果覆盖了。
+  _hadFeishuBaseline = !!(state.__syncedKeys && Object.keys(state.__syncedKeys).length);
   const stat = CORE.mergeRemote(state, remote, {
     syncedKeys: state.__syncedKeys,
     protect: state.__pushBlocked
@@ -3336,6 +3377,7 @@ async function fsBoot() {
     const stat = fsMerge(remote);
     save(); renderLedger(); renderTxns(); renderOperators(); renderMembers(); renderWip();
     await fsFlushQueue();          // 网络恢复后先把积压的写入补上
+    await autoPushPending();       // 再把「本地有、飞书没有」的新建记录补推上去
     refreshStatusHint();
     runReconcile();                // 只读核对飞书缺列 / 缺选项，呈现到对齐面板
     log('☁️ 飞书同步：' + mergeStatText2(stat));

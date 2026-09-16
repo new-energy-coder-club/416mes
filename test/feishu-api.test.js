@@ -730,14 +730,14 @@ test('阶段0·工单取号：只读，绝不写任何数据', async (t) => {
    需要验证「飞书缺列/缺选项」时的行为，用下面的 typesWithGaps() 显式造一份缺的 ——
    把缺口写成显式的，比依赖「mock 恰好没建那列」可靠，也不会随着生产补列而悄悄失效。 */
 const ALL_TABLE_TYPES = {
-  tblMAT: [{ name: '物料码', type: 1 }, { name: '名称', type: 1 }, { name: '规格型号', type: 1 }, { name: '闲鱼XY编号', type: 1 }, { name: '当前库位码', type: 1 }, { name: '容器码', type: 1 }, { name: '库存数量', type: 2 }, { name: '安全库存', type: 2 }, { name: '成本', type: 2 }, { name: '模块区', type: 1 }],
-  tblLOC: [{ name: '库位码', type: 1 }, { name: '类型', type: 3, options: ['货架', '工位', '站点', '模块区', '空地'] }, { name: '说明', type: 1 }, { name: '授权人员', type: 1 }],
-  tblCTN: [{ name: '容器码', type: 1 }, { name: '容器类型', type: 3, options: ['A4四抽收纳盒', '三连格文件盒', '斜口零件盒', '6040周转箱', '四层四格牛皮纸收纳盒', '开放式收纳格'] }, { name: '规格', type: 1 }, { name: '当前库位码', type: 1 }],
-  tblMBR: [{ name: '编号', type: 1 }, { name: '姓名', type: 1 }, { name: '学号', type: 1 }, { name: '部门/SIG', type: 1 }, { name: '职务', type: 3, options: ['负责人', '成员', '本科生'] }, { name: '电话', type: 13 }, { name: '备注', type: 1 }, { name: '标签', type: 1 }, { name: 'PIN码', type: 1 }],
-  tblITM: [{ name: '物品码', type: 1 }, { name: '名称', type: 1 }, { name: '规格型号', type: 1 }, { name: '库位码', type: 1 }],
-  tblMAN: [{ name: '手册码', type: 1 }, { name: '名称', type: 1 }, { name: '版本', type: 1 }, { name: '库位码', type: 1 }],
-  tblWIP: [{ name: '工单号', type: 1 }, { name: '类型', type: 3, options: ['LL 领料', 'BH 补货', 'JH 拣货', 'TL 退料'] }, { name: '日期', type: 5 }, { name: '明细', type: 1 }, { name: '状态', type: 3, options: ['未执行', '已执行', '部分执行', '已取消'] }, { name: '执行时间', type: 5 }, { name: '执行数量', type: 1 }, { name: '执行批次', type: 1 }, { name: '冲销记录', type: 1 }, { name: '取消记录', type: 1 }],
-  tblTXN: [{ name: '流水号', type: 1 }, { name: '时间', type: 5 }, { name: '操作人', type: 1 }, { name: '类型', type: 1 }, { name: '物料码', type: 1 }, { name: '变动', type: 2 }, { name: '余量', type: 2 }, { name: '关联单', type: 1 }, { name: '原因/备注', type: 1 }, { name: '操作ID', type: 1 }]
+  tblMAT: [{ name: '物料码', type: 1 }, { name: '名称', type: 1 }, { name: '规格型号', type: 1 }, { name: '闲鱼XY编号', type: 1 }, { name: '当前库位码', type: 1 }, { name: '容器码', type: 1 }, { name: '库存数量', type: 2 }, { name: '安全库存', type: 2 }, { name: '成本', type: 2 }, { name: '模块区', type: 1 }, { name: '最后更新时间', type: 1002 }],
+  tblLOC: [{ name: '库位码', type: 1 }, { name: '类型', type: 3, options: ['货架', '工位', '站点', '模块区', '空地'] }, { name: '说明', type: 1 }, { name: '授权人员', type: 1 }, { name: '最后更新时间', type: 1002 }],
+  tblCTN: [{ name: '容器码', type: 1 }, { name: '容器类型', type: 3, options: ['A4四抽收纳盒', '三连格文件盒', '斜口零件盒', '6040周转箱', '四层四格牛皮纸收纳盒', '开放式收纳格'] }, { name: '规格', type: 1 }, { name: '当前库位码', type: 1 }, { name: '最后更新时间', type: 1002 }],
+  tblMBR: [{ name: '编号', type: 1 }, { name: '姓名', type: 1 }, { name: '学号', type: 1 }, { name: '部门/SIG', type: 1 }, { name: '职务', type: 3, options: ['负责人', '成员', '本科生'] }, { name: '电话', type: 13 }, { name: '备注', type: 1 }, { name: '标签', type: 1 }, { name: 'PIN码', type: 1 }, { name: '最后更新时间', type: 1002 }],
+  tblITM: [{ name: '物品码', type: 1 }, { name: '名称', type: 1 }, { name: '规格型号', type: 1 }, { name: '库位码', type: 1 }, { name: '最后更新时间', type: 1002 }],
+  tblMAN: [{ name: '手册码', type: 1 }, { name: '名称', type: 1 }, { name: '版本', type: 1 }, { name: '库位码', type: 1 }, { name: '最后更新时间', type: 1002 }],
+  tblWIP: [{ name: '工单号', type: 1 }, { name: '类型', type: 3, options: ['LL 领料', 'BH 补货', 'JH 拣货', 'TL 退料'] }, { name: '日期', type: 5 }, { name: '明细', type: 1 }, { name: '状态', type: 3, options: ['未执行', '已执行', '部分执行', '已取消'] }, { name: '执行时间', type: 5 }, { name: '执行数量', type: 1 }, { name: '执行批次', type: 1 }, { name: '冲销记录', type: 1 }, { name: '取消记录', type: 1 }, { name: '最后更新时间', type: 1002 }],
+  tblTXN: [{ name: '流水号', type: 1 }, { name: '时间', type: 5 }, { name: '操作人', type: 1 }, { name: '类型', type: 1 }, { name: '物料码', type: 1 }, { name: '变动', type: 2 }, { name: '余量', type: 2 }, { name: '关联单', type: 1 }, { name: '原因/备注', type: 1 }, { name: '操作ID', type: 1 }, { name: '最后更新时间', type: 1002 }]
 };
 
 /** 造一份「还缺东西」的表结构，专门验证缺列 / 缺选项的处理路径 */
