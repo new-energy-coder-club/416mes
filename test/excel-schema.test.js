@@ -95,3 +95,22 @@ test('PIN 码：JSON 备份默认不含，且用「删键」而不是写空串',
   assert.ok(/withPin/.test(bk), '备份没有 PIN 选择');
   assert.ok(/delete c\.pin/.test(bk), '备份「不含 PIN」应当是删除该键（写空串会变成要求清空）');
 });
+
+test('B7【关键】导入必须认得导出/模板自己写的表头（否则导出→导入往返直接失败）', () => {
+  // 从 index.html 的 KEYCOLS 里抠出每张表认的业务键候选名
+  const m = HTML.match(/const KEYCOLS = \[([\s\S]*?)\n      \];/);
+  assert.ok(m, '找不到 KEYCOLS');
+  const entries = [...m[1].matchAll(/\['([^']+)',\s*\[([^\]]*)\]/g)]
+    .map(x => ({ sheet: x[1], keys: x[2].split(',').map(v => v.trim().replace(/^'|'$/g, '')).filter(Boolean) }));
+  assert.ok(entries.length >= 8, 'KEYCOLS 条目太少：' + entries.length);
+
+  const exported = sheetsIn(EXPORT_SRC);
+  const bad = [];
+  for (const e of entries) {
+    const headers = exported[e.sheet];
+    if (!headers) continue;                       // 导出里没有这张表（例如 NEC 有、但别的没有）
+    if (!e.keys.some(k => headers.includes(k))) bad.push(e.sheet + '（导出表头有 ' + headers.join('/') + '，但导入只认 ' + e.keys.join('/') + '）');
+  }
+  assert.deepStrictEqual(bad, [],
+    '这些表的导入业务键与导出表头不一致 → 用户按提示「导出→改→导回」会被直接拒绝：\n' + bad.join('\n'));
+});
