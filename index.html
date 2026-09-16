@@ -209,6 +209,7 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         <span class="hint">验收标准 9：随机抽查任一零件，都能给出库位/容器/模块区（精确到架-层-位）或最近一次扫码/流水的位置与时间</span>
       </div>
       <div id="cloudGapBox" class="panel" style="display:none;border-left:5px solid #e8a020;background:#fffbf0;margin-top:10px"></div>
+      <div id="conflictBox" class="panel" style="display:none;border-left:5px solid #d33a2c;background:#fff6f5;margin-top:10px"></div>
       <div id="locateAuditBox" style="display:none"></div>
       <p class="hint" style="margin-top:8px">所有修改自动保存到浏览器本地；换电脑/换浏览器前请「导出备份 JSON」（全量含流水）或「导出 Excel 台账」。库存数量带<b>黄底=低于安全库存，红底=负库存</b>；手工改数量会要求填写调整原因并写入流水。</p>
       <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;color:#445" id="txnSummary">📜 库存流水</summary>
@@ -537,6 +538,7 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 <script src="lib/store.js"></script>
 <script src="lib/replay-checkpoint.js"></script>
 <script src="lib/incremental.js"></script>
+<script src="lib/three-way-merge.js"></script>
 <script>
 /* ================= 416MES 应用逻辑 ================= */
 'use strict';
@@ -569,6 +571,7 @@ const OUTBOX = window.Outbox;
 const STORE = window.MesStore;
 const CHECKPOINT = window.MesReplayCheckpoint;
 const INC = window.MesIncremental;
+const TWM = window.MesThreeWay;
 if (!OUTBOX) {
   document.body.insertAdjacentHTML('afterbegin',
     '<div style="background:#d33a2c;color:#fff;padding:12px 20px;font-size:14px">⚠️ 缺少 lib/outbox.js，离线队列无法工作（离线期间的改动会丢）。请确认 lib/outbox.js 与 index.html 一起部署后刷新。</div>');
@@ -581,6 +584,7 @@ if (!STORE) {
 }
 if (!CHECKPOINT) throw new Error('缺少 lib/replay-checkpoint.js（账本 checkpoint 模块）');
 if (!INC) throw new Error('缺少 lib/incremental.js（增量协议模块）');
+if (!TWM) throw new Error('缺少 lib/three-way-merge.js（三方合并模块）');
 const NEC_TYPE_NAMES = { RW: '任务', LL: '领料', CG: '采购', WX: '维修', HD: '活动', QT: '其他' };
 const NEC_STATUS = ['待处理', '进行中', '已完成', '已取消'];
 const LS_KEY = 'mes416_state_v1';
@@ -852,6 +856,7 @@ function load() {
   let hadSaved = false;
   try { const raw = localStorage.getItem(LS_KEY); if (raw) { state = JSON.parse(raw); hadSaved = true; } } catch (e) { }
   if (!state) state = seedState();
+  state.__base = state.__base || null;   // 基线只从 IndexedDB 恢复（localStorage 里刻意不存）
   state.__freshSeed = !hadSaved;   // 本次是「全新数据空间」，用于提示用户数据可能存在别的地址下
   /* 出厂示例数据稍后由 dropSeedDemoRecords() 在云端同步成功时清理（见那里说明） */
   state.necOrders = state.necOrders || [];      // 旧版本数据迁移
@@ -880,7 +885,13 @@ function load() {
   localStoreReady = initLocalStore();
 }
 function save() {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) { }
+  // __base 是三方合并的基线（整份飞书值快照），体积与 state 同量级。
+  // 只写 IndexedDB，不写 localStorage —— 否则 5MB 墙会被直接翻倍撞上。
+  try {
+    const persist = Object.assign({}, state);
+    delete persist.__base;
+    localStorage.setItem(LS_KEY, JSON.stringify(persist));
+  } catch (e) { }
   // UI 仍要求同步渲染；IDB 落盘异步防抖，失败只告警，LS 源仍在，绝不假装已迁移。
   if (localStore && !_saveTimer) _saveTimer = setTimeout(() => {
     _saveTimer = null;
@@ -1723,6 +1734,7 @@ async function cloudSync({ silent = false } = {}) {
     await autoPushPending();       // 「本地有、飞书没有」的新建记录同样自动补推
     runReconcile();
     await fsInitWatermarks();      // 同上：全量之后把水位顶到最新
+    fsRebuildBase(pkg.state || pkg);
     fsStartPolling();
     if (!silent) alert('云端同步完成：' + mergeStatText2(stat));
     return stat;
@@ -3124,14 +3136,24 @@ async function fsIncrementalSync() {
       catch (e) { log('⚠️ 增量拉取 ' + (TABLE_LABEL[key] || key) + ' 失败：' + e.message); continue; }
       if (!r.records || !r.records.length) { wms[key] = r.watermark; continue; }
 
-      const partial = {}; partial[key] = r.records;
-      // 增量合并**绝不判删**：部分数据不知道整表键集合，拿它判删会清空整张表
-      const stat = CORE.applyRemoteChanges(state, partial, {
-        syncedKeys: state.__syncedKeys, protect: state.__pushBlocked
-      });
-      state.__syncedKeys = stat.syncedKeys;
+      // 三方合并：base(上次同步的飞书值) + local + remote(本次变化行)
+      // 分得出「飞书改的」和「本地改的」——远端单方改动自动快进，只有真双改才进冲突池
+      const tw = fsThreeWayApply(key, r.records);
+
+      // syncedKeys 并进基线，否则下一轮会把远端已有记录当成「本地新建」
+      const idf = TABLE_KEY_FIELD[key];
+      const seen = new Set((state.__syncedKeys[key] || []).map(String));
+      r.records.forEach(rec => { const k = rec && rec[idf] != null && rec[idf] !== '' ? String(rec[idf]) : ''; if (k) seen.add(k); });
+      state.__syncedKeys[key] = [...seen];
+
+      // **base 必须跟着前进**：刚拉到的远端值就是新的「已确认基线」。
+      // 不更新的话，下次远端再改时会拿一个更旧的 base 去比，
+      // 于是把「本地跟随上一次远端值」误判成「本地也改了」→ 满屏假冲突。
+      fsUpdateBase(key, r.records);
+
       wms[key] = r.watermark;
       total += r.records.length;
+      if (tw.conflicts) log('⚔️ ' + (TABLE_LABEL[key] || key) + ' 有 ' + tw.conflicts + ' 条真双改，已进冲突面板' + (tw.degraded ? '（无基线，已降级为保守策略）' : ''));
 
       if (key === 'workorders') mergeSerials({ workorders: r.records });   // 工单号计数器跟上
       if (key === 'materials') refreshMatDatalist();
@@ -3224,6 +3246,147 @@ async function fsRunCensus(opts) {
 async function fsCensusNow() {
   const r = await fsRunCensus();
   return r;
+}
+
+/* ================= Phase 3：三方合并（base / local / remote） =================
+   两方合并分不清「飞书改的」和「本地改的」，只能全问人。
+   有 base 才知道是谁改的：local===base 自动采纳远端、remote===base 保留本地，
+   三者互不相同才是真双改。base 存在 IndexedDB 里，换设备就没有 → 降级为保守策略。 */
+
+/** 上次同步时的已确认基线（值快照）。没有就是 null → 三方合并自动降级 */
+function fsMergeBase() { return state.__base && Object.keys(state.__base).length ? state.__base : null; }
+
+/** 全量合并成功后重建基线：基线 = 刚刚从飞书读到的那一份 */
+function fsRebuildBase(remote) {
+  const snap = {};
+  Object.keys(TABLE_KEY_FIELD).forEach(k => { if (Array.isArray(remote[k])) snap[k] = JSON.parse(JSON.stringify(remote[k])); });
+  state.__base = snap;
+  save();
+}
+
+/** 基线里同步这几行（增量拉取后必须做，否则下次会产生满屏假冲突） */
+function fsUpdateBase(table, rows) {
+  if (!state.__base) return;                     // 还没有基线 → 保持降级状态，不凭空造
+  const id = TABLE_KEY_FIELD[table];
+  const list = state.__base[table] = Array.isArray(state.__base[table]) ? state.__base[table] : [];
+  const idx = new Map();
+  list.forEach((r, i) => { if (r && r[id] != null) idx.set(String(r[id]), i); });
+  (rows || []).forEach(rec => {
+    const k = rec && rec[id] != null && rec[id] !== '' ? String(rec[id]) : '';
+    if (!k) return;
+    const copy = JSON.parse(JSON.stringify(rec));
+    if (idx.has(k)) list[idx.get(k)] = copy; else { idx.set(k, list.length); list.push(copy); }
+  });
+}
+
+/** 把某个键在三份数据里的那一行挑出来，喂给 planMerge 做局部三方合并 */
+function fsPartial(tables, keys) {
+  const want = new Set(keys.map(String));
+  const out = {};
+  Object.entries(tables).forEach(([tbl, list]) => {
+    if (!Array.isArray(list)) return;
+    const id = TABLE_KEY_FIELD[tbl];
+    out[tbl] = list.filter(r => r && want.has(String(r[id])));
+  });
+  return out;
+}
+
+/**
+ * 对**本次真正拉到变化的那张表**做三方合并（局部，不把没变的表卷进来）。
+ *
+ * base/local/remote 三份都只取「这次变化的那些键」：
+ *   - remote 就是刚拉到的变化行
+ *   - local 从 state 里按同样的键挑
+ *   - base 从上次同步的基线里按同样的键挑（没有 base → planMerge 自动降级）
+ * 这样三方合并的开销只与变化行数有关，而不是整表。
+ */
+function fsThreeWayApply(table, remoteRows) {
+  const id = TABLE_KEY_FIELD[table];
+  const keys = remoteRows.map(r => String(r[id]));
+  const base = fsMergeBase();
+  const baseP = base ? { [table]: (base[table] || []) } : null;
+  const localP = { [table]: (state[table] || []) };
+  const remoteP = { [table]: remoteRows };
+  const plan = TWM.planMerge(
+    baseP ? { [table]: baseP[table].filter(r => keys.indexOf(String(r[id])) >= 0) } : null,
+    { [table]: localP[table].filter(r => keys.indexOf(String(r[id])) >= 0) },
+    remoteP,
+    { protect: state.__pushBlocked }
+  );
+  // 自动快进的部分直接落地
+  const applied = TWM.applyMerge(state, { writes: plan.writes, conflicts: [] }, {});
+  // 真双改进冲突池，等人裁决（绝不替人挑一个赢）
+  if (plan.conflicts.length) fsSetConflicts(_conflicts.concat(plan.conflicts));
+  return { auto: applied.applied, conflicts: plan.conflicts.length, degraded: plan.degraded };
+}
+
+/** 冲突池：未裁决的冲突按「表×类型×字段」分组展示，人只需要对几十组做决定 */
+let _conflicts = [];        // [{table,key,field,base,local,remote,kind}]
+let _conflictGroups = [];
+let _conflictSnapshot = null;
+
+function fsSetConflicts(list) {
+  _conflicts = list || [];
+  _conflictGroups = TWM.groupConflicts(_conflicts);
+  renderConflictPanel();
+}
+
+/** 应用一组冲突的裁决：group 级「全部采用飞书 / 全部保留本地」 */
+function fsResolveGroup(group, choice) {
+  const resolutions = {};
+  _conflicts.filter(c => c.table === group.table && c.field === group.field && (c.kind || 'update') === group.kind)
+    .forEach(c => { resolutions[c.table + '\u0000' + c.key + '\u0000' + c.field] = choice; });
+  const plan = { writes: [], conflicts: _conflicts };
+  const r = TWM.applyMerge(state, plan, resolutions);
+  _conflictSnapshot = _conflictSnapshot || r.snapshot;   // 只在第一次保留快照，供整体回滚
+  // 裁决过的从池子里摘掉
+  const done = new Set(Object.keys(resolutions));
+  fsSetConflicts(_conflicts.filter(c => !done.has(c.table + '\u0000' + c.key + '\u0000' + c.field)));
+  save(); renderLedger(); renderMembers(); renderTxns(); renderWip();
+  log('✅ 冲突裁决：' + (TABLE_LABEL[group.table] || group.table) + ' 列「' + group.field + '」' +
+    group.count + ' 条 → ' + (choice === 'remote' ? '采用飞书' : '保留本地'));
+}
+
+/** 整体回滚上一次冲突裁决（本地快照，保留最近 1 次） */
+function fsUndoConflictApply() {
+  if (!_conflictSnapshot) { alert('没有可回滚的裁决'); return; }
+  TWM.undoMerge(state, _conflictSnapshot);
+  _conflictSnapshot = null;
+  save(); renderLedger(); renderMembers(); renderTxns(); renderWip();
+  log('↩️ 已回滚上一次冲突裁决');
+}
+
+function renderConflictPanel() {
+  const box = document.getElementById('conflictBox');
+  if (!box) return;
+  if (!_conflictGroups.length) { box.style.display = 'none'; return; }
+  const total = _conflicts.length;
+  let html = '⚔️ <b>两边都改过同一字段，需要你决定：' + total + ' 条（' + _conflictGroups.length + ' 组）</b><br>' +
+    '<span class="hint">按「表 × 字段」分组，人只需要对几十组做决定，不用逐条点。</span>' +
+    '<table class="grid" style="max-width:760px;margin:8px 0"><thead><tr>' +
+    '<th>表</th><th>字段</th><th style="text-align:right">条数</th><th>样例（本地 → 飞书）</th><th>操作</th></tr></thead><tbody>';
+  _conflictGroups.forEach((g, i) => {
+    const smp = g.samples.slice(0, 2).map(s =>
+      '<code>' + esc(String(s.key)) + '</code>: ' + esc(String(s.local)) + ' → ' + esc(String(s.remote))).join('<br>');
+    html += '<tr><td>' + (TABLE_LABEL[g.table] || g.table) + '</td><td><b>' + esc(g.field) + '</b></td>' +
+      '<td style="text-align:right">' + g.count + '</td><td class="hint">' + smp + '</td>' +
+      '<td><button class="btn small" data-g="' + i + '" data-choice="remote">全部采用飞书</button> ' +
+      '<button class="btn small ghost" data-g="' + i + '" data-choice="local">全部保留本地</button></td></tr>';
+  });
+  html += '</tbody></table><div class="toolbar">' +
+    '<button class="btn small ghost" id="btnUndoConflict">回滚上次裁决</button>' +
+    '<span class="hint">库存数量、已执行工单、流水删除三类不给「全部」按钮（见方案 §六）</span></div>';
+  box.style.display = 'block';
+  box.innerHTML = html;
+  box.querySelectorAll('button[data-g]').forEach(b => b.addEventListener('click', () => {
+    const g = _conflictGroups[+b.dataset.g];
+    if (!g) return;
+    // 库存数量必须用 delta 而不是绝对值：批量改过之后本地那条绝对 qty 已全错
+    if (g.field === 'qty' && !confirm('「库存数量」用绝对值批量覆盖会丢掉本地并发期间的变动。\n确认要按飞书的值整体覆盖吗？（建议改用库存流水重放）')) return;
+    fsResolveGroup(g, b.dataset.choice);
+  }));
+  const u = document.getElementById('btnUndoConflict');
+  if (u) u.addEventListener('click', fsUndoConflictApply);
 }
 
 /** 轮询档位：可见才跑，闲置降频，隐藏暂停 */
@@ -3666,6 +3829,7 @@ async function fsBoot() {
     runReconcile();                // 只读核对飞书缺列 / 缺选项，呈现到对齐面板
     log('☁️ 飞书同步：' + mergeStatText2(stat));
     await fsInitWatermarks();      // 全量拉完 → 水位顶到当前最新，之后走增量
+    fsRebuildBase(remote);         // Phase 3：把「刚读到的飞书值」记成三方合并的基线
     fsStartPolling();              // Phase 2：10 秒探测一次，只有变了才拉内容
   } catch (e) {
     fsOnline = false; refreshStatusHint();

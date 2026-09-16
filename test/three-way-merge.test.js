@@ -209,3 +209,25 @@ test('planText：给人看的一句话里包含关键数字与降级提示', () 
   assert.match(txt, /需确认 1/);
   assert.match(txt, /无基线/);
 });
+
+test('三方合并【关键】base 必须跟着远端前进，否则会产生满屏假冲突', () => {
+  // 第 1 轮：远端把 K 从「原」改成「v1」，本地没动 → 自动快进，无冲突
+  let base = { materials: [{ code: 'K', name: '原' }] };
+  let local = { materials: [{ code: 'K', name: '原' }] };
+  let remote = { materials: [{ code: 'K', name: 'v1' }] };
+  let p = TWM.planMerge(base, local, remote);
+  assert.equal(p.conflicts.length, 0, '远端单方改动不该冲突');
+  // 本地跟随远端
+  local = { materials: [{ code: 'K', name: 'v1' }] };
+  // base 前进到 v1（fsUpdateBase 做的事）
+  base = { materials: [{ code: 'K', name: 'v1' }] };
+
+  // 第 2 轮：远端又改成 v2，本地仍未动 → 仍应自动快进
+  p = TWM.planMerge(base, local, { materials: [{ code: 'K', name: 'v2' }] });
+  assert.equal(p.conflicts.length, 0, 'base 前进后不该把「本地跟随」误判成双改');
+  assert.equal(p.writes[0].fields.name, 'v2');
+
+  // 反例：base 忘了前进（仍是「原」）→ 就会误报冲突
+  const stale = TWM.planMerge({ materials: [{ code: 'K', name: '原' }] }, local, { materials: [{ code: 'K', name: 'v2' }] });
+  assert.equal(stale.conflicts.length, 1, 'base 不前进就会出现假冲突 —— 这正是必须 fsUpdateBase 的原因');
+});
