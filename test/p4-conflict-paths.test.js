@@ -127,3 +127,13 @@ test('P4-2 闸门期间不许推送「待推送」列表（否则面板谎称已
   assert.ok(/fsBulkHold\(\)\)[\s\S]{0,200}return 0;/.test(p),
     'pushPending 在闸门期间必须返回 0，否则 autoPushPending 会清空「待推送」列表');
 });
+
+test('B5【阶段二实测】已自行收敛的陈旧冲突必须被丢弃，不能让人裁决不存在的差异', () => {
+  const p = fnSrc('fsPruneStaleConflicts');
+  assert.ok(/TWM\._eq\(c\.local, c\.remote\)/.test(p), '要丢掉「快照里两边本来就一样」的');
+  assert.ok(/TWM\._eq\(rec\[c\.field\], c\.remote\)/.test(p),
+    '要丢掉「当前本地值已经等于飞书值」的（写入在飞时记下的临时冲突）');
+  assert.ok(/丢弃 \d+ 条|丢弃 ' \+ dropped\.length/.test(p), '丢弃要有日志说明，不能静默');
+  const set = fnSrc('fsSetConflicts');
+  assert.ok(/fsPruneStaleConflicts\(list/.test(set), 'fsSetConflicts 必须走这道过滤');
+});
