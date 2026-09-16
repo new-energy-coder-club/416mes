@@ -82,7 +82,7 @@ function startMock(opts = {}) {
     if (!t.ids) Object.defineProperty(t, 'ids', { value: [], writable: true, enumerable: false, configurable: true });
     t.rows.forEach(() => t.ids.push('rec_' + (++idSeq)));
   });
-  const calls = { created: [], updated: [], deleted: [], requests: [], deny: false, denyOn: opts.denyOn || null };
+  const calls = { created: [], updated: [], deleted: [], requests: [], deny: false, denyOn: opts.denyOn || null, inflight: 0, maxConcurrent: 0 };
   // 字段类型定义：type 数字对应飞书字段类型码（1 文本 / 2 数字 / 3 单选 / 5 日期）
   const fieldTypes = opts.fieldTypes || {
     tblMAT: [{ name: '物料码', type: 1 }, { name: '名称', type: 1 }, { name: '库存数量', type: 2 }],
@@ -99,7 +99,7 @@ function startMock(opts = {}) {
     req.on('data', c => body += c);
     req.on('end', () => {
       const url = new URL(req.url, 'http://x');
-      const json = (o, code = 200) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
+      const json = (o, code = 200) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); done(); };
 
       // --- 先只做「路由识别」，真正的处理放到 dispatch 里，好让延迟插在读与写之间 ---
       const fm = url.pathname.match(/\/tables\/([^/]+)\/fields$/);
@@ -111,6 +111,12 @@ function startMock(opts = {}) {
       const recordId = (m && sub && KNOWN.indexOf(sub) < 0) ? sub : null;
       const action = m ? (recordId ? 'get' : sub) : (isAuth ? 'auth' : (fm ? 'fields' : 'unknown'));
       const phase = (action === 'auth' || action === 'fields' || action === '' || action === 'search' || action === 'get') ? 'read' : 'write';
+      /* 同时在飞的请求数：并行的直接证据，而且**不受机器负载影响**
+         （用墙钟时间判并行在整套测试并行跑时会抖）。 */
+      calls.inflight++;
+      if (calls.inflight > calls.maxConcurrent) calls.maxConcurrent = calls.inflight;
+      let settled = false;
+      const done = () => { if (!settled) { settled = true; calls.inflight--; } };
       const info = { requestNo: ++reqNo, method: req.method, path: url.pathname, action, phase, tableId, body };
       calls.requests.push(info);
 
@@ -1302,4 +1308,57 @@ test('upsert【P4 兜底】物料表的「库存数量」一律不写，并如�
   assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 5, '库存数量不能被 upsert 改（必须走账本）');
   assert.ok(r.dropped.some(d => /库存数量/.test(d)), '要如实回报被忽略的字段，不能静默');
   assert.equal(r.blocked['A-1'], undefined, '不能记进 blocked（那会让合并永远不采纳飞书的库存值）');
+});
+
+/* ================= P7-1：预读并行（O1） ================= */
+
+test('写库【P7 核心】四段预读必须并行发出（串行会白等 3 个往返）', async (t) => {
+  /* 用「每次请求都延迟 D」把串行与并行拉开：四段预读若串行，墙钟时间 ≥ 4D；
+     并行则 ≈ D（外加流水写入那几段）。D 取 120ms，阈值设在 3D 与 4D 之间，
+     既有明确的判别力，又不会因为机器慢而误报。 */
+  const D = 120;
+  const mock = await startMock({ delay: D });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  const r = await lib.writeStock({ matCode: 'A-1', qty: 3, delta: -2, opId: 'p7-o1' });
+  assert.equal(r.ok, true, r.error);
+  /* 判据用「同时在飞的请求数」而不是墙钟时间：
+     四段预读（物料行 / 流水表结构 / 账本 / 操作ID 查重）互相独立，并行时至少 4 个同时在飞；
+     串行则最多 1 个。这个信号不受机器负载与测试并发影响 —— 第一版用时间阈值，
+     整套测试并行跑时会抖。 */
+  assert.ok(mock.calls.maxConcurrent >= 4,
+    '四段预读没有并行：同时在飞的请求最多只有 ' + mock.calls.maxConcurrent + ' 个（并行应在 4 个以上）');
+  // 时间只做一个很松的兜底检查（预读段远小于串行上界即说明有重叠）
+  assert.ok(r.timing.lookup < 4 * D,
+    '预读段耗时 ' + r.timing.lookup + 'ms 接近串行上界 ' + (4 * D) + 'ms');
+});
+
+test('写库【P7 回归】并行预读不能改变账本语义（并发 +2/+2 仍等于 +4）', async (t) => {
+  const mock = await startMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  const before = mock.tables.tblMAT.rows[0]['库存数量'];
+  const rs = await Promise.all([
+    lib.writeStock({ matCode: 'A-1', delta: 2, opId: 'p7a' }),
+    lib.writeStock({ matCode: 'A-1', delta: 2, opId: 'p7b' })
+  ]);
+  assert.ok(rs.every(x => x.ok), JSON.stringify(rs));
+  assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], before + 4,
+    '并发 +2/+2 必须等于 +4；预读并行不能把它变成 +2（那是以前不敢并行的原因）');
+});
+
+test('写库【P7 关键】并行预读里任何一支失败都不能变成 unhandledRejection', async (t) => {
+  const seen = [];
+  const onUnhandled = e => seen.push(String(e && e.message));
+  process.on('unhandledRejection', onUnhandled);
+  t.after(() => process.off('unhandledRejection', onUnhandled));
+  // 流水表 ID 故意写错 → 结构读取那一支会失败，而账本读取那一支还在飞
+  const mock = await startMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: JSON.stringify({ materials: 'tblMAT', transactions: 'tblNOPE' }) });
+  const r = await lib.writeStock({ matCode: 'A-1', qty: 3, delta: -2, opId: 'p7-c' });
+  assert.equal(r.ok, false, '必须如实失败');
+  await new Promise(res => setTimeout(res, 300));   // 给在飞的那几支一点时间来"暴露"
+  assert.deepEqual(seen, [],
+    '有并行分支的 rejection 没人处理 —— 提前 return 时必须先给每一支挂兜底 catch：' + seen.join(' | '));
 });
