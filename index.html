@@ -534,6 +534,7 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 <script src="jsqr.min.js"></script>
 <script src="mes-core.js"></script>
 <script src="lib/outbox.js"></script>
+<script src="lib/store.js"></script>
 <script>
 /* ================= 416MES 应用逻辑 ================= */
 'use strict';
@@ -563,14 +564,25 @@ if (!CORE) {
 /* 离线队列模块（lib/outbox.js）：同样是可单测的纯逻辑。
    缺了它「离线期间的改动」就无处存放，宁可当场报错也不要静默丢数据。 */
 const OUTBOX = window.Outbox;
+const STORE = window.MesStore;
 if (!OUTBOX) {
   document.body.insertAdjacentHTML('afterbegin',
     '<div style="background:#d33a2c;color:#fff;padding:12px 20px;font-size:14px">⚠️ 缺少 lib/outbox.js，离线队列无法工作（离线期间的改动会丢）。请确认 lib/outbox.js 与 index.html 一起部署后刷新。</div>');
   throw new Error('缺少 lib/outbox.js（离线队列模块）');
 }
+if (!STORE) {
+  document.body.insertAdjacentHTML('afterbegin',
+    '<div style="background:#d33a2c;color:#fff;padding:12px 20px;font-size:14px">⚠️ 缺少 lib/store.js，本地数据安全迁移无法工作。请确认完整部署后刷新。</div>');
+  throw new Error('缺少 lib/store.js（本地真源仓储模块）');
+}
 const NEC_TYPE_NAMES = { RW: '任务', LL: '领料', CG: '采购', WX: '维修', HD: '活动', QT: '其他' };
 const NEC_STATUS = ['待处理', '进行中', '已完成', '已取消'];
 const LS_KEY = 'mes416_state_v1';
+const IDB_MIGRATION_KEY = 'mes416-idb-state-v1';
+const IDB_STATE_KEY = 'state-v1';
+let localStore = null;
+let localStoreReady = null;
+let _saveTimer = null;
 
 /* ---------- 状态 ---------- */
 let state = null;
@@ -857,8 +869,52 @@ function load() {
   // 模块区卡内置（连接器/电机/电池/防护设备/端子线材）
   MODULE_ZONES.forEach(z => { if (!state.locations.find(x => x.code === z.code)) state.locations.push(Object.assign({}, z)); });
   save();
+  // Phase 1：先用 LS 快速首屏，再异步迁移/恢复 IDB。IDB 成功前绝不清掉 LS 源，
+  // 避免升级中断造成主数据与离线队列一起消失。
+  localStoreReady = initLocalStore();
 }
-function save() { localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+function save() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) { }
+  // UI 仍要求同步渲染；IDB 落盘异步防抖，失败只告警，LS 源仍在，绝不假装已迁移。
+  if (localStore && !_saveTimer) _saveTimer = setTimeout(() => {
+    _saveTimer = null;
+    persistStateToIdb().catch(e => log('⚠️ 本地 IDB 落盘失败，已保留 localStorage 源：' + e.message));
+  }, 0);
+}
+async function initLocalStore() {
+  try {
+    localStore = STORE.createIndexedDbStore({ dbName: 'mes416-state' });
+    await localStore.open();
+    const saved = await localStore.get('syncMeta', IDB_STATE_KEY);
+    if (saved && saved.value) {
+      state = saved.value;
+      state.__freshSeed = false;
+      hydrateState();
+      renderLedger(); renderTxns(); renderNec(); renderMembers(); renderOperators(); refreshMatDatalist(); refreshMemberDatalist();
+      return;
+    }
+    // 迁移必须在同一 IDB transaction 中写 state + marker；成功前不清 LS。
+    await localStore.transaction(['syncMeta'], async tx => {
+      await tx.put('syncMeta', { key: IDB_STATE_KEY, value: state, migratedAt: new Date().toISOString() });
+      await tx.put('syncMeta', { key: IDB_MIGRATION_KEY, value: { done: true, at: new Date().toISOString() } });
+    });
+  } catch (e) {
+    localStore = null;
+    log('⚠️ IndexedDB 不可用，暂按旧 localStorage 运行（未丢数据）：' + e.message);
+  }
+}
+function hydrateState() {
+  state.necOrders = state.necOrders || []; state.items = state.items || []; state.members = state.members || [];
+  state.manuals = state.manuals || []; state.necSerials = state.necSerials || {}; state.transactions = state.transactions || [];
+  state.scanHistory = state.scanHistory || []; state.operators = (state.operators && state.operators.length) ? state.operators : ['管理员'];
+  state.operator = state.operator || state.operators[0]; state.deviceId = state.deviceId || ('dev-' + Math.random().toString(36).slice(2, 8));
+  state.serials = state.serials || {}; state.workorders = state.workorders || []; state.locations = state.locations || []; state.containers = state.containers || [];
+  state.workorders.forEach(normalizeOrder);
+}
+async function persistStateToIdb() {
+  if (!localStore) return;
+  await localStore.put('syncMeta', { key: IDB_STATE_KEY, value: state, savedAt: new Date().toISOString() });
+}
 
 /* 工单数据归一化（Excel 导入 / 备份合并 / 云端同步共用）：
    同一物料多行 → 合并为一行，避免历史脏数据在执行时被重复扣减 */
