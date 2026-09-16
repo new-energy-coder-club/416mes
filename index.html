@@ -3427,7 +3427,7 @@ function mergeStatText2(stat) {
      { op:'delete', table, keys:[…] }                           任意表按业务键删除
    table 取值：materials / locations / containers / members / items / manuals / workorders / transactions */
 
-const QUEUE_MAX_TRIES = 5;   // 连续失败这么多次就移出队列，避免「永远重试」把队列堆爆
+const QUEUE_MAX_TRIES = 5;   // 连续失败这么多次就转 needs_attention（**永不自动丢弃**，只能人工放弃）
 
 /** 统一 POST；非 2xx 或 ok:false 一律抛错，让调用方决定入队 */
 async function fsPost(path, body) {
