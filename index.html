@@ -339,6 +339,9 @@ body.stocktake-on .stocktake-banner{display:block}
 .mb-6{margin-bottom:6px}
 /* 必须排在 .queue-chip 之后：同优先级下后定义者胜，hidden 才能压过 display:inline-block */
 .visually-hidden{display:none}
+/* 阶段13：仅供读屏器读取的文本（表格说明等） */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0 0 0 0);white-space:nowrap;border:0}
 /* ============================================================
    04 COMPONENTS（阶段12）：轻提示 toast
    只承载「简短、纯确认、无需阅读」的成功反馈。需要停下来看的信息
@@ -679,7 +682,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <button class="btn warn small" id="btnDelMat">删除勾选行</button>
       </div>
       <div class="table-scroll">
-      <table class="grid grid-dense" id="matTable">
+      <table class="grid grid-dense" id="matTable" aria-label="物料台账：物料码/分类/名称/规格/库位/容器/模块区/库存数量/安全库存/成本/图片链接">
         <thead><tr>
           <th style="width:28px"><input type="checkbox" id="matCheckAll"></th>
           <th>物料码</th><th style="width:86px">分类</th><th>名称</th><th class="col-secondary">规格型号</th><th class="col-secondary">闲鱼XY编号</th>
@@ -708,7 +711,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <span class="hint">流水追加写、只增不改；回放可从首条余量逐条重算，定位篡改/丢数</span>
       </div>
       <div class="table-scroll">
-      <table class="grid grid-dense mt-8" id="txnTable">
+      <table class="grid grid-dense mt-8" id="txnTable" aria-label="库存流水：时间/操作人/类型/物料码/变动/余量/关联单/原因">
         <thead><tr><th>时间</th><th>操作人</th><th>类型</th><th>物料码</th><th>变动</th><th>余量</th><th>关联单</th><th>原因/备注</th></tr></thead>
         <tbody></tbody>
       </table>
@@ -728,7 +731,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       </div>
       <div class="toolbar mt-6" id="memberTagBar"></div>
       <div class="table-scroll">
-      <table class="grid grid-dense" id="memberTable">
+      <table class="grid grid-dense" id="memberTable" aria-label="成员名录：编号/姓名/学号/部门/职务/标签/电话">
         <thead><tr>
           <th style="width:28px"><input type="checkbox" id="memberCheckAll"></th>
           <th style="width:80px">编号</th><th>姓名</th><th>学号</th><th>部门/SIG</th><th>职务</th><th style="width:120px">标签</th><th style="width:110px">PIN码</th><th style="width:120px">电话</th><th>备注</th>
@@ -762,7 +765,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <button class="btn" id="btnPrint">🖨 打印勾选标签</button>
       </div>
       <div class="label-layout">
-        <div class="label-list panel panel-flush"><table class="grid" id="recTable"><thead></thead><tbody></tbody></table></div>
+        <div class="label-list panel panel-flush"><table class="grid" id="recTable" aria-label="标签记录选择列表"><thead></thead><tbody></tbody></table></div>
         <div class="preview">
           <p class="hint mb-6">预览（实际尺寸 60×40mm）。标签纸打印：纸张选 60×40mm 自定义、边距无、缩放 100%、取消页眉页脚；A4 整版：直接选 A4、边距默认即可，自动 3×7 密排带裁切线。</p>
           <div class="preview-inner" id="printSheet"></div>
@@ -790,15 +793,15 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
           <option value="K401">401开放空地（机构整机/调试设备）</option>
           <option value="B">B区（默认货架区）</option>
         </datalist>
-        货架数 <input type="number" id="gLocShelf" value="2" min="1">
-        层数 <input type="number" id="gLocLayer" value="4" min="1">
-        每层货位 <input type="number" id="gLocPos" value="8" min="1">
+        货架数 <input type="number" id="gLocShelf" value="2" min="1" inputmode="decimal">
+        层数 <input type="number" id="gLocLayer" value="4" min="1" inputmode="decimal">
+        每层货位 <input type="number" id="gLocPos" value="8" min="1" inputmode="decimal">
         <button class="btn small" id="btnGenShelf">生成货架库位</button>
       </div>
       <div class="form-row"><label>工位收纳格</label>
-        工位起 <input type="number" id="gWsFrom" value="1" min="1" style="width:70px">
-        工位止 <input type="number" id="gWsTo" value="4" min="1" style="width:70px">
-        每工位格数 <input type="number" id="gWsGrid" value="3" min="1">
+        工位起 <input type="number" id="gWsFrom" value="1" min="1" style="width:70px" inputmode="decimal">
+        工位止 <input type="number" id="gWsTo" value="4" min="1" style="width:70px" inputmode="decimal">
+        每工位格数 <input type="number" id="gWsGrid" value="3" min="1" inputmode="decimal">
         <button class="btn small" id="btnGenWs">生成工位库位</button>
         <span class="hint">例：W01-G02 = 1号工位第2格</span>
       </div>
@@ -806,7 +809,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         场地码 <input type="text" id="gOpenSite" value="K401" style="width:64px">
         通道起 <input type="text" id="gOpenAisleFrom" value="A" maxlength="1" style="width:44px">
         通道止 <input type="text" id="gOpenAisleTo" value="C" maxlength="1" style="width:44px">
-        每通道块位 <input type="number" id="gOpenPos" value="6" min="1" style="width:70px">
+        每通道块位 <input type="number" id="gOpenPos" value="6" min="1" style="width:70px" inputmode="decimal">
         <button class="btn small" id="btnGenOpen">生成块位码</button>
         <span class="hint">例：K401-A03 = 401开放空地 A通道 3号块位（地贴/立柱贴码）</span>
       </div>
@@ -827,8 +830,8 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
           <option value="SC4|四层四格牛皮纸收纳盒|32×25×34cm">四层四格牛皮纸收纳盒</option>
           <option value="KF|开放式收纳格|32×25×6cm（含12×6×6小格×4）">开放式收纳格</option>
         </select>
-        起始序号 <input type="number" id="gCtnFrom" value="1" min="1">
-        数量 <input type="number" id="gCtnCount" value="10" min="1">
+        起始序号 <input type="number" id="gCtnFrom" value="1" min="1" inputmode="decimal">
+        数量 <input type="number" id="gCtnCount" value="10" min="1" inputmode="decimal">
         <button class="btn small" id="btnGenCtn">生成容器码</button>
         <span class="hint">例：A4SH-015</span>
       </div>
@@ -879,7 +882,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <button class="btn small" id="btnGenWip">生成工单</button>
         <span class="hint">流水号按 类型+日期 自动递增，例：LL20260909007</span>
       </div>
-      <table class="grid grid-dense" id="wipItemTable">
+      <table class="grid grid-dense" id="wipItemTable" aria-label="新建工单明细：物料码/数量">
         <thead><tr><th>物料码（可从台账选）</th><th style="width:90px">数量</th><th style="width:60px"></th></tr></thead>
         <tbody></tbody>
       </table>
@@ -907,7 +910,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <span class="hint" id="wipStats"></span>
       </div>
       <div class="table-scroll">
-      <table class="grid grid-dense mt-10" id="wipTable">
+      <table class="grid grid-dense mt-10" id="wipTable" aria-label="库存工单列表：工单号/类型/日期/状态/进度/批次">
         <thead><tr>
           <th>工单号</th><th style="width:90px">类型</th><th style="width:90px">日期</th>
           <th style="width:88px">状态</th><th>进度（已执行/计划）</th><th style="width:70px">批次</th><th style="width:130px">操作</th>
@@ -951,7 +954,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <button class="btn small warn" id="btnNecDel">删除勾选</button>
       </div>
       <div class="table-scroll">
-      <table class="grid grid-dense" id="necTable">
+      <table class="grid grid-dense" id="necTable" aria-label="NEC 任务列表：工单号/标题/类型/负责人/优先级/截止/状态/关联物料">
         <thead><tr>
           <th style="width:28px"><input type="checkbox" id="necCheckAll"></th>
           <th>工单号</th><th>标题</th><th>类型</th><th>负责人</th><th>优先级</th><th>截止</th>
@@ -1010,7 +1013,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       </p>
       <input class="scan-input" id="scanInput" placeholder="扫描或输入，如 MAT:GJ-SD-001 / WIP:LL20260909007，回车确认" autofocus>
       <button class="btn ghost mt-8" id="btnCam">📷 摄像头扫码</button>
-      <div id="camOverlay" style="display:none;position:fixed;inset:0;background:rgba(10,16,28,.92);z-index:99;flex-direction:column;align-items:center;justify-content:center;gap:10px;">
+      <div id="camOverlay" style="display:none;position:fixed;inset:0;background:rgba(10,16,28,.92);z-index:99;flex-direction:column;align-items:center;justify-content:center;gap:10px;" role="dialog" aria-modal="true" aria-label="摄像头扫码">
         <video id="camVideo" autoplay playsinline style="width:min(92vw,480px);border-radius:10px;background:#000;"></video>
         <div class="hint" style="color:#bfe0c8">对准二维码（MAT:/LOC:/CTN:/WIP:/NEC:/ITM:/MAN:），识别后自动填入</div>
         <button class="btn warn" id="btnCamClose">关闭摄像头</button>
@@ -1854,7 +1857,10 @@ function qrSvg(text) {
 /* ---------- 页签切换 ---------- */
 document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('click', () => {
   history.replaceState(null, '', '#' + b.dataset.tab);   // 支持 index.html#tab 深链
-  document.querySelectorAll('nav.tabs button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('nav.tabs button').forEach(x => {
+    x.classList.toggle('on', x === b);
+    if (x === b) x.setAttribute('aria-current', 'page'); else x.removeAttribute('aria-current');
+  });
   document.querySelectorAll('section.tab').forEach(s => s.classList.toggle('on', s.id === 'tab-' + b.dataset.tab));
   if (b.dataset.tab === 'ledger') renderLedger();   // 数据可能在别的页签被改过，切回时必须重渲染
   if (b.dataset.tab === 'label') renderLabelTab();
@@ -2026,7 +2032,7 @@ function renderLedger() {
           if (k === 'zone') return '<td data-th="模块区"><input type="text" list="zoneList" data-i="' + i + '" data-k="zone" value="' + esc(m.zone || '') + '" placeholder="M-01" class="grid-field--w64"></td>';
           const num = (k === 'qty' || k === 'cost' || k === 'minQty');
           const cls = (SECONDARY_MAT_COLS.includes(k) ? 'col-secondary ' : '') + (k === 'qty' ? 'cell-qty-risk' : '');
-          return '<td data-th="' + label + '"' + (cls ? ' class="' + cls.trim() + '"' : '') + '><input type="' + (num ? 'number' : 'text') + '" data-i="' + i + '" data-k="' + k + '" value="' + esc(m[k]) + '"' + (k === 'cost' ? ' step="0.01"' : '') + '></td>';
+          return '<td data-th="' + label + '"' + (cls ? ' class="' + cls.trim() + '"' : '') + '><input type="' + (num ? 'number' : 'text') + '"' + (num ? ' inputmode="decimal"' : '') + ' data-i="' + i + '" data-k="' + k + '" value="' + esc(m[k]) + '"' + (k === 'cost' ? ' step="0.01"' : '') + '></td>';
         }).join('') + '</tr>';
     }).join('');
   tb.querySelectorAll('[data-k]').forEach(inp => inp.addEventListener('change', async () => {
@@ -3169,7 +3175,7 @@ function refreshMatDatalist() {
 function wipItemRow() {
   const tr = document.createElement('tr');
   tr.innerHTML = '<td data-th="物料码"><input type="text" class="wiMat" list="matList" placeholder="物料码，如 GJ-SD-001"><div class="wiMatInfo hint" style="margin-top:2px;min-height:16px"></div></td>' +
-    '<td data-th="数量"><input type="number" class="wiQty" value="1" min="1"></td>' +
+    '<td data-th="数量"><input type="number" class="wiQty" value="1" min="1" inputmode="decimal"></td>' +
     '<td data-th="操作"><button class="btn small warn wiDel">删</button></td>';
   tr.querySelector('.wiDel').addEventListener('click', () => tr.remove());
   // 实时校验：显示物料名称与当前库存；未建档标红
@@ -3659,6 +3665,8 @@ function addScan(kind, prefix, code, hit, hitObj) {
     zone: (hitObj && hitObj.zone) || '',
     operator: state.operator
   });
+  // 阶段13：只有「命中」才回焦。未命中也回焦会把用户正在修正的输入框夺走。
+  if (hit) focusScanInput();
 }
 
 function scanMat(code, box) {
@@ -3674,7 +3682,7 @@ function scanMat(code, box) {
         { label: '当前库位', value: m.loc || '—' }
       ],
       actionsHtml:
-        '<label style="font-size:13px">实盘数量 <input type="number" id="stocktakeQty" value="' + m.qty + '" min="0" style="width:96px;border:1px solid var(--line);border-radius:var(--r-sm);padding:6px 8px;font-size:15px"></label>' +
+        '<label style="font-size:13px">实盘数量 <input type="number" inputmode="decimal" id="stocktakeQty" value="' + m.qty + '" min="0" style="width:96px;border:1px solid var(--line);border-radius:var(--r-sm);padding:6px 8px;font-size:15px" inputmode="decimal"></label>' +
         '<button class="btn" id="btnStocktake">确认盘点</button><span class="hint">差异自动写入库存流水</span>'
     });
     document.getElementById('btnStocktake').addEventListener('click', () => {
@@ -3904,11 +3912,11 @@ function scanWip(code, box) {
         const disabled = closed || it.remaining <= 0;
         return '<tr' + (it.remaining <= 0 && !closed ? ' style="opacity:.55"' : '') + '><td data-th="物料码">' + esc(it.matCode) + '</td><td data-th="名称">' + esc(m ? m.name : '⚠未建档') + '</td>' +
         '<td data-th="计划">' + it.planned + '</td><td data-th="已执行">' + it.executed + '</td>' +
-        '<td data-th="本次执行"><input type="number" class="execQty" data-code="' + esc(it.matCode) + '" value="' + it.remaining + '" min="0"' + (disabled ? ' disabled' : '') + '></td>' +
+        '<td data-th="本次执行"><input type="number" inputmode="decimal" class="execQty" data-code="' + esc(it.matCode) + '" value="' + it.remaining + '" min="0"' + (disabled ? ' disabled' : '') + ' inputmode="decimal"></td>' +
         '<td data-th="执行后库存" class="exec-after" data-code="' + esc(it.matCode) + '">—</td></tr>'; }).join('') + '</tbody></table>' +
       (closed
         ? '<p class="hint mt-8">' + (w.reverseInfo ? '已冲销（' + esc(w.reverseInfo.at) + '）' : w.cancelInfo ? '已取消（' + esc(w.cancelInfo.at) + '）' : '执行时间：' + esc(w.execTime || '—')) + '。工单已闭环，不可再执行。</p>'
-        : '<div class="exec-summary" id="execSummary" aria-live="polite"></div>'),
+        : '<div class="exec-summary" id="execSummary" role="status" aria-live="polite"></div>'),
     actionsHtml: closed ? '' : '<button class="btn" id="btnExec">确认执行（' + verb + '）</button><span class="hint">可只填一部分数量，实现分批执行</span>'
   });
 
@@ -3939,18 +3947,31 @@ function scanWip(code, box) {
         '<span>执行后工单剩余 <b>' + (remainAfter < 0 ? 0 : remainAfter) + '</b></span>' +
         '<span class="hint">填 0 = 跳过该物料</span>' +
         (v.ok ? '<span class="hint">✓ 校验通过（提交时以核心再校验为准）</span>'
-              : '<span class="exec-summary__err">✗ ' + esc(v.errors.join('；')) + '</span>');
+              : '<span class="exec-summary__err" role="alert">✗ ' + esc(v.errors.join('；')) + '</span>');
       btn.disabled = !v.ok;
       btn.textContent = v.ok ? ('确认执行（' + verb + '）') : '修正后执行';
     };
     box.querySelectorAll('.execQty').forEach(i => i.addEventListener('input', refresh));
     refresh();
+    /* 阶段13（§7.3 键盘可达性）：扫码枪本质是键盘设备 ——
+       工单扫码后焦点到第一条可执行数量，数量输入 Enter 移到下一条，
+       最后一条 Enter 聚焦确认按钮，**但不自动提交**
+       （避免扫码枪尾随 Enter 误扣库存）。 */
+    const eqs = [...box.querySelectorAll('.execQty')].filter(i => !i.disabled);
+    eqs.forEach((inp, idx) => inp.addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const nx = eqs[idx + 1];
+      if (nx) { nx.focus(); nx.select(); }
+      else if (btn && !btn.disabled) btn.focus();
+    }));
+    if (eqs.length) requestAnimationFrame(() => { eqs[0].focus(); eqs[0].select(); });
     btn.addEventListener('click', () => {
       const r = CORE.executeOrder(state, w, { execQtyByCode: collect(), operator: state.operator });
       if (!r.ok) {
         /* 阶段6 分级反馈：执行失败**留在结果卡内**（不弹窗、不自动消失） */
         summary.className = 'exec-summary exec-summary--blocked';
-        summary.innerHTML = '<span class="exec-summary__err">✗ 无法执行：' + esc(r.errors.join('；')) + '</span>' +
+        summary.innerHTML = '<span class="exec-summary__err" role="alert">✗ 无法执行：' + esc(r.errors.join('；')) + '</span>' +
           '<span class="hint">请修正后重试；库存未发生任何变化。</span>';
         log('执行被拒 ' + w.code + '：' + r.errors.join('；'));
         return;
@@ -4033,6 +4054,10 @@ function handleScan(raw) {
   nav.addEventListener('click', e => { if (e.target.closest('button, a')) sync(false); });
   // 视口变宽（转横屏/平板）时复位，避免残留展开态
   window.addEventListener('resize', () => { if (innerWidth > 767) sync(false); });
+  // 阶段13（§7.3）：抽屉要能纯键盘关闭，关闭后焦点归还到开关按钮
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && document.body.classList.contains('nav-all-open')) { sync(false); btn.focus(); }
+  });
   sync(false);
 })();
 /* ============================================================
@@ -4105,6 +4130,23 @@ function toast(msg, kind) {
   return el;
 }
 
+/** 阶段13（§5.1 焦点流转）：扫码页回焦。
+ *  ⚠ 只在**成功**路径调用（由 addScan 的 hit 参数驱动）；失败/未建档/歧义/库存不足
+ *  绝不抢焦点，否则用户正在修正的输入框会被夺走。
+ *  且用户正在编辑其它输入框（.execQty / #stocktakeQty / 搜索框 / PIN / token）时不抢。 */
+function focusScanInput() {
+  const cam = document.getElementById('camOverlay');
+  if (cam && cam.style.display && cam.style.display !== 'none') return;
+  const si = document.getElementById('scanInput');
+  if (!si) return;
+  const a = document.activeElement;
+  if (a && a !== si && a !== document.body) {
+    const tag = a.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+  }
+  requestAnimationFrame(() => { si.focus(); si.select(); });
+}
+
 function renderStatusBar() {
   const bar = document.getElementById('statusBar');
   if (!bar) return;
@@ -4144,6 +4186,7 @@ document.getElementById('scanInput').addEventListener('keydown', e => {
     cancelAnimationFrame(rafId);
     if (stream) stream.getTracks().forEach(t => t.stop());
     stream = null; overlay.style.display = 'none';
+    requestAnimationFrame(() => { const b = document.getElementById('btnCam'); if (b) b.focus(); });
   }
   function tick() {
     if (!stream) return;
@@ -4167,6 +4210,8 @@ document.getElementById('scanInput').addEventListener('keydown', e => {
       stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
       video.srcObject = stream;
       overlay.style.display = 'flex';
+      // 阶段13（§7.3）：对话框打开时把焦点移入，关闭时归还给触发按钮
+      requestAnimationFrame(() => { const c = document.getElementById('btnCamClose'); if (c) c.focus(); });
       tick();
     } catch (e) { alert('无法打开摄像头：' + e.message); }
   });
@@ -6392,6 +6437,8 @@ function renderDataStoreHint() {
 }
 
 load(); renderDataStoreHint(); renderLedger(); refreshMatDatalist(); refreshMemberDatalist(); renderNec(); renderOperators(); renderTxns(); renderWip(); renderCtxBar(); renderStatusBar();
+// 阶段13：为初始当前页签补 aria-current（深链进入时也要正确）
+(function () { const on = document.querySelector('nav.tabs button.on'); if (on) on.setAttribute('aria-current', 'page'); })();
 (function () {   // 支持门户页深链 index.html#ledger / #member / #label / #gen / #nec / #scan
   const h = location.hash.slice(1);
   if (h) { const btn = document.querySelector('nav.tabs button[data-tab="' + h + '"]'); if (btn) btn.click(); }
