@@ -129,22 +129,45 @@ main{padding:16px 20px;max-width:1280px;margin:0 auto;}
 section.tab{display:none;}
 section.tab.on{display:block;}
 .panel{background:#fff;border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:14px;}
-.panel h2{font-size:15px;margin-bottom:10px;color:#16233a;}
-.btn{display:inline-block;border:1px solid var(--blue);background:var(--blue);color:#fff;border-radius:5px;padding:6px 14px;cursor:pointer;font-size:13px;}
+/* 阶段15（§4.5）：h2 左侧青竖条，形成全站统一的「图纸分区」节奏。
+   ⚠ 用 inline-block 伪元素而不是 display:flex —— 后者会把标题文字变成 flex item，
+   长标题（如「⑤ 手册标签生成（…）」）会因 min-width:auto 溢出约 7px（A/B 实测过）。 */
+.panel h2{font-size:16px;font-weight:600;margin-bottom:10px;color:var(--ink-strong);line-height:1.4;}
+.panel h2::before{content:"";display:inline-block;width:3px;height:14px;border-radius:2px;
+  background:var(--cyan-ink);margin-right:8px;vertical-align:-2px;}
+/* 阶段15（§4.5）：主按钮 32px 高、small 28px —— 纵向 padding 归零 + flex 居中，
+   让 min-height 成为真正的约束（否则 padding 会把高度顶到 37px，规格落不了地） */
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:32px;
+  border:1px solid var(--blue);background:var(--blue);color:#fff;border-radius:var(--r-sm);
+  padding:0 14px;cursor:pointer;font-size:13px;font-family:inherit;text-decoration:none;}
 .btn.ghost{background:#fff;color:var(--blue);}
 .btn.warn{border-color:var(--red);background:var(--red);}
-.btn.small{padding:2px 8px;font-size:12px;}
+.btn.small{padding:0 10px;font-size:12px;min-height:28px;}
+/* 阶段15（§4.5）：danger 实底，**仅**用于删除 / 清空 / 冲销 / 取消 */
+.btn.danger{border-color:var(--danger-fg);background:var(--danger-fg);color:#fff;}
+/* 阶段15（§4.5）按钮规格：主按钮 32px、small 28px（高度用 min-height + 居中，
+   与 .btn.small 的既有内边距兼容，不改变文字基线） */
+
 .btn:disabled{opacity:.45;cursor:not-allowed;}
 table.grid{border-collapse:collapse;width:100%;font-size:13px;}
 table.grid th,table.grid td{border:1px solid var(--line);padding:4px 6px;text-align:left;}
-table.grid th{background:#eef2f7;white-space:nowrap;}
+table.grid th{background:var(--surface-2);white-space:nowrap;font-size:12px;font-weight:600;color:var(--text-sub);}
+/* 阶段15（§4.5）：数值列右对齐 + 等宽数字 */
+table.grid th.num,table.grid td.num{text-align:right;font-variant-numeric:tabular-nums;}
 table.grid input[type=text],table.grid input[type=number]{width:100%;border:none;background:transparent;font-size:13px;padding:2px;}
 table.grid input:focus{background:#fff8e6;}   /* 阶段3：移除 outline:none，改用全局 :focus-visible 焦点环 */
 table.grid tr:hover td{background:#f7fafd;}
 .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
 .toolbar .spacer{flex:1;}
 .hint{font-size:12px;color:var(--text-muted);}   /* 阶段3：对比度 3.14:1 → 4.97:1 */
-.badge{display:inline-block;padding:1px 8px;border-radius:var(--r-sm);color:#fff;font-size:11px;}
+.badge{display:inline-block;padding:1px 8px;border-radius:var(--r-sm);font-size:11px;font-weight:600;
+  white-space:nowrap;min-height:20px;line-height:18px;background:var(--surface-2);color:var(--text-sub);}
+/* 阶段15（§4.5）：徽章五档，软色调、11px/600、高 20px、圆角 4px（弃胶囊） */
+.badge--todo{background:var(--todo-bg);color:var(--todo-fg);}
+.badge--doing{background:var(--doing-bg);color:var(--doing-fg);}
+.badge--done{background:var(--done-bg);color:var(--done-fg);}
+.badge--cancelled{background:var(--cancelled-bg);color:var(--cancelled-fg);}
+.badge--danger{background:var(--danger-bg);color:var(--danger-fg);}
 /* ============================================================
    04 COMPONENTS（阶段3 新增）
    ============================================================ */
@@ -219,7 +242,11 @@ table.grid tr:hover td{background:#f7fafd;}
 .num-delta{font-weight:700;font-variant-numeric:tabular-nums}
 .num-delta--negative{color:var(--danger-fg)}
 .num-delta--positive{color:var(--done-fg)}
-.empty-row{text-align:center;color:var(--text-muted)}
+.empty-row{text-align:center;color:var(--text-muted);padding:12px}
+/* 阶段15（§4.5）：空状态。表格内空行用 .empty-row，独立容器用 .empty */
+.empty{display:flex;align-items:center;justify-content:center;min-height:64px;
+  margin:8px 0;padding:12px;border:1px dashed var(--line-strong);border-radius:var(--r-md);
+  color:var(--text-muted);font-size:13px;text-align:center}
 .grid-field--w64{width:64px}
 .grid-field--readonly{color:#667;background:#f5f7fa}
 .wip-num--done{color:var(--done-fg)}
@@ -352,12 +379,19 @@ body.stocktake-on .stocktake-banner{display:block}
 .hdr-operator{margin-left:auto;font-size:13px}
 .link-inline{color:var(--blue)}
 .text-danger{color:var(--danger-fg)}
-/* 提示面板：视觉规格集中于此；display 仍由 JS 用 style.display 切换，故保留内联 */
-.alert{margin-top:10px;border-left:5px solid var(--line)}
-.alert--warn{border-left-color:var(--accent-warn);background:#fffbf0}
-.alert--info{border-left-color:var(--accent-info);background:#f6f8ff}
-.alert--danger{border-left-color:var(--accent-danger);background:#fff6f5}
-.alert--ok{border-left-color:var(--accent-ok);background:#f4fbf6}
+/* 阶段15（§4.5）：提示条 .notice —— 3px 左条 + 浅底 + 图标，四变体。
+   原 .alert 为同一组件的前身，此处改名并升级为规范规格；
+   display 仍由 JS 用 style.display 切换，故保留内联。 */
+.notice{position:relative;margin-top:10px;padding-left:34px;border-left:3px solid var(--line)}
+.notice::before{position:absolute;left:12px;top:9px;font-size:14px;line-height:1;font-weight:700}
+.notice--info{border-left-color:var(--accent-info);background:#f6f8ff}
+.notice--info::before{content:"\2139";color:var(--accent-info)}
+.notice--warn{border-left-color:var(--accent-warn);background:#fffbf0}
+.notice--warn::before{content:"\25b3";color:var(--accent-warn)}
+.notice--danger{border-left-color:var(--accent-danger);background:#fff6f5}
+.notice--danger::before{content:"\2717";color:var(--accent-danger)}
+.notice--success{border-left-color:var(--accent-ok);background:#f4fbf6}
+.notice--success::before{content:"\2713";color:var(--accent-ok)}
 /* 顶部离线队列胶囊：原先由 JS 逐条写 5 个 inline 样式，改为 class 切换 */
 .queue-chip{display:inline-block;margin-left:10px;padding:2px 10px;font-size:12px;
   border-radius:var(--r-lg);cursor:pointer;
@@ -408,7 +442,7 @@ body.cols-compact .col-secondary{display:none}
      ② 宽表不用横向包装（会牺牲横向滚动）
    决策前不做，避免留下失效且有风险的 CSS。 */
 /* 标签打印页 */
-.typebar{display:flex;gap:8px;margin-bottom:10px;}
+.typebar{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;}
 .typebar button{border:1px solid var(--line);background:#fff;border-radius:5px;padding:6px 14px;cursor:pointer;}
 .typebar button.on{color:#fff;font-weight:bold;}
 .label-layout{display:flex;gap:16px;align-items:flex-start;}
@@ -577,8 +611,10 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   .kv{font-size:13.5px;line-height:1.75;}
   .kv b{min-width:64px;}
   /* 触控目标与字号 */
-  .btn{min-height:40px;}
-  .btn.small{min-height:34px;}
+  /* 阶段15（§4.5）：手机 ≥44px、关键确认 48px */
+  .btn{min-height:44px;}
+  .btn.small{min-height:44px;}
+  #btnExec,#btnPrint,#btnStocktake,#btnGenWip{min-height:48px;}
   /* 定位卡的动作按钮是主动作：必须压过上面的 .btn.small(34px)。
      同优先级下后定义者胜，这里用 .btn.small 再提一级到 (0,3,0) 以确保生效。 */
   .locate-actions .btn.small{min-height:44px;}
@@ -731,10 +767,10 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <button class="btn small ghost" id="btnLocateFind">📍 按位置查物料</button>
         <span class="hint">验收标准 9：随机抽查任一零件，都能给出库位/容器/模块区（精确到架-层-位）或最近一次扫码/流水的位置与时间</span>
       </div>
-      <div id="cloudGapBox" class="panel alert alert--warn" style="display:none"></div>
-      <div id="queueBox" class="panel alert alert--info" style="display:none"></div>
-      <div id="conflictBox" class="panel alert alert--danger" style="display:none"></div>
-      <div id="healthBox" class="panel alert alert--ok" style="display:none"></div>
+      <div id="cloudGapBox" class="panel notice notice--warn" style="display:none"></div>
+      <div id="queueBox" class="panel notice notice--info" style="display:none"></div>
+      <div id="conflictBox" class="panel notice notice--danger" style="display:none"></div>
+      <div id="healthBox" class="panel notice notice--success" style="display:none"></div>
       <div id="locateAuditBox" style="display:none"></div>
       <p class="hint mt-8">所有修改自动保存到浏览器本地；换电脑/换浏览器前请「导出备份 JSON」（全量含流水）或「导出 Excel 台账」。库存数量带<b>黄底=低于安全库存，红底=负库存</b>；手工改数量会要求填写调整原因并写入流水。</p>
       <details class="mt-10"><summary class="hint-line"  id="txnSummary">📜 库存流水</summary>
@@ -809,7 +845,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <summary>⚠ 业务记录维护（与打印无关）</summary>
         <div class="danger-zone__body">
           <p class="hint">此处删除的是<b>台账业务记录</b>（库位 / 容器 / 模块区 / 物料 / 物品 / 手册 / 工单），<b>不是取消打印选择</b> —— 取消选择请用上方「全不选」。<br>运营规则：标签编码只在<b>物理载体报废</b>时作废，正常改名/换货位不要删记录。</p>
-          <button class="btn small warn" id="btnDelRec">删除勾选记录</button>
+          <button class="btn small danger" id="btnDelRec">删除勾选记录</button>
         </div>
       </details>
     </div>
@@ -898,7 +934,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <h2>⚠ 数据维护</h2>
       <div class="toolbar">
         <button class="btn ghost" id="btnSeed">重置为出厂种子数据</button>
-        <button class="btn warn" id="btnWipe">清空全部数据</button>
+        <button class="btn danger" id="btnWipe">清空全部数据</button>
       </div>
     </div>
   </section>
@@ -985,7 +1021,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         状态筛选 <select id="necFilter"><option value="">全部</option><option>待处理</option><option>进行中</option><option>已完成</option><option>已取消</option></select>
         <button class="btn small ghost" id="btnNecExport">导出同步文件（JSON）</button>
         <span class="spacer"></span>
-        <button class="btn small warn" id="btnNecDel">删除勾选</button>
+        <button class="btn small danger" id="btnNecDel">删除勾选</button>
       </div>
       <div class="table-scroll">
       <table class="grid grid-dense" id="necTable" aria-label="NEC 任务列表：工单号/标题/类型/负责人/优先级/截止/状态/关联物料">
@@ -1746,8 +1782,8 @@ function renderTxns() {
   const sum = document.getElementById('txnSummary');
   if (sum) sum.textContent = '📜 库存流水（共 ' + state.transactions.length + ' 条 · 只增不改 · 显示最近 50 条）';
   tb.innerHTML = state.transactions.slice(0, 50).map(t => '<tr><td data-th="时间">' + esc(t.time) + '</td><td data-th="操作人">' + esc(t.operator) + '</td><td data-th="类型">' + esc(t.type) + '</td><td data-th="物料码">' + esc(t.matCode) + '</td>' +
-    '<td data-th="变动" class="num-delta ' + (t.delta < 0 ? 'num-delta--negative' : 'num-delta--positive') + '">' + (t.delta > 0 ? '+' : '') + t.delta + '</td>' +
-    '<td data-th="余量">' + esc(t.balance) + '</td><td data-th="关联单">' + esc(t.ref) + '</td><td data-th="原因/备注">' + esc(t.reason) + '</td></tr>').join('')
+    '<td data-th="变动" class="num num-delta ' + (t.delta < 0 ? 'num-delta--negative' : 'num-delta--positive') + '">' + (t.delta > 0 ? '+' : '') + t.delta + '</td>' +
+    '<td data-th="余量" class="num">' + esc(t.balance) + '</td><td data-th="关联单">' + esc(t.ref) + '</td><td data-th="原因/备注">' + esc(t.reason) + '</td></tr>').join('')
     || '<tr><td colspan="8" class="empty-row">（暂无流水）</td></tr>';
 }
 document.getElementById('btnAuditReplay').addEventListener('click', replayAudit);
@@ -2065,7 +2101,7 @@ function renderLedger() {
             Object.entries(MAT_CATS).map(([c, n]) => '<option value="' + c + '"' + ((m.cat || 'QT') === c ? ' selected' : '') + '>' + c + ' ' + n + '</option>').join('') + '</select></td>';
           if (k === 'zone') return '<td data-th="模块区"><input type="text" list="zoneList" data-i="' + i + '" data-k="zone" value="' + esc(m.zone || '') + '" placeholder="M-01" class="grid-field--w64"></td>';
           const num = (k === 'qty' || k === 'cost' || k === 'minQty');
-          const cls = (SECONDARY_MAT_COLS.includes(k) ? 'col-secondary ' : '') + (k === 'qty' ? 'cell-qty-risk' : '');
+          const cls = (num ? 'num ' : '') + (SECONDARY_MAT_COLS.includes(k) ? 'col-secondary ' : '') + (k === 'qty' ? 'cell-qty-risk' : '');
           return '<td data-th="' + label + '"' + (cls ? ' class="' + cls.trim() + '"' : '') + '><input type="' + (num ? 'number' : 'text') + '"' + (num ? ' inputmode="decimal"' : '') + ' data-i="' + i + '" data-k="' + k + '" value="' + esc(m[k]) + '"' + (k === 'cost' ? ' step="0.01"' : '') + '></td>';
         }).join('') + '</tr>';
     }).join('');
@@ -3210,7 +3246,7 @@ function wipItemRow() {
   const tr = document.createElement('tr');
   tr.innerHTML = '<td data-th="物料码"><input type="text" class="wiMat" list="matList" placeholder="物料码，如 GJ-SD-001"><div class="wiMatInfo hint" style="margin-top:2px;min-height:16px"></div></td>' +
     '<td data-th="数量"><input type="number" class="wiQty" value="1" min="1" inputmode="decimal"></td>' +
-    '<td data-th="操作"><button class="btn small warn wiDel">删</button></td>';
+    '<td data-th="操作"><button class="btn small danger wiDel">删</button></td>';
   tr.querySelector('.wiDel').addEventListener('click', () => tr.remove());
   // 实时校验：显示物料名称与当前库存；未建档标红
   const matInp = tr.querySelector('.wiMat');
@@ -3457,8 +3493,8 @@ function showWipDetail(code) {
 
     '<div class="toolbar" style="margin-top:12px">' +
     (open ? '<button class="btn" id="btnWipExec">去扫码执行（剩余 ' + p.remainingTotal + '）</button>' : '') +
-    (CORE.isPending(w) ? '<button class="btn warn" id="btnWipCancel">取消工单</button>' : '') +
-    (p.anyExecuted && !CORE.isCancelled(w) ? '<button class="btn warn" id="btnWipReverse">冲销工单（回退 ' + p.executedTotal + '）</button>' : '') +
+    (CORE.isPending(w) ? '<button class="btn danger" id="btnWipCancel">取消工单</button>' : '') +
+    (p.anyExecuted && !CORE.isCancelled(w) ? '<button class="btn danger" id="btnWipReverse">冲销工单（回退 ' + p.executedTotal + '）</button>' : '') +
     '<button class="btn ghost" id="btnWipDelete">删除工单</button>' +
     '<button class="btn ghost" id="btnWipClose">关闭详情</button>' +
     (w.reverseInfo ? '<span class="hint">已于 ' + esc(w.reverseInfo.at) + ' 由 ' + esc(w.reverseInfo.operator || '—') + ' 冲销</span>' : '') +
@@ -3841,8 +3877,8 @@ function scanMat(code, box) {
       kind: (neg || low) ? 'warn' : 'ok',
       statusText: (neg ? '负库存 · 请核查' : low ? '低于安全库存 · 请补货' : '已找到 · 只读查询（不改库存）'),
       prefix: 'MAT:', prefixCls: 'mat', title: m.name, code: 'MAT:' + m.code,
-      tag: neg ? '<span class="badge" style="background:var(--danger-fg)">负库存</span>'
-        : low ? '<span class="badge" style="background:var(--doing-bg);color:var(--doing-fg)">低于安全库存 ' + m.minQty + '</span>' : '',
+      tag: neg ? '<span class="badge badge--danger">负库存</span>'
+        : low ? '<span class="badge badge--doing">低于安全库存 ' + m.minQty + '</span>' : '',
       readings: [
         { label: '库存', value: m.qty, unit: '件', primary: true, danger: neg },
         { label: '当前库位', value: m.loc || '—' },
@@ -3900,7 +3936,7 @@ function scanWhere(kind, code, box) {
         ? '<table class="grid grid-dense mt-8"><thead><tr><th>物料码</th><th>名称</th><th style="width:70px">库存</th><th>模块区</th></tr></thead><tbody>' +
           list.map(m => '<tr><td data-th="物料码">' + esc(m.code) + '</td><td data-th="名称">' + esc(m.name) + '</td><td data-th="库存"' + (m.qty < 0 ? ' class="num-delta num-delta--negative"' : '') + '>' + m.qty + '</td><td data-th="模块区">' + esc(m.zone || '—') + '</td></tr>').join('') +
           '</tbody></table>'
-        : '<p class="hint">（该位置当前没有登记物料）</p>')
+        : '<div class="empty">该位置当前没有登记物料</div>')
   });
   addScan(isZone ? 'zone' : kind === 'LOC:' ? 'location' : 'container', kind, code, !!rec || list.length > 0, rec);
   log('查询' + (isZone ? '模块区 ' : kind === 'LOC:' ? '库位 ' : '容器 ') + code + '，物料 ' + list.length + ' 项');
