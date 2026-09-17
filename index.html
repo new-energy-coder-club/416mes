@@ -47,6 +47,8 @@
   --done-fg:#17613B;      --done-bg:#E9F6EE;      /* 6.72:1 */
   --cancelled-fg:#4A5568; --cancelled-bg:#EEF1F5; /* 6.64:1 */
   --danger-fg:#A92323;    --danger-bg:#FDECEA;    /* 6.22:1 */
+  /* 浅强调色：用于面板左侧粗边等「大面积色块」，与 -fg 文本色区分用途 */
+  --accent-warn:#e8a020;  --accent-info:#6b7fd7;  --accent-danger:#d33a2c;  --accent-ok:#2d9d4f;
   /* 尺寸阶梯 */
   --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px;
   --r-sm:4px; --r-md:6px; --r-lg:10px;
@@ -142,7 +144,7 @@ table.grid tr:hover td{background:#f7fafd;}
 .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
 .toolbar .spacer{flex:1;}
 .hint{font-size:12px;color:var(--text-muted);}   /* 阶段3：对比度 3.14:1 → 4.97:1 */
-.badge{display:inline-block;padding:1px 8px;border-radius:10px;color:#fff;font-size:11px;}
+.badge{display:inline-block;padding:1px 8px;border-radius:var(--r-sm);color:#fff;font-size:11px;}
 /* ============================================================
    04 COMPONENTS（阶段3 新增）
    ============================================================ */
@@ -294,6 +296,49 @@ body.stocktake-on .stocktake-banner{display:block}
 .scan-reading__unit{font-size:12px;font-style:normal;color:var(--text-muted);margin-left:2px}
 .scan-card__detail{font-size:13px}
 .scan-card__actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+/* ============================================================
+   04 COMPONENTS（阶段11 批次B/C）：表单控件 .field / 提示面板 .alert / 工具类
+   把原先散落在 40+ 个元素上的内联样式集中到一处。
+   一次性的列宽（如某列 70px）仍保留内联 —— 那是该列的个体属性，为每个宽度
+   造一个只用一次的 class 并不能提升可维护性，反而让 CSS 变噪音。
+   ============================================================ */
+.field{border:1px solid var(--line);border-radius:var(--r-md);padding:6px 10px;
+  font-size:14px;font-family:inherit;background:var(--surface);color:var(--ink-strong)}
+.field--md{padding:6px 10px;font-size:13px;border-radius:5px}
+.field--sm{padding:3px 8px;font-size:13px;border-radius:5px}
+.field--xs{padding:2px 8px;font-size:13px;border-radius:4px;border:none;background:var(--surface-2)}
+.field--inv{padding:5px 8px;font-size:12px;border-radius:5px}
+.field--w200{width:200px}
+.field--w220{width:220px}
+.field--w240{width:240px}
+.field--w250{width:250px}
+.field--w260{width:260px}
+.field--w64{width:64px}
+/* ⚠ 不要给这个类加 display：其中一个落点是 <summary>，
+   一旦改成 inline-flex 会丢掉 list-item 的展开三角并把宽度塌掉 */
+.hint-line{cursor:pointer;font-size:13px;color:#445}
+.panel-flush{margin:0;padding:8px}
+.hdr-operator{margin-left:auto;font-size:13px}
+.link-inline{color:var(--blue)}
+.text-danger{color:var(--danger-fg)}
+/* 提示面板：视觉规格集中于此；display 仍由 JS 用 style.display 切换，故保留内联 */
+.alert{margin-top:10px;border-left:5px solid var(--line)}
+.alert--warn{border-left-color:var(--accent-warn);background:#fffbf0}
+.alert--info{border-left-color:var(--accent-info);background:#f6f8ff}
+.alert--danger{border-left-color:var(--accent-danger);background:#fff6f5}
+.alert--ok{border-left-color:var(--accent-ok);background:#f4fbf6}
+/* 顶部离线队列胶囊：原先由 JS 逐条写 5 个 inline 样式，改为 class 切换 */
+.queue-chip{display:inline-block;margin-left:10px;padding:2px 10px;font-size:12px;
+  border-radius:var(--r-lg);cursor:pointer;
+  background:#fff4e0;color:#a4600a;border:1px solid #f0c884}
+.queue-chip--danger{background:#ffe3e0;color:#a3251a;border-color:#f0a8a0}
+/* 间距工具类（原先 15 处 margin-top 内联） */
+.mt-6{margin-top:6px}
+.mt-8{margin-top:8px}
+.mt-10{margin-top:10px}
+.mb-6{margin-bottom:6px}
+/* 必须排在 .queue-chip 之后：同优先级下后定义者胜，hidden 才能压过 display:inline-block */
+.visually-hidden{display:none}
 /* 阶段5：物料台账的「库存数量」是唯一高风险写入口（改数必须填原因并写流水），
    用左侧琥珀条把它与普通属性输入框区分开。 */
 .cell-qty-risk{position:relative;background:rgba(232,160,32,.055)}
@@ -482,6 +527,11 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   .btn{min-height:40px;}
   .btn.small{min-height:34px;}
   input,select,textarea{font-size:16px;}
+  /* .field 系列的优先级(0,1,0)高于上面的元素选择器(0,0,1)，必须显式覆盖，
+     否则搜索框仍是 12–14px，iOS 聚焦时会自动放大整页。
+     阶段11 之前这些字号写在各控件的 inline style 上（inline 优先级最高），
+     根本没法用 CSS 覆盖 —— 迁到 class 之后这个既有问题才修得掉。 */
+  .field,.field--md,.field--sm,.field--xs,.field--inv{font-size:16px;}
   /* 工单执行的汇总栏在手机上纵向堆叠 */
   .exec-summary{flex-direction:column;align-items:flex-start;gap:4px;}
   /* 当前对象条：chip 与按钮都是可点元素，手机上必须达到 44px 触控目标；
@@ -528,7 +578,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
 </style>
 </head>
 <body>
-<header><img class="nec-logo" id="hdrLogo" alt="NEC"><div><div class="slogan">BUILT TO DAWN · KEEP BUILDING&#9608;</div><h1>416MES 仓储管理系统</h1></div><span class="sub">七类标签 · Excel 台账 · 扫码工作台（查询只读 / 执行需确认）（单机离线版）</span><span id="fsQueueChip" title="离线期间的库存变动，联网后自动冲刷到飞书" style="display:none;margin-left:10px;font-size:12px;background:#fff4e0;color:#a4600a;border:1px solid #f0c884;border-radius:10px;padding:2px 10px;"></span><span style="margin-left:auto;font-size:13px">操作人 <select id="selOperator" style="font-size:13px;padding:2px 8px;border-radius:4px;border:none;"></select></span></header>
+<header><img class="nec-logo" id="hdrLogo" alt="NEC"><div><div class="slogan">BUILT TO DAWN · KEEP BUILDING&#9608;</div><h1>416MES 仓储管理系统</h1></div><span class="sub">七类标签 · Excel 台账 · 扫码工作台（查询只读 / 执行需确认）（单机离线版）</span><span class="queue-chip visually-hidden" id="fsQueueChip" title="离线期间的库存变动，联网后自动冲刷到飞书"></span><span class="hdr-operator">操作人 <select class="field--xs" id="selOperator"></select></span></header>
 <nav class="tabs" id="mainTabs">
   <div class="nav-group">现场作业</div>
   <button data-tab="scan" data-primary="1">扫码工作台</button>
@@ -592,15 +642,15 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
     <div class="panel">
       <h2>物料台账（主数据：编码不变，属性可变）</h2>
       <div class="toolbar">
-        <input type="text" id="matSearch" placeholder="🔍 搜索：编码/名称/规格/库位/容器" style="border:1px solid var(--line);border-radius:5px;padding:6px 10px;font-size:13px;width:240px;">
+        <input class="field field--md field--w240" type="text" id="matSearch" placeholder="🔍 搜索：编码/名称/规格/库位/容器">
         <button class="btn" id="btnAddMat">+ 新增物料</button>
         <button class="btn ghost" id="btnExport">导出 Excel 台账</button>
         <button class="btn ghost" id="btnImport">导入 Excel 台账</button>
         <button class="btn ghost" id="btnTemplate">下载 Excel 模板</button>
-        <input type="file" id="fileImport" accept=".xlsx,.xls" style="display:none">
+        <input class="visually-hidden" type="file" id="fileImport" accept=".xlsx,.xls">
         <button class="btn ghost" id="btnBackupJson">导出备份 JSON</button>
         <button class="btn ghost" id="btnMergeJson">导入合并</button>
-        <input type="file" id="fileMerge" accept=".json" style="display:none">
+        <input class="visually-hidden" type="file" id="fileMerge" accept=".json">
         <button class="btn ghost" id="btnCloudSync">☁️ 云端同步</button>
         <button class="btn ghost" id="btnAutoCode">⚡ 空白编码自动编号</button>
         <button class="btn small ghost" id="btnColsMore" title="规格 / 闲鱼XY编号 / 成本 / 图片链接">👁 显示全部列</button>
@@ -618,26 +668,26 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       </table>
       </div>
       <datalist id="zoneList"></datalist>
-      <div class="toolbar" style="margin-top:10px">
+      <div class="toolbar mt-10">
         <button class="btn small ghost" id="btnLocateAudit">🎯 定位抽查（随机 10 件）</button>
         <button class="btn small ghost" id="btnLocateFind">📍 按位置查物料</button>
         <span class="hint">验收标准 9：随机抽查任一零件，都能给出库位/容器/模块区（精确到架-层-位）或最近一次扫码/流水的位置与时间</span>
       </div>
-      <div id="cloudGapBox" class="panel" style="display:none;border-left:5px solid #e8a020;background:#fffbf0;margin-top:10px"></div>
-      <div id="queueBox" class="panel" style="display:none;border-left:5px solid #6b7fd7;background:#f6f8ff;margin-top:10px"></div>
-      <div id="conflictBox" class="panel" style="display:none;border-left:5px solid #d33a2c;background:#fff6f5;margin-top:10px"></div>
-      <div id="healthBox" class="panel" style="display:none;border-left:5px solid #2d9d4f;background:#f4fbf6;margin-top:10px"></div>
+      <div id="cloudGapBox" class="panel alert alert--warn" style="display:none"></div>
+      <div id="queueBox" class="panel alert alert--info" style="display:none"></div>
+      <div id="conflictBox" class="panel alert alert--danger" style="display:none"></div>
+      <div id="healthBox" class="panel alert alert--ok" style="display:none"></div>
       <div id="locateAuditBox" style="display:none"></div>
-      <p class="hint" style="margin-top:8px">所有修改自动保存到浏览器本地；换电脑/换浏览器前请「导出备份 JSON」（全量含流水）或「导出 Excel 台账」。库存数量带<b>黄底=低于安全库存，红底=负库存</b>；手工改数量会要求填写调整原因并写入流水。</p>
-      <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;color:#445" id="txnSummary">📜 库存流水</summary>
-      <div class="toolbar" style="margin-top:8px">
+      <p class="hint mt-8">所有修改自动保存到浏览器本地；换电脑/换浏览器前请「导出备份 JSON」（全量含流水）或「导出 Excel 台账」。库存数量带<b>黄底=低于安全库存，红底=负库存</b>；手工改数量会要求填写调整原因并写入流水。</p>
+      <details class="mt-10"><summary class="hint-line"  id="txnSummary">📜 库存流水</summary>
+      <div class="toolbar mt-8">
         <button class="btn small ghost" id="btnAuditReplay">🔄 回放校验</button>
         <button class="btn small ghost" id="btnLedgerRepair" title="把账本里错的「余量」列改对，并让服务端按账本口径重写库存数量">🔧 账本修数</button>
         <button class="btn small ghost" id="btnAuditExport">⬇ 导出审计日志（JSON）</button>
         <span class="hint">流水追加写、只增不改；回放可从首条余量逐条重算，定位篡改/丢数</span>
       </div>
       <div class="table-scroll">
-      <table class="grid grid-dense" id="txnTable" style="margin-top:8px">
+      <table class="grid grid-dense mt-8" id="txnTable">
         <thead><tr><th>时间</th><th>操作人</th><th>类型</th><th>物料码</th><th>变动</th><th>余量</th><th>关联单</th><th>原因/备注</th></tr></thead>
         <tbody></tbody>
       </table>
@@ -650,12 +700,12 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
     <div class="panel">
       <h2>成员名录（编号自动生成，姓名同步「操作人」与 NEC 任务负责人）</h2>
       <div class="toolbar">
-        <input type="text" id="memberSearch" placeholder="🔍 搜索：编号/姓名/学号/部门/职务/标签/电话" style="border:1px solid var(--line);border-radius:5px;padding:6px 10px;font-size:13px;width:260px;">
+        <input class="field field--md field--w260" type="text" id="memberSearch" placeholder="🔍 搜索：编号/姓名/学号/部门/职务/标签/电话">
         <button class="btn" id="btnAddMember">+ 新增人员</button>
         <span class="spacer"></span>
         <button class="btn warn small" id="btnDelMember">删除勾选行</button>
       </div>
-      <div class="toolbar" id="memberTagBar" style="margin-top:6px"></div>
+      <div class="toolbar mt-6" id="memberTagBar"></div>
       <div class="table-scroll">
       <table class="grid grid-dense" id="memberTable">
         <thead><tr>
@@ -665,7 +715,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <tbody></tbody>
       </table>
       </div>
-      <p class="hint" style="margin-top:8px">姓名会自动出现在右上角「操作人」下拉和 NEC 工单「负责人」候选中；编号（MB-xxx）生成后不变，人员退出请删除整行。「标签」用于分组（如 天权1楼实验台 / 416整理），上方标签条可一键筛选。所有修改自动保存到浏览器本地。</p>
+      <p class="hint mt-8">姓名会自动出现在右上角「操作人」下拉和 NEC 工单「负责人」候选中；编号（MB-xxx）生成后不变，人员退出请删除整行。「标签」用于分组（如 天权1楼实验台 / 416整理），上方标签条可一键筛选。所有修改自动保存到浏览器本地。</p>
     </div>
   </section>
   <!-- ========== 标签打印 ========== -->
@@ -675,25 +725,25 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <h2>标签打印（60×40mm 三防热敏纸，汉印 N41 / A4 整版）</h2>
       <div class="typebar" id="typeBar"></div>
       <div class="toolbar">
-        <input type="text" id="recFilter" placeholder="🔍 筛选（如 C- / SC4 / SLG-01）" style="border:1px solid var(--line);border-radius:5px;padding:5px 10px;font-size:13px;width:200px;">
+        <input class="field field--md field--w200" type="text" id="recFilter" placeholder="🔍 筛选（如 C- / SC4 / SLG-01）">
         <button class="btn small ghost" id="btnSelAll">全选(筛选结果)</button>
         <button class="btn small ghost" id="btnSelNone">全不选</button>
         <span class="spacer"></span>
-        纸张 <select id="selPaper" style="font-size:13px;padding:3px 8px;border:1px solid var(--line);border-radius:5px;">
+        纸张 <select class="field field--sm" id="selPaper">
           <option value="label">60×40 标签纸（N41）</option>
           <option value="a4">A4 整版（3×7=21 张/页）</option>
         </select>
-        色彩 <select id="selInk" style="font-size:13px;padding:3px 8px;border:1px solid var(--line);border-radius:5px;">
+        色彩 <select class="field field--sm" id="selInk">
           <option value="mono">高对比（纯黑）</option>
           <option value="color">彩色（主视觉）</option>
         </select>
-        字号 <input type="number" id="numFontScale" min="70" max="120" step="5" value="100" style="width:64px;font-size:13px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;">%
+        字号 <input class="field field--sm field--w64" type="number" id="numFontScale" min="70" max="120" step="5" value="100">%
         <button class="btn" id="btnPrint">🖨 打印勾选标签</button>
       </div>
       <div class="label-layout">
-        <div class="label-list panel" style="margin:0;padding:8px"><table class="grid" id="recTable"><thead></thead><tbody></tbody></table></div>
+        <div class="label-list panel panel-flush"><table class="grid" id="recTable"><thead></thead><tbody></tbody></table></div>
         <div class="preview">
-          <p class="hint" style="margin-bottom:6px">预览（实际尺寸 60×40mm）。标签纸打印：纸张选 60×40mm 自定义、边距无、缩放 100%、取消页眉页脚；A4 整版：直接选 A4、边距默认即可，自动 3×7 密排带裁切线。</p>
+          <p class="hint mb-6">预览（实际尺寸 60×40mm）。标签纸打印：纸张选 60×40mm 自定义、边距无、缩放 100%、取消页眉页脚；A4 整版：直接选 A4、边距默认即可，自动 3×7 密排带裁切线。</p>
           <div class="preview-inner" id="printSheet"></div>
         </div>
       </div>
@@ -764,7 +814,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
     </div>
     <div class="panel">
       <h2>③ 工单生成 → 已移至「库存工单」页</h2>
-      <p class="hint">为避免同一功能出现两处入口，建单表单已<b>归位到「库存工单」页顶部</b>；本页只负责主数据建档与编码。<a href="javascript:void 0" onclick="document.querySelector('nav.tabs button[data-tab=wip]').click()" style="color:var(--blue)">去「库存工单」建单 →</a></p>
+      <p class="hint">为避免同一功能出现两处入口，建单表单已<b>归位到「库存工单」页顶部</b>；本页只负责主数据建档与编码。<a class="link-inline" href="javascript:void 0" onclick="document.querySelector('nav.tabs button[data-tab=wip]').click()">去「库存工单」建单 →</a></p>
     </div>
     <div class="panel">
       <h2>④ 物品标签生成（设备 / 工具 / 展品等耐用品，WP 流水码）</h2>
@@ -812,22 +862,22 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <thead><tr><th>物料码（可从台账选）</th><th style="width:90px">数量</th><th style="width:60px"></th></tr></thead>
         <tbody></tbody>
       </table>
-      <div class="toolbar" style="margin-top:8px"><button class="btn small ghost" id="btnWipAddItem">+ 添加明细行</button></div>
-      <p class="hint" id="wipMatHint">⚠️ 物料码必须先在「<a href="javascript:void 0" onclick="document.querySelector('nav.tabs button[data-tab=ledger]').click()" style="color:var(--blue)">物料台账</a>」里建档；输入后右侧会显示物料名称与当前库存，<span style="color:#d33a2c">红色 = 未建档，无法生成工单</span>。同一物料填多行会自动合并为一行。<b>创建工单只登记计划，库存不变；扫 WIP 码并确认执行才改动库存。</b></p>
+      <div class="toolbar mt-8"><button class="btn small ghost" id="btnWipAddItem">+ 添加明细行</button></div>
+      <p class="hint" id="wipMatHint">⚠️ 物料码必须先在「<a class="link-inline" href="javascript:void 0" onclick="document.querySelector('nav.tabs button[data-tab=ledger]').click()">物料台账</a>」里建档；输入后右侧会显示物料名称与当前库存，<span class="text-danger">红色 = 未建档，无法生成工单</span>。同一物料填多行会自动合并为一行。<b>创建工单只登记计划，库存不变；扫 WIP 码并确认执行才改动库存。</b></p>
       <p class="hint">生成的工单打印后随货走；发料/补货时在「扫码工作台」页扫 <b>WIP:</b> 码执行扣减/增加库存，不扫码库存不变。</p>
     </div>
     <div class="panel">
       <h2>库存工单管理（WIP · 建单只登记计划，扫码确认执行才改库存）</h2>
       <div class="toolbar">
-        <input type="search" id="wipSearch" placeholder="搜索工单号 / 物料码 / 物料名" style="border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:14px;width:250px">
-        <select id="wipFilterStatus" style="border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:14px">
+        <input class="field field--w250" type="search" id="wipSearch" placeholder="搜索工单号 / 物料码 / 物料名">
+        <select class="field" id="wipFilterStatus">
           <option value="">全部状态</option>
           <option value="未执行">待执行</option>
           <option value="部分执行">部分执行</option>
           <option value="已执行">已执行</option>
           <option value="已取消">已取消</option>
         </select>
-        <select id="wipFilterType" style="border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:14px">
+        <select class="field" id="wipFilterType">
           <option value="">全部类型</option>
           <option value="LL">LL 领料</option><option value="BH">BH 补货</option>
           <option value="JH">JH 拣货</option><option value="TL">TL 退料</option>
@@ -836,7 +886,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <span class="hint" id="wipStats"></span>
       </div>
       <div class="table-scroll">
-      <table class="grid grid-dense" id="wipTable" style="margin-top:10px">
+      <table class="grid grid-dense mt-10" id="wipTable">
         <thead><tr>
           <th>工单号</th><th style="width:90px">类型</th><th style="width:90px">日期</th>
           <th style="width:88px">状态</th><th>进度（已执行/计划）</th><th style="width:70px">批次</th><th style="width:130px">操作</th>
@@ -844,7 +894,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <tbody></tbody>
       </table>
       </div>
-      <p class="hint" style="margin-top:8px">点「详情」查看计划/实际/剩余数量、执行历史与关联流水。待执行可「取消」，已执行或部分执行可「冲销」（把库存还回后关闭工单）。</p>
+      <p class="hint mt-8">点「详情」查看计划/实际/剩余数量、执行历史与关联流水。待执行可「取消」，已执行或部分执行可「冲销」（把库存还回后关闭工单）。</p>
     </div>
     <div class="panel" id="wipDetailPanel" style="display:none">
       <div id="wipDetail"></div>
@@ -889,7 +939,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <tbody></tbody>
       </table>
       </div>
-      <p class="hint" style="margin-top:8px">同步到飞书：① 点「导出同步文件」得到 nec-wip-export.json → ② 终端运行 <b>node nec-sync.mjs push</b>（首次先 node nec-sync.mjs init 建表选群）。状态改为「已完成/已取消」会写入完成时间并触发群通知。</p>
+      <p class="hint mt-8">同步到飞书：① 点「导出同步文件」得到 nec-wip-export.json → ② 终端运行 <b>node nec-sync.mjs push</b>（首次先 node nec-sync.mjs init 建表选群）。状态改为「已完成/已取消」会写入完成时间并触发群通知。</p>
     </div>
   </section>
   <!-- ========== 排版工具 ========== -->
@@ -919,7 +969,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <span class="hint">品牌 Logo 直接用项目根目录 nec-logo.png / nec-logo-white.png</span>
       </div>
       <div class="nec-gallery" id="galGrid"></div>
-      <div class="toolbar" style="margin-top:8px"><button class="btn small ghost" id="btnGalMore">加载更多</button>
+      <div class="toolbar mt-8"><button class="btn small ghost" id="btnGalMore">加载更多</button>
         <span class="hint">图片来源于 cdn.newenergycoder.club（需联网加载缩略图）；加入画板失败时会降级为下载/新标签页打开原图。</span></div>
     </div>
     <div class="panel" style="padding:0;overflow:hidden">
@@ -938,7 +988,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <br>不写前缀也能扫：系统会按「库存工单 → NEC 任务 → 物品 → 手册 → 物料」顺序自动识别。
       </p>
       <input class="scan-input" id="scanInput" placeholder="扫描或输入，如 MAT:GJ-SD-001 / WIP:LL20260909007，回车确认" autofocus>
-      <button class="btn ghost" id="btnCam" style="margin-top:8px">📷 摄像头扫码</button>
+      <button class="btn ghost mt-8" id="btnCam">📷 摄像头扫码</button>
       <div id="camOverlay" style="display:none;position:fixed;inset:0;background:rgba(10,16,28,.92);z-index:99;flex-direction:column;align-items:center;justify-content:center;gap:10px;">
         <video id="camVideo" autoplay playsinline style="width:min(92vw,480px);border-radius:10px;background:#000;"></video>
         <div class="hint" style="color:#bfe0c8">对准二维码（MAT:/LOC:/CTN:/WIP:/NEC:/ITM:/MAN:），识别后自动填入</div>
@@ -946,11 +996,11 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       </div>
       <div class="stocktake-banner" id="stocktakeBanner">📦 <b>盘点模式已开启</b> —— 扫 <b>MAT:</b> 物料码后输入实盘数，点「确认盘点」才会写入库存流水；其他码型仍按原方式处理。<button type="button" class="btn small ghost" id="btnStocktakeOff" style="margin-left:8px">退出盘点模式</button></div>
       <label style="display:inline-flex;align-items:center;gap:6px;margin-top:10px;font-size:13px;cursor:pointer;"><input type="checkbox" id="chkStocktake"> 📦 盘点模式（扫物料码 → 输实盘数 → 自动生成盘点差异流水）</label>
-      <details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px;color:#445">☁️ InvenTree 实时同步（可选，设置一次即可）</summary>
-      <div class="toolbar" style="margin-top:8px">
+      <details class="mt-8"><summary class="hint-line">☁️ InvenTree 实时同步（可选，设置一次即可）</summary>
+      <div class="toolbar mt-8">
         <label style="font-size:13px"><input type="checkbox" id="invEnabled"> 变动后自动写入</label>
-        <input type="text" id="invUrl" placeholder="API 地址" style="border:1px solid var(--line);border-radius:5px;padding:5px 8px;font-size:12px;width:240px;">
-        <input type="password" id="invToken" placeholder="API Token（仅存在本浏览器）" style="border:1px solid var(--line);border-radius:5px;padding:5px 8px;font-size:12px;width:220px;">
+        <input class="field field--inv field--w240" type="text" id="invUrl" placeholder="API 地址">
+        <input class="field field--inv field--w220" type="password" id="invToken" placeholder="API Token（仅存在本浏览器）">
         <button class="btn small ghost" id="btnInvTest">测试连接</button>
         <span class="hint" id="invStatus"></span>
       </div></details>
@@ -1715,16 +1765,16 @@ function renderLocateAudit(rep, ms) {
   box.style.marginTop = '10px';
   box.innerHTML =
     '<h3 style="margin:0 0 6px;font-size:15px">🎯 定位抽查结果</h3>' +
-    '<div class="hint" style="margin-bottom:6px">物料总数 ' + rep.total + '，随机抽查 ' + rep.checked + ' 件（seed ' + rep.seed + '，同 seed 可复现）　' +
+    '<div class="hint mb-6">物料总数 ' + rep.total + '，随机抽查 ' + rep.checked + ' 件（seed ' + rep.seed + '，同 seed 可复现）　' +
     '本次查询耗时 <b>' + ms.toFixed(1) + ' ms</b>　精确率 <b>' + Math.round(rep.preciseRatio * 100) + '%</b></div>' +
     '<table class="grid"><thead><tr><th style="width:110px">物料码</th><th>名称</th><th style="width:60px">数量</th><th style="width:80px">精度</th><th>位置</th><th style="width:70px">来源</th></tr></thead><tbody>' +
     rep.results.map(r => '<tr><td>' + esc(r.code) + '</td><td>' + esc(r.name || '—') + '</td><td>' + (r.qty == null ? '—' : r.qty) + '</td>' +
       '<td>' + g(r.grade) + '</td><td>' + esc(r.path || '—') + '</td><td class="hint">' + esc(r.source || '—') + '</td></tr>').join('') +
     '</tbody></table>' +
-    '<div class="toolbar" style="margin-top:8px">' +
+    '<div class="toolbar mt-8">' +
     '<span class="hint">汇总：精确 ' + rep.summary.exact + ' · 容器 ' + rep.summary.container + ' · 模块区 ' + rep.summary.zone + ' · 历史线索 ' + rep.summary.clue + ' · 无法定位 ' + rep.summary.none + '</span>' +
     (far.length ? '<span class="hint" style="color:#c98a00">⚠️ ' + far.length + ' 件只能给到粗略位置或历史线索</span>' : '') +
-    (rep.ok ? '<span class="hint" style="color:#2d9d4f">✅ 每一件都能定位</span>' : '<span class="hint" style="color:#d33a2c">❌ 有零件无法定位，请补库位/容器/模块区</span>') +
+    (rep.ok ? '<span class="hint" style="color:#2d9d4f">✅ 每一件都能定位</span>' : '<span class="hint text-danger">❌ 有零件无法定位，请补库位/容器/模块区</span>') +
     '<button class="btn small ghost" id="btnLocateAuditClose">关闭</button></div>';
   const close = document.getElementById('btnLocateAuditClose');
   if (close) close.addEventListener('click', () => { box.style.display = 'none'; });
@@ -1752,7 +1802,7 @@ document.getElementById('btnLocateFind').addEventListener('click', () => {
         hit.map(m => '<tr><td>' + esc(m.code) + '</td><td>' + esc(m.name) + '</td><td>' + m.qty + '</td>' +
           '<td class="hint">' + (m.loc === c ? '库位' : m.container === c ? '容器' : '模块区') + '</td></tr>').join('') + '</tbody></table>'
       : '<p class="hint">该位置没有登记任何物料。</p>') +
-    '<div class="toolbar" style="margin-top:8px"><button class="btn small ghost" id="btnLocateAuditClose2">关闭</button></div>';
+    '<div class="toolbar mt-8"><button class="btn small ghost" id="btnLocateAuditClose2">关闭</button></div>';
   document.getElementById('btnLocateAuditClose2').addEventListener('click', () => { box.style.display = 'none'; });
 });
 document.getElementById('btnAuditExport').addEventListener('click', () => {
@@ -3565,7 +3615,7 @@ function locationCard(code, { withTimes = true } = {}) {
 
   const g = CORE.gradeLocation(state, L);
   const GRADE_TXT = { exact: '精确', container: '容器', zone: '模块区', clue: '历史线索', none: '无' };
-  return '<div class="kv" style="margin-top:6px">' +
+  return '<div class="kv mt-6">' +
     (fromHistory ? '<span class="locate-banner">\u25b3 历史线索，不是当前位置确认 —— 到达后请扫描库位 / 容器标签并核对实物。</span>' : '') +
     '<div><span class="hint">定位来源：' + esc(L.source) + '\u3000定位精度：' + esc(GRADE_TXT[g.grade] || g.grade) + '</span></div>' +
     rows.map(r => '<div>' + r + '</div>').join('') +
@@ -3678,7 +3728,7 @@ function scanWhere(kind, code, box) {
     detailHtml:
       (lastScan ? '<div class="kv"><b>最近扫码</b>' + esc(lastScan.time) + ' <span class="hint">' + CORE.timeAgo(lastScan.ts) + '</span></div>' : '') +
       (list.length
-        ? '<table class="grid grid-dense" style="margin-top:8px"><thead><tr><th>物料码</th><th>名称</th><th style="width:70px">库存</th><th>模块区</th></tr></thead><tbody>' +
+        ? '<table class="grid grid-dense mt-8"><thead><tr><th>物料码</th><th>名称</th><th style="width:70px">库存</th><th>模块区</th></tr></thead><tbody>' +
           list.map(m => '<tr><td data-th="物料码">' + esc(m.code) + '</td><td data-th="名称">' + esc(m.name) + '</td><td data-th="库存"' + (m.qty < 0 ? ' class="num-delta num-delta--negative"' : '') + '>' + m.qty + '</td><td data-th="模块区">' + esc(m.zone || '—') + '</td></tr>').join('') +
           '</tbody></table>'
         : '<p class="hint">（该位置当前没有登记物料）</p>')
@@ -3719,7 +3769,7 @@ function scanNec(code, box) {
       (o.materials ? '<div class="kv"><b>物料</b>' + esc(o.materials) + '</div>' : '') +
       (o.note ? '<div class="kv"><b>备注</b>' + esc(o.note) + '</div>' : '') +
       (related.length
-        ? '<table class="grid grid-dense" style="margin-top:8px"><thead><tr><th>物料码</th><th>名称</th><th style="width:70px">库存</th><th>库位</th></tr></thead><tbody>' +
+        ? '<table class="grid grid-dense mt-8"><thead><tr><th>物料码</th><th>名称</th><th style="width:70px">库存</th><th>库位</th></tr></thead><tbody>' +
           related.map(m => '<tr><td data-th="物料码">' + esc(m.code) + '</td><td data-th="名称">' + esc(m.name) + '</td><td data-th="库存">' + m.qty + '</td><td data-th="库位">' + esc(m.loc || '—') + '</td></tr>').join('') +
           '</tbody></table>'
         : '')
@@ -3822,7 +3872,7 @@ function scanWip(code, box) {
       '<div class="kv"><b>计划</b>' + prog.plannedTotal + '　<b>已执行</b>' + prog.executedTotal + '　<b>剩余</b>' + prog.remainingTotal + '　<b>日期</b>' + esc(w.date) + '</div>' +
       (mergedHint ? '<p class="hint" style="margin:6px 0 0">ℹ️ 本工单存在同一物料多行，已合并为一行按<b>合计数量</b>校验与执行。</p>' : '') +
       (partial ? '<p class="hint" style="margin:6px 0 0">ℹ️ 本工单已部分执行，下方数量预填<b>剩余数量</b>；改为 0 可跳过该物料。</p>' : '') +
-      '<table class="grid grid-dense" style="margin-top:8px"><thead><tr><th>物料码</th><th>名称</th><th style="width:70px">计划</th><th style="width:70px">已执行</th><th style="width:90px">本次执行</th><th>执行后库存</th></tr></thead><tbody>' +
+      '<table class="grid grid-dense mt-8"><thead><tr><th>物料码</th><th>名称</th><th style="width:70px">计划</th><th style="width:70px">已执行</th><th style="width:90px">本次执行</th><th>执行后库存</th></tr></thead><tbody>' +
       lines.map(it => {
         const m = findMat(it.matCode);
         const disabled = closed || it.remaining <= 0;
@@ -3831,7 +3881,7 @@ function scanWip(code, box) {
         '<td data-th="本次执行"><input type="number" class="execQty" data-code="' + esc(it.matCode) + '" value="' + it.remaining + '" min="0"' + (disabled ? ' disabled' : '') + '></td>' +
         '<td data-th="执行后库存" class="exec-after" data-code="' + esc(it.matCode) + '">—</td></tr>'; }).join('') + '</tbody></table>' +
       (closed
-        ? '<p class="hint" style="margin-top:8px">' + (w.reverseInfo ? '已冲销（' + esc(w.reverseInfo.at) + '）' : w.cancelInfo ? '已取消（' + esc(w.cancelInfo.at) + '）' : '执行时间：' + esc(w.execTime || '—')) + '。工单已闭环，不可再执行。</p>'
+        ? '<p class="hint mt-8">' + (w.reverseInfo ? '已冲销（' + esc(w.reverseInfo.at) + '）' : w.cancelInfo ? '已取消（' + esc(w.cancelInfo.at) + '）' : '执行时间：' + esc(w.execTime || '—')) + '。工单已闭环，不可再执行。</p>'
         : '<div class="exec-summary" id="execSummary" aria-live="polite"></div>'),
     actionsHtml: closed ? '' : '<button class="btn" id="btnExec">确认执行（' + verb + '）</button><span class="hint">可只填一部分数量，实现分批执行</span>'
   });
@@ -4244,11 +4294,7 @@ function fsQueueChip() {
       if (!chip) return;
       const need = q.filter(x => x.status === 'needs_attention').length;
       chip.textContent = q.length ? ('☁️ 离线队列 ' + q.length + ' 条' + (need ? '（' + need + ' 待处理）' : '')) : '';
-      chip.style.display = q.length ? 'inline-block' : 'none';
-      chip.style.cursor = 'pointer';
-      chip.style.background = need ? '#ffe3e0' : '#fff4e0';
-      chip.style.color = need ? '#a3251a' : '#a4600a';
-      chip.style.borderColor = need ? '#f0a8a0' : '#f0c884';
+      chip.className = 'queue-chip' + (q.length ? '' : ' visually-hidden') + (need ? ' queue-chip--danger' : '');
     }).catch(() => {});
     return 0;
   }
@@ -4256,11 +4302,7 @@ function fsQueueChip() {
   if (chip) {
     const need = q.filter(x => x.status === 'needs_attention').length;
     chip.textContent = q.length ? ('☁️ 离线队列 ' + q.length + ' 条' + (need ? '（' + need + ' 待处理）' : '')) : '';
-    chip.style.display = q.length ? 'inline-block' : 'none';
-    chip.style.cursor = 'pointer';
-    chip.style.background = need ? '#ffe3e0' : '#fff4e0';
-    chip.style.color = need ? '#a3251a' : '#a4600a';
-    chip.style.borderColor = need ? '#f0a8a0' : '#f0c884';
+    chip.className = 'queue-chip' + (q.length ? '' : ' visually-hidden') + (need ? ' queue-chip--danger' : '');
   }
   return q.length;
 }
@@ -4380,13 +4422,13 @@ function dataConsistencyHtml() {
     const L = t.localRecords, R = t.feishuRecords;
     const diff = L - R;
     const mark = diff === 0 ? '<b style="color:#2d9d4f">✓ 一致</b>'
-      : (diff > 0 ? '<b style="color:#e8a020">本地多 ' + diff + '</b>' : '<b style="color:#d33a2c">飞书多 ' + (-diff) + '</b>');
+      : (diff > 0 ? '<b style="color:#e8a020">本地多 ' + diff + '</b>' : '<b class="text-danger">飞书多 ' + (-diff) + '</b>');
     return '<tr><td>' + (TABLE_LABEL[k] || k) + '</td><td style="text-align:right">' + L + '</td>' +
       '<td style="text-align:right">' + R + '</td><td>' + mark + '</td></tr>';
   });
   const bad = rows.length && SYNC_TABLES.filter(k => rep.tables[k] &&
     (rep.tables[k].localRecords !== rep.tables[k].feishuRecords)).length;
-  return '<div style="margin-bottom:6px">' + (bad
+  return '<div class="mb-6">' + (bad
     ? '⚠️ <b>数据不一致：' + bad + ' 张表本地与飞书条数不同</b>'
     : '✅ <b>8 张表数据条数全部一致（本地 ↔ 飞书）</b>') + '</div>' +
     '<table class="grid" style="max-width:520px;margin-bottom:8px"><thead><tr>' +
@@ -4467,7 +4509,7 @@ function duplicateHtml() {
     total += list.length;
     return (TABLE_LABEL[t] || t) + ' ' + list.map(x => '<code>' + esc(x.key) + '</code>×' + x.count).join('、');
   });
-  return '🚨 <b style="color:#d33a2c">飞书里有 ' + total + ' 组「同一编号对应多条记录」</b><br>' +
+  return '🚨 <b class="text-danger">飞书里有 ' + total + ' 组「同一编号对应多条记录」</b><br>' +
     '<span class="hint">' + parts.join('；') + '<br>' +
     '本地按编号合并后只会显示一条，另一条看不出来。这通常是<b>两台设备并发建单</b>造成的' +
     '（各自都读到「还没有这条」→ 各建一条）。请到飞书里删掉多余的那条，' +
@@ -4485,7 +4527,7 @@ function identityHtml() {
   const byTable = {};
   r.unknown.forEach(u => { byTable[u.table] = (byTable[u.table] || 0) + 1; });
   const detail = Object.entries(byTable).map(([t, n]) => (TABLE_LABEL[t] || t) + ' ' + n + ' 条').join('、');
-  return '🚨 <b style="color:#d33a2c">有 ' + r.unknown.length + ' 条记录来历不明</b>（' + esc(detail) + '）：<br>' +
+  return '🚨 <b class="text-danger">有 ' + r.unknown.length + ' 条记录来历不明</b>（' + esc(detail) + '）：<br>' +
     '<span class="hint">本地有、飞书没确认过，离线队列里也没有对应的待提交操作。它们会被当成「本地新建」自动补推到飞书 —— ' +
     '数据不会丢，但推之前你得知道这些是什么。常见原因：从别处导入/恢复了数据却没推给飞书、本机状态被外部改过。' +
     '样例：<code>' + r.unknown.slice(0, 8).map(u => (TABLE_LABEL[u.table] || u.table) + ':' + u.key).join('</code>、<code>') + '</code>' +
@@ -4541,7 +4583,7 @@ function renderAlignBox() {
       ' —— 删除不可逆，这里存的是「谁在什么时候因为什么删了哪些」。</div>' +
       '<div class="toolbar" style="margin-top:4px"><button class="btn small ghost" id="btnDelJournal">查看/导出删除凭据</button></div>';
   }
-  html += '<div class="toolbar" style="margin-top:6px">' +
+  html += '<div class="toolbar mt-6">' +
     (pendingCount ? '<button class="btn small" id="btnPushPending">全部推到飞书</button>' : '') +
     '<button class="btn small ghost" id="btnRecheck">重新核对</button>' +
     '<button class="btn small ghost" id="btnCensus">立即核对删除</button>' +
@@ -4965,7 +5007,7 @@ function renderHealthPanel() {
     '　设备 ' + esc(state.deviceId || '—') +
     (HEALTH.errors.length ? '<br>最近异常：<code>' + esc(HEALTH.errors[0].where + '：' + HEALTH.errors[0].msg).slice(0, 120) + '</code>' : '') +
     '</div>' +
-    '<div class="toolbar" style="margin-top:6px">' +
+    '<div class="toolbar mt-6">' +
     '<label class="hint">同步频率 <select id="pollIntervalSel" style="font-size:13px">' +
     POLL_CHOICES.map(c => '<option value="' + c.ms + '"' + (c.ms === pollActiveMs() ? ' selected' : '') + '>' + c.label + '</option>').join('') +
     '</select></label>' +
@@ -5394,7 +5436,7 @@ function renderConflictPanel() {
     box.style.display = 'block';
     box.innerHTML = '✅ <b>冲突已全部裁决</b><br>' +
       '<span class="hint">本地值已按你的选择更新；后悔了可以整体回滚（保留最近一次）。</span>' +
-      '<div class="toolbar" style="margin-top:6px"><button class="btn small ghost" id="btnUndoConflict">回滚上次裁决</button>' +
+      '<div class="toolbar mt-6"><button class="btn small ghost" id="btnUndoConflict">回滚上次裁决</button>' +
       '<button class="btn small ghost" id="btnDismissConflict">收起</button></div>';
     document.getElementById('btnUndoConflict').addEventListener('click', fsUndoConflictApply);
     document.getElementById('btnDismissConflict').addEventListener('click', () => { _conflictSnapshot = null; box.style.display = 'none'; });
@@ -6036,7 +6078,7 @@ async function fsQueuePanelHtml() {
   try { q = ob ? await ob.list() : fsOutbox().list(); } catch (e) { q = []; }
   const need = q.filter(x => x.status === 'needs_attention');
   const rows = q.map((x, i) => {
-    const st = x.status === 'needs_attention' ? '<b style="color:#d33a2c">待人工处理</b>'
+    const st = x.status === 'needs_attention' ? '<b class="text-danger">待人工处理</b>'
       : (x.tries ? '<span style="color:#e8a020">已失败 ' + x.tries + ' 次</span>' : '待提交');
     return '<tr><td>' + (i + 1) + '</td><td>' + esc(fsDescribeItem(x)) + '</td><td>' + st + '</td>' +
       '<td class="hint">' + esc(String(x.lastError || '').slice(0, 90)) + '</td>' +
@@ -6047,7 +6089,7 @@ async function fsQueuePanelHtml() {
     need: need.length, total: q.length,
     html: (q.length ? '<table class="grid" style="max-width:760px"><thead><tr><th>#</th><th>操作</th><th>状态</th><th>失败原因</th><th>处理</th></tr></thead><tbody>' + rows + '</tbody></table>'
       : '<span class="hint">队列为空 —— 所有操作都已提交到飞书。</span>') +
-      (need.length ? '<div class="hint" style="margin-top:6px">⏸ 这 ' + need.length +
+      (need.length ? '<div class="hint mt-6">⏸ 这 ' + need.length +
         ' 条已<b>暂停自动重试</b>。多数情况是飞书那边缺列/缺选项，或物料还没建档；补齐后点「重试」，确认不再需要就「放弃并导出」留底。</div>' : '')
   };
 }
@@ -6057,10 +6099,10 @@ async function fsOpenQueuePanel() {
   const box = document.getElementById('queueBox');
   if (!box) return;
   const r = await fsQueuePanelHtml();
-  box.innerHTML = '<b>☁️ 离线队列（' + r.total + ' 条' + (r.need ? '，其中 <span style="color:#d33a2c">' + r.need + ' 条待人工处理</span>' : '') + '）</b><br>' +
+  box.innerHTML = '<b>☁️ 离线队列（' + r.total + ' 条' + (r.need ? '，其中 <span class="text-danger">' + r.need + ' 条待人工处理</span>' : '') + '）</b><br>' +
     '<span class="hint">这里的每一条都已经**落盘**，关页/断网都不会丢；联网后自动提交。</span>' +
     r.html +
-    '<div class="toolbar" style="margin-top:6px"><button class="btn small" id="btnQueueFlush">立即重试全部</button>' +
+    '<div class="toolbar mt-6"><button class="btn small" id="btnQueueFlush">立即重试全部</button>' +
     '<button class="btn small ghost" id="btnQueueClose">收起</button></div>';
   box.style.display = 'block';
   const f = document.getElementById('btnQueueFlush');
