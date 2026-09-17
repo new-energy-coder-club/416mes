@@ -28,7 +28,9 @@ test('Phase1 压测：5 万条流水不截断、coverage 完整、checkpoint 每
   assert.equal(cps.checkpoints.length, 50);
   assert.equal(cps.checkpoints.at(-1).seq, 50000);
   // Node CI 慢机给足余量；Worker 接线负责避免浏览器主线程卡顿。
-  assert.ok(ms < 5000, '5万条纯回放应在 5s 内，实测 ' + ms + 'ms');
+  /* 同上：这条是防算法退化（O(n²) 回放 5 万条会是分钟级），不是性能基准。
+     5s 在并行测试 + 重 IO 的机器上偶有假红风险，放宽到 20s 仍能抓住退化。 */
+  assert.ok(ms < 20000, '5万条纯回放不得退化成 O(n²)（20s 上限），实测 ' + ms + 'ms');
 });
 
 test('Phase1 压测：挖掉中间 100 条仍必须准确报告缺口', () => {
