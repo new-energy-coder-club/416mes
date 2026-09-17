@@ -513,6 +513,46 @@ body.cols-compact .col-secondary{display:none}
 .typebar button{border:1px solid var(--line);background:#fff;border-radius:5px;padding:6px 14px;cursor:pointer;}
 .typebar button.on{color:#fff;font-weight:bold;}
 .label-layout{display:flex;gap:16px;align-items:flex-start;}
+/* ============================================================
+   05 PAGES（阶段20）：标签打印三栏作业台（ui优化.md §5.7）
+   ⚠ 打印域安全做法：全部规则放在 @media screen 内，并用 display:contents
+   让 .toolbar / .label-layout 的「框」在屏幕上消失、其子元素直接参与 .panel 的网格。
+   打印时这些规则不生效 → 祖先链原样恢复（打印块对 .label-layout/.preview 的
+   宽高重置照旧命中），#printSheet 及其祖先节点一个都没动。
+   ============================================================ */
+@media screen and (min-width:1100px){
+  #tab-label .panel{display:grid;gap:14px;
+    grid-template-columns:280px minmax(0,1fr) 220px;
+    grid-template-areas:
+      "h2     h2      h2"
+      "type   preview print"
+      "sel    preview print"
+      "list   preview print"
+      "danger danger  danger";}
+  #tab-label .panel>h2{grid-area:h2;margin-bottom:0;}
+  #tab-label .panel>.toolbar,
+  #tab-label .panel>.label-layout{display:contents;}
+  #tab-label .typebar{grid-area:type;flex-direction:column;align-items:stretch;margin-bottom:0;}
+  #tab-label .lw-select{grid-area:sel;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+  #tab-label .label-list{grid-area:list;width:auto;}
+  /* 预览内容可能很长（A4 整版 183 张），必须给它高度上界并内部滚动，
+     否则它跨的网格行会被撑到几千像素，左侧两栏被推到看不见的地方 */
+  #tab-label .preview{max-height:78vh;overflow:auto;}
+  #tab-label .preview{grid-area:preview;}
+  #tab-label .lw-print{grid-area:print;display:flex;flex-direction:column;
+    gap:10px;align-items:flex-start;font-size:13px;}
+  #tab-label .lw-print .btn{width:100%;}
+  #tab-label .panel>.danger-zone{grid-area:danger;margin-top:0;}
+  /* 栏标题用伪元素，随 .toolbar / .typebar 一起在打印时消失 */
+  #tab-label .typebar::before{content:"\2460 \7c7b\578b\4e0e\9009\择";
+    font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;flex:none;}
+  #tab-label .lw-select::before{content:"\9009\62e9";
+    flex:1 1 100%;font-size:12px;font-weight:600;color:var(--text-muted);}
+  #tab-label .preview::before{content:"\2461 \9884\89c8\ff08\5b9e\9645\5c3a\5bf8\ff09";
+    display:block;font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px;}
+  #tab-label .lw-print::before{content:"\2462 \6253\5370\8bbe\7f6e";
+    font-size:12px;font-weight:600;color:var(--text-muted);}
+}
 .label-list{width:460px;max-height:520px;overflow:auto;}
 .label-list table input[type=text]{min-width:0;}
 .preview{flex:1;min-width:0;}
@@ -893,20 +933,26 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <h2>标签打印（60×40mm 三防热敏纸，汉印 N41 / A4 整版）</h2>
       <div class="typebar" id="typeBar"></div>
       <div class="toolbar">
-        <input class="field field--md field--w200" type="text" id="recFilter" placeholder="🔍 筛选（如 C- / SC4 / SLG-01）">
-        <button class="btn small ghost" id="btnSelAll">全选(筛选结果)</button>
-        <button class="btn small ghost" id="btnSelNone">全不选</button>
-        <span class="spacer"></span>
-        纸张 <select class="field field--sm" id="selPaper">
-          <option value="label">60×40 标签纸（N41）</option>
-          <option value="a4">A4 整版（3×7=21 张/页）</option>
-        </select>
-        色彩 <select class="field field--sm" id="selInk">
-          <option value="mono">高对比（纯黑）</option>
-          <option value="color">彩色（主视觉）</option>
-        </select>
-        字号 <input class="field field--sm field--w64" type="number" id="numFontScale" min="70" max="120" step="5" value="100">%
-        <button class="btn" id="btnPrint">🖨 打印勾选标签</button>
+        <!-- 阶段20（§5.7）：工具栏按「选择」/「打印设置」拆成两块。
+             两者仍留在 .toolbar 内 —— 打印时 .toolbar 整体隐藏，所以不进打印域。 -->
+        <div class="lw-select">
+          <input class="field field--md field--w200" type="text" id="recFilter" placeholder="🔍 筛选（如 C- / SC4 / SLG-01）">
+          <button class="btn small ghost" id="btnSelAll">全选(筛选结果)</button>
+          <button class="btn small ghost" id="btnSelNone">全不选</button>
+        </div>
+        <div class="lw-print" id="lwPrint">
+          纸张 <select class="field field--sm" id="selPaper">
+            <option value="label">60×40 标签纸（N41）</option>
+            <option value="a4">A4 整版（3×7=21 张/页）</option>
+          </select>
+          色彩 <select class="field field--sm" id="selInk">
+            <option value="mono">高对比（纯黑）</option>
+            <option value="color">彩色（主视觉）</option>
+          </select>
+          字号 <input class="field field--sm field--w64" type="number" id="numFontScale" min="70" max="120" step="5" value="100">%
+          <button class="btn" id="btnPrint">🖨 打印勾选标签</button>
+          <span class="hint">汉印 N41：纸张 60×40mm 自定义、边距无、缩放 100%、取消页眉页脚。窄屏请用电脑打印。</span>
+        </div>
       </div>
       <div class="label-layout">
         <div class="label-list panel panel-flush"><table class="grid grid-dense" id="recTable" aria-label="标签记录选择列表"><thead></thead><tbody></tbody></table></div>
