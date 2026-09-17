@@ -51,6 +51,10 @@ Thumbs.db
 416MES开发需求书.md
 MES开发需求书.md
 验收报告.md
+ui优化.md
+
+# UI 重构研究的子代理中间产物（本地参考，不入库）
+.ui-research/
 
 # 本地待定事项（不上传仓库）
 待定.md

@@ -161,16 +161,16 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
 </style>
 </head>
 <body>
-<header><img class="nec-logo" id="hdrLogo" alt="NEC"><div><div class="slogan">BUILT TO DAWN · KEEP BUILDING&#9608;</div><h1>416MES 仓储管理系统</h1></div><span class="sub">七类标签 · Excel 台账 · 扫码出入库闭环（单机离线版）</span><span id="fsQueueChip" title="离线期间的库存变动，联网后自动冲刷到飞书" style="display:none;margin-left:10px;font-size:12px;background:#fff4e0;color:#a4600a;border:1px solid #f0c884;border-radius:10px;padding:2px 10px;"></span><span style="margin-left:auto;font-size:13px">操作人 <select id="selOperator" style="font-size:13px;padding:2px 8px;border-radius:4px;border:none;"></select></span></header>
+<header><img class="nec-logo" id="hdrLogo" alt="NEC"><div><div class="slogan">BUILT TO DAWN · KEEP BUILDING&#9608;</div><h1>416MES 仓储管理系统</h1></div><span class="sub">七类标签 · Excel 台账 · 扫码工作台（查询只读 / 执行需确认）（单机离线版）</span><span id="fsQueueChip" title="离线期间的库存变动，联网后自动冲刷到飞书" style="display:none;margin-left:10px;font-size:12px;background:#fff4e0;color:#a4600a;border:1px solid #f0c884;border-radius:10px;padding:2px 10px;"></span><span style="margin-left:auto;font-size:13px">操作人 <select id="selOperator" style="font-size:13px;padding:2px 8px;border-radius:4px;border:none;"></select></span></header>
 <nav class="tabs">
   <button data-tab="ledger" class="on">物料台账</button>
-  <button data-tab="member">人员台账</button>
+  <button data-tab="member">成员名录</button>
   <button data-tab="label">标签打印</button>
-  <button data-tab="gen">编码生成</button>
+  <button data-tab="gen">建档与编码</button>
   <button data-tab="wip">库存工单</button>
-  <button data-tab="nec">NEC小工单</button>
+  <button data-tab="nec">NEC 任务</button>
   <button data-tab="design">排版工具</button>
-  <button data-tab="scan">扫码出入库</button>
+  <button data-tab="scan">扫码工作台</button>
   <a class="tab-link" style="margin-left:auto" href="home.html">🏠 首页</a>
   <a class="tab-link" href="flyer-a4.html" target="_blank" rel="noopener">📄 宣传页</a>
 </nav>
@@ -230,7 +230,7 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
   <!-- ========== 人员台账 ========== -->
   <section class="tab" id="tab-member">
     <div class="panel">
-      <h2>人员台账（实验室成员名录：编号自动生成，姓名同步「操作人」与工单负责人）</h2>
+      <h2>成员名录（编号自动生成，姓名同步「操作人」与 NEC 任务负责人）</h2>
       <div class="toolbar">
         <input type="text" id="memberSearch" placeholder="🔍 搜索：编号/姓名/学号/部门/职务/标签/电话" style="border:1px solid var(--line);border-radius:5px;padding:6px 10px;font-size:13px;width:260px;">
         <button class="btn" id="btnAddMember">+ 新增人员</button>
@@ -257,7 +257,8 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         <input type="text" id="recFilter" placeholder="🔍 筛选（如 C- / SC4 / SLG-01）" style="border:1px solid var(--line);border-radius:5px;padding:5px 10px;font-size:13px;width:200px;">
         <button class="btn small ghost" id="btnSelAll">全选(筛选结果)</button>
         <button class="btn small ghost" id="btnSelNone">全不选</button>
-        <button class="btn small warn" id="btnDelRec">从台账删除勾选</button>
+        <button class="btn small warn" id="btnDelRec">删除勾选记录</button>
+        <span class="hint" style="color:#a4600a">⚠ 该按钮<b>删除业务记录</b>（不是取消打印选择）；取消选择请用左侧「全不选」</span>
         <span class="spacer"></span>
         纸张 <select id="selPaper" style="font-size:13px;padding:3px 8px;border:1px solid var(--line);border-radius:5px;">
           <option value="label">60×40 标签纸（N41）</option>
@@ -335,11 +336,11 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
       </div>
     </div>
     <div class="panel">
-      <h2>③ 工单生成（领料 LL / 补货 BH / 拣货 JH / 退料 TL）</h2>
+      <h2>③ 工单生成（LL 领料出库 / BH 补货入库 / JH 拣货出库 / TL 退料入库）</h2>
       <div class="form-row"><label>工单类型</label>
         <select id="gWipType">
-          <option value="LL">LL 领料工单</option><option value="BH">BH 补货工单</option>
-          <option value="JH">JH 拣货工单</option><option value="TL">TL 退料工单</option>
+          <option value="LL">LL 领料出库（扣减库存）</option><option value="BH">BH 补货入库（增加库存）</option>
+          <option value="JH">JH 拣货出库（扣减库存）</option><option value="TL">TL 退料入库（增加库存）</option>
         </select>
         日期 <input type="date" id="gWipDate">
         <button class="btn small" id="btnGenWip">生成工单</button>
@@ -350,8 +351,8 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         <tbody></tbody>
       </table>
       <div class="toolbar" style="margin-top:8px"><button class="btn small ghost" id="btnWipAddItem">+ 添加明细行</button></div>
-      <p class="hint" id="wipMatHint">⚠️ 物料码必须先在「<a href="javascript:void 0" onclick="document.querySelector('nav.tabs button[data-tab=ledger]').click()" style="color:var(--blue)">物料台账</a>」里建档；输入后右侧会显示物料名称与当前库存，<span style="color:#d33a2c">红色 = 未建档，无法生成工单</span>。同一物料填多行会自动合并为一行。</p>
-      <p class="hint">生成的工单打印后随货走；发料/补货时在「扫码出入库」页扫 <b>WIP:</b> 码执行扣减/增加库存，不扫码库存不变。</p>
+      <p class="hint" id="wipMatHint">⚠️ 物料码必须先在「<a href="javascript:void 0" onclick="document.querySelector('nav.tabs button[data-tab=ledger]').click()" style="color:var(--blue)">物料台账</a>」里建档；输入后右侧会显示物料名称与当前库存，<span style="color:#d33a2c">红色 = 未建档，无法生成工单</span>。同一物料填多行会自动合并为一行。<b>创建工单只登记计划，库存不变；扫 WIP 码并确认执行才改动库存。</b></p>
+      <p class="hint">生成的工单打印后随货走；发料/补货时在「扫码工作台」页扫 <b>WIP:</b> 码执行扣减/增加库存，不扫码库存不变。</p>
     </div>
     <div class="panel">
       <h2>④ 物品标签生成（设备 / 工具 / 展品等耐用品，WP 流水码）</h2>
@@ -384,7 +385,7 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
   <!-- ========== 库存工单（Phase 3 管理页） ========== -->
   <section class="tab" id="tab-wip">
     <div class="panel">
-      <h2>库存工单管理</h2>
+      <h2>库存工单管理（WIP · 建单只登记计划，扫码确认执行才改库存）</h2>
       <div class="toolbar">
         <input type="search" id="wipSearch" placeholder="搜索工单号 / 物料码 / 物料名" style="border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:14px;width:250px">
         <select id="wipFilterStatus" style="border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:14px">
@@ -418,24 +419,25 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
   <!-- ========== NEC 小工单 ========== -->
   <section class="tab" id="tab-nec">
     <div class="panel">
-      <h2>新建 NEC 小工单（New Energy Coder 实验室）</h2>
+      <h2>新建 NEC 任务（New Energy Coder 实验室 · 纯记录，不改库存）</h2>
       <div class="form-row"><label>标题</label><input type="text" id="necTitle" placeholder="要做什么事" style="width:280px">
         类型 <select id="necType">
-          <option value="RW">RW 任务</option><option value="LL">LL 领料</option><option value="CG">CG 采购</option>
+          <option value="RW">RW 任务</option><option value="LL">LL 领料记录（不改库存）</option><option value="CG">CG 采购</option>
           <option value="WX">WX 维修</option><option value="HD">HD 活动</option><option value="QT">QT 其他</option>
         </select>
         负责人 <input type="text" id="necOwner" list="memberList" style="width:90px">
         优先级 <select id="necPriority"><option>中</option><option>高</option><option>低</option></select>
         截止 <input type="date" id="necDue">
       </div>
-      <div class="form-row"><label>关联物料</label><input type="text" id="necMaterials" placeholder="选填，如 GJ-SD-001×2; HC-BG-001×1（纯记录，不动库存）" style="width:340px">
+      <div class="form-row"><label>关联物料</label><input type="text" id="necMaterials" placeholder="选填，如 GJ-SD-001×2; HC-BG-001×1" style="width:340px">
         备注 <input type="text" id="necNote" style="width:220px">
-        <button class="btn" id="btnNecCreate">创建工单</button>
+        <button class="btn" id="btnNecCreate">创建任务</button>
       </div>
+      <p class="hint">⚠️ NEC 任务是<b>纯记录，不改库存</b>；需要出库/入库请到「库存工单」页建 WIP 工单并扫码执行。</p>
       <p class="hint">编码自动生成：类型+日期+3位流水（例 RW20260909003），二维码机读串 <b>NEC:编码</b>。创建后可在「标签打印」页打印紫色工单标签。</p>
     </div>
     <div class="panel">
-      <h2>工单列表</h2>
+      <h2>NEC 任务列表</h2>
       <div class="toolbar">
         状态筛选 <select id="necFilter"><option value="">全部</option><option>待处理</option><option>进行中</option><option>已完成</option><option>已取消</option></select>
         <button class="btn small ghost" id="btnNecExport">导出同步文件（JSON）</button>
@@ -492,8 +494,9 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
       <h2>扫码 / 手输机读串</h2>
       <p class="hint" style="margin:0 0 8px">支持 7 种前缀：
         <b>MAT:</b> 物料 · <b>LOC:</b> 库位（含模块区 <b>M-01</b>）· <b>CTN:</b> 容器 ·
-        <b>WIP:</b> 工单 · <b>NEC:</b> NEC工单 · <b>ITM:</b> 物品 · <b>MAN:</b> 手册
-        <br>不写前缀也能扫：系统会按「工单码 → 物料码」顺序自动识别。
+        <b>WIP:</b> 库存工单 · <b>NEC:</b> NEC 任务 · <b>ITM:</b> 物品 · <b>MAN:</b> 手册
+        <br><b>库存影响：</b>MAT / LOC / CTN / NEC / ITM / MAN 为<b>只读查询</b>；只有 <b>WIP</b> 工单在点「确认执行」后才增减库存。
+        <br>不写前缀也能扫：系统会按「库存工单 → NEC 任务 → 物品 → 手册 → 物料」顺序自动识别。
       </p>
       <input class="scan-input" id="scanInput" placeholder="扫描或输入，如 MAT:GJ-SD-001 / WIP:LL20260909007，回车确认" autofocus>
       <button class="btn ghost" id="btnCam" style="margin-top:8px">📷 摄像头扫码</button>
@@ -2677,7 +2680,7 @@ document.getElementById('btnGenWip').addEventListener('click', async () => {
     (seqInfo.remote > seqInfo.local ? '\n（飞书侧已有 ' + seqInfo.remote + ' 号，已自动接在其后）' : '') +
     (notes.length ? '\n\n' + notes.join('\n') : ''));
   // 三选：去扫码执行 / 去打印标签 / 留在本页
-  const choice = prompt('工单 ' + code + ' 已生成。下一步：\n输入 1 = 去「扫码出入库」立即执行（扣减/增加库存）\n输入 2 = 去「标签打印」打印工单标签\n其他/取消 = 留在本页', '1');
+  const choice = prompt('工单 ' + code + ' 已生成。下一步：\n输入 1 = 去「扫码工作台」立即执行（扣减/增加库存）\n输入 2 = 去「标签打印」打印工单标签\n其他/取消 = 留在本页', '1');
   if (choice === '1') {
     document.querySelector('nav.tabs button[data-tab=scan]').click();
     const si = document.getElementById('scanInput');
@@ -3116,7 +3119,7 @@ function scanNec(code, box) {
   const o = state.necOrders.find(x => x.code === code);
   if (!o) {
     box.className = 'scan-result panel flash-bad';
-    box.innerHTML = '<div class="kv"><b>未找到 NEC 工单</b>' + esc(code) + '<br><span class="hint">请在「NEC小工单」页确认工单号</span></div>';
+    box.innerHTML = '<div class="kv"><b>未找到 NEC 工单</b>' + esc(code) + '<br><span class="hint">请在「NEC 任务」页确认工单号</span></div>';
     addScan('nec', 'NEC:', code, false, null);
     log('未命中 NEC 工单 ' + code);
     return;
@@ -3145,7 +3148,7 @@ function scanItem(code, box) {
   const it = state.items.find(x => x.code === code);
   if (!it) {
     box.className = 'scan-result panel flash-bad';
-    box.innerHTML = '<div class="kv"><b>未找到物品</b>' + esc(code) + '<br><span class="hint">请在「编码生成 → ④ 物品标签生成」建档</span></div>';
+    box.innerHTML = '<div class="kv"><b>未找到物品</b>' + esc(code) + '<br><span class="hint">请在「建档与编码 → ④ 物品标签生成」建档</span></div>';
     addScan('item', 'ITM:', code, false, null);
     log('未命中物品 ' + code);
     return;
@@ -3166,7 +3169,7 @@ function scanManual(code, box) {
   const mn = state.manuals.find(x => x.code === code);
   if (!mn) {
     box.className = 'scan-result panel flash-bad';
-    box.innerHTML = '<div class="kv"><b>未找到手册</b>' + esc(code) + '<br><span class="hint">请在「编码生成 → ⑤ 手册标签生成」建档</span></div>';
+    box.innerHTML = '<div class="kv"><b>未找到手册</b>' + esc(code) + '<br><span class="hint">请在「建档与编码 → ⑤ 手册标签生成」建档</span></div>';
     addScan('manual', 'MAN:', code, false, null);
     log('未命中手册 ' + code);
     return;
@@ -3183,7 +3186,7 @@ function scanManual(code, box) {
 }
 function scanWip(code, box) {
   const w = state.workorders.find(x => x.code === code);
-  if (!w) { box.className = 'scan-result panel flash-bad'; box.innerHTML = '未找到工单：' + esc(code) + '（请先在「编码生成」创建）'; log('未命中工单 ' + code); return; }
+  if (!w) { box.className = 'scan-result panel flash-bad'; box.innerHTML = '未找到工单：' + esc(code) + '（请先在「建档与编码」创建，或到「库存工单」页新建）'; log('未命中工单 ' + code); return; }
   const closed = CORE.isOrderExecuted(w);
   const sign = CORE.signOf(w.type);
   const verb = sign < 0 ? '扣减库存' : '增加库存';

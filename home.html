@@ -82,7 +82,7 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
   <div class="wrap">
     <div class="eyebrow">BUILT TO DAWN · KEEP BUILDING&#9608;</div>
     <h1><span class="logo"><img src="nec-logo-white.png" alt="NEC"></span>常州工NEC · 智能仓库MES</h1>
-    <div class="sub">七类标签（库位 / 容器 / 物料 / 物品 / 手册 / 工单 / NEC工单）· 扫码出入库闭环 · Excel 台账 · InvenTree 集成镜像<br>Design by 常州工 NEC · newenergycoder.club</div>
+    <div class="sub">七类标签（库位 / 容器 / 物料 / 物品 / 手册 / 库存工单 / NEC工单）· 扫码工作台（查询只读 · 执行需确认）· Excel 台账 · InvenTree 集成镜像<br>Design by 常州工 NEC · newenergycoder.club</div>
     <div class="status-row">
       <span class="chip" id="chip-mes"><span class="dot"></span>416MES 前端检测中…</span>
       <span class="chip" id="chip-inv"><span class="dot"></span>InvenTree 后端检测中…</span>
@@ -111,18 +111,18 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
       <span class="go">进入 →</span>
     </a>
     <a class="card c-navy" href="index.html#member">
-      <div class="icon">👥</div><h3>人员台账</h3>
-      <p>社团成员名录：编号 / 姓名 / 学号 / 部门SIG / 职务，姓名直通操作人与工单负责人。</p>
+      <div class="icon">👥</div><h3>成员名录</h3>
+      <p>社团成员名录：编号 / 姓名 / 学号 / 部门SIG / 职务，姓名直通「操作人」与 NEC 任务负责人。</p>
       <span class="go">进入 →</span>
     </a>
     <a class="card c-amber" href="index.html#gen">
-      <div class="icon">🔢</div><h3>编码生成</h3>
-      <p>按货架/层/位参数批量补齐空位码，容器码、物料流水码一键生成。</p>
+      <div class="icon">🔢</div><h3>批量建档与编码</h3>
+      <p>主数据建档：按货架/层/位批量补齐空位码，容器码、物品码、手册码一键生成。库存工单请到「库存工单」页。</p>
       <span class="go">进入 →</span>
     </a>
     <a class="card c-purple" href="index.html#nec">
-      <div class="icon">🧾</div><h3>NEC 小工单</h3>
-      <p>RW 任务 / CG 采购 / WX 维修等轻量工单，可导出 JSON 推送飞书多维表格+群通知。</p>
+      <div class="icon">🧾</div><h3>NEC 任务</h3>
+      <p>RW 任务 / CG 采购 / WX 维修等轻量任务，<b>纯记录、不改库存</b>，可导出 JSON 推送飞书多维表格+群通知。</p>
       <span class="go">进入 →</span>
     </a>
     <a class="card c-navy" href="join.html">
@@ -131,8 +131,8 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
       <span class="go">查看 →</span>
     </a>
     <a class="card c-red" href="index.html#scan">
-      <div class="icon">🔫</div><h3>扫码出入库</h3>
-      <p>扫 MAT:/LOC:/CTN:/WIP: 码即查即扣，库存闭环：没有扫码动作，库存数不变。</p>
+      <div class="icon">🔫</div><h3>扫码工作台</h3>
+      <p>扫 MAT/LOC/CTN 码即查位置与库存（<b>只读</b>）；扫 WIP 工单码并<b>确认执行</b>才增减库存。此外盘点与手工调整是另外的合法改数入口。</p>
       <span class="go">进入 →</span>
     </a>
   </div>
@@ -186,7 +186,8 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
     var s = JSON.parse(localStorage.getItem('mes416_state_v1') || '{}');
     if (s.materials) {
       var mats = s.materials;
-      var wips = (s.workorders || []).filter(function(w){ return w.status !== '已执行'; });
+      // 待办 = 未执行 / 待执行 / 部分执行；「已取消」（含已冲销）不再计入待办
+      var wips = (s.workorders || []).filter(function(w){ return w.status === '未执行' || w.status === '待执行' || w.status === '部分执行'; });
       var totalVal = mats.reduce(function(a, m){ return a + (m.qty || 0) * (m.cost || 0); }, 0);
       var lastBackup = +(localStorage.getItem('mes416_last_backup') || 0);
       var days = lastBackup ? Math.floor((Date.now() - lastBackup) / 864e5) : 99;
