@@ -190,6 +190,43 @@ table.grid tr:hover td{background:#f7fafd;}
 .flow-node--confirm{border-color:var(--doing-fg);background:var(--doing-bg);color:var(--doing-fg);font-weight:600}
 .flow-arrow{color:var(--text-muted)}
 .flow-label{color:var(--text-muted);font-size:12px}
+/* ============================================================
+   04 COMPONENTS（阶段5 新增）：表格语义色 / 危险单元格 / 列分组 / 粘性表头
+   ============================================================ */
+/* 批次D：渲染函数里的行内颜色改为语义 class（原先写死 #d33a2c / #2d9d4f / #8892a2） */
+.num-delta{font-weight:700;font-variant-numeric:tabular-nums}
+.num-delta--negative{color:var(--danger-fg)}
+.num-delta--positive{color:var(--done-fg)}
+.empty-row{text-align:center;color:var(--text-muted)}
+.grid-field--w64{width:64px}
+.grid-field--readonly{color:#667;background:#f5f7fa}
+.wip-num--done{color:var(--done-fg)}
+.wip-num--muted{color:var(--text-muted)}
+.wip-num--short{color:var(--danger-fg);font-weight:600}
+.status-select{margin-top:2px}
+.detail-section{margin:12px 0 6px;font-size:15px}
+.col-w150{width:150px}
+.col-w60{width:60px}
+.mt-12{margin-top:12px}
+/* 阶段5：折叠危险区 —— 把业务删除与「打印/选择」在视觉上彻底分开 */
+.danger-zone{margin-top:12px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--surface)}
+.danger-zone>summary{cursor:pointer;padding:9px 14px;font-size:13px;color:var(--danger-fg);background:var(--danger-bg)}
+.danger-zone__body{padding:12px 14px;display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+/* 阶段5：物料台账的「库存数量」是唯一高风险写入口（改数必须填原因并写流水），
+   用左侧琥珀条把它与普通属性输入框区分开。 */
+.cell-qty-risk{position:relative;background:rgba(232,160,32,.055)}
+.cell-qty-risk::after{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--doing-fg)}
+.cell-qty-risk input{font-weight:700;font-variant-numeric:tabular-nums}
+/* 阶段5：次要列默认折叠（规格 / 闲鱼XY编号 / 成本 / 图片链接），由「显示全部列」切换 */
+body.cols-compact .col-secondary{display:none}
+/* 阶段5：粘性表头 —— 本轮【未实现，有意留空】。
+   原因：横向滚动容器与纵向 sticky 互斥。要让 position:sticky 相对视口生效，
+   必须让 .table-scroll 不成为纵向滚动容器，而 overflow-x:auto 会把 overflow-y
+   计算为 auto；改用 overflow-y:clip 在本环境实测不被支持（计算值退回 hidden），
+   反而带来纵向裁剪风险，故撤除。剩余两条路各有代价，需先决策：
+     ① 给宽表加 max-height 内滚（放弃页面滚动，ui优化.md §8.2 明确不建议默认这么做）
+     ② 宽表不用横向包装（会牺牲横向滚动）
+   决策前不做，避免留下失效且有风险的 CSS。 */
 /* 标签打印页 */
 .typebar{display:flex;gap:8px;margin-bottom:10px;}
 .typebar button{border:1px solid var(--line);background:#fff;border-radius:5px;padding:6px 14px;cursor:pointer;}
@@ -396,6 +433,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <input type="file" id="fileMerge" accept=".json" style="display:none">
         <button class="btn ghost" id="btnCloudSync">☁️ 云端同步</button>
         <button class="btn ghost" id="btnAutoCode">⚡ 空白编码自动编号</button>
+        <button class="btn small ghost" id="btnColsMore" title="规格 / 闲鱼XY编号 / 成本 / 图片链接">👁 显示全部列</button>
         <span class="spacer"></span>
         <button class="btn warn small" id="btnDelMat">删除勾选行</button>
       </div>
@@ -403,8 +441,8 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <table class="grid" id="matTable">
         <thead><tr>
           <th style="width:28px"><input type="checkbox" id="matCheckAll"></th>
-          <th>物料码</th><th style="width:86px">分类</th><th>名称</th><th>规格型号</th><th>闲鱼XY编号</th>
-          <th>当前库位码</th><th>容器码</th><th style="width:70px">模块区</th><th style="width:76px">库存数量</th><th style="width:70px">安全库存</th><th style="width:76px">成本(元)</th><th>图片链接</th>
+          <th>物料码</th><th style="width:86px">分类</th><th>名称</th><th class="col-secondary">规格型号</th><th class="col-secondary">闲鱼XY编号</th>
+          <th>当前库位码</th><th>容器码</th><th style="width:70px">模块区</th><th style="width:76px">库存数量</th><th style="width:70px">安全库存</th><th style="width:76px" class="col-secondary">成本(元)</th><th class="col-secondary">图片链接</th>
         </tr></thead>
         <tbody></tbody>
       </table>
@@ -470,8 +508,6 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <input type="text" id="recFilter" placeholder="🔍 筛选（如 C- / SC4 / SLG-01）" style="border:1px solid var(--line);border-radius:5px;padding:5px 10px;font-size:13px;width:200px;">
         <button class="btn small ghost" id="btnSelAll">全选(筛选结果)</button>
         <button class="btn small ghost" id="btnSelNone">全不选</button>
-        <button class="btn small warn" id="btnDelRec">删除勾选记录</button>
-        <span class="hint" style="color:#a4600a">⚠ 该按钮<b>删除业务记录</b>（不是取消打印选择）；取消选择请用左侧「全不选」</span>
         <span class="spacer"></span>
         纸张 <select id="selPaper" style="font-size:13px;padding:3px 8px;border:1px solid var(--line);border-radius:5px;">
           <option value="label">60×40 标签纸（N41）</option>
@@ -491,11 +527,18 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
           <div class="preview-inner" id="printSheet"></div>
         </div>
       </div>
+      <details class="danger-zone">
+        <summary>⚠ 业务记录维护（与打印无关）</summary>
+        <div class="danger-zone__body">
+          <p class="hint">此处删除的是<b>台账业务记录</b>（库位 / 容器 / 模块区 / 物料 / 物品 / 手册 / 工单），<b>不是取消打印选择</b> —— 取消选择请用上方「全不选」。<br>运营规则：标签编码只在<b>物理载体报废</b>时作废，正常改名/换货位不要删记录。</p>
+          <button class="btn small warn" id="btnDelRec">删除勾选记录</button>
+        </div>
+      </details>
     </div>
   </section>
   <!-- ========== 编码生成 ========== -->
   <section class="tab" id="tab-gen">
-    <p class="page-purpose"><span>批量生成库位 / 容器 / 物品 / 手册编码；其中「③ 工单生成」只登记计划</span><span class="impact impact--none">本页不改库存</span></p>
+    <p class="page-purpose"><span>主数据建档与编码：库位 / 容器 / 物品 / 手册（建单已移至「库存工单」页）</span><span class="impact impact--none">本页不改库存</span></p>
     <div class="panel">
       <h2>① 库位码批量生成（空位提前全打，贴上即启用）</h2>
       <div class="form-row"><label>货架库位</label>
@@ -550,23 +593,8 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       </div>
     </div>
     <div class="panel">
-      <h2>③ 工单生成（LL 领料出库 / BH 补货入库 / JH 拣货出库 / TL 退料入库）</h2>
-      <div class="form-row"><label>工单类型</label>
-        <select id="gWipType">
-          <option value="LL">LL 领料出库（扣减库存）</option><option value="BH">BH 补货入库（增加库存）</option>
-          <option value="JH">JH 拣货出库（扣减库存）</option><option value="TL">TL 退料入库（增加库存）</option>
-        </select>
-        日期 <input type="date" id="gWipDate">
-        <button class="btn small" id="btnGenWip">生成工单</button>
-        <span class="hint">流水号按 类型+日期 自动递增，例：LL20260909007</span>
-      </div>
-      <table class="grid" id="wipItemTable">
-        <thead><tr><th>物料码（可从台账选）</th><th style="width:90px">数量</th><th style="width:60px"></th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <div class="toolbar" style="margin-top:8px"><button class="btn small ghost" id="btnWipAddItem">+ 添加明细行</button></div>
-      <p class="hint" id="wipMatHint">⚠️ 物料码必须先在「<a href="javascript:void 0" onclick="document.querySelector('nav.tabs button[data-tab=ledger]').click()" style="color:var(--blue)">物料台账</a>」里建档；输入后右侧会显示物料名称与当前库存，<span style="color:#d33a2c">红色 = 未建档，无法生成工单</span>。同一物料填多行会自动合并为一行。<b>创建工单只登记计划，库存不变；扫 WIP 码并确认执行才改动库存。</b></p>
-      <p class="hint">生成的工单打印后随货走；发料/补货时在「扫码工作台」页扫 <b>WIP:</b> 码执行扣减/增加库存，不扫码库存不变。</p>
+      <h2>③ 工单生成 → 已移至「库存工单」页</h2>
+      <p class="hint">为避免同一功能出现两处入口，建单表单已<b>归位到「库存工单」页顶部</b>；本页只负责主数据建档与编码。<a href="javascript:void 0" onclick="document.querySelector('nav.tabs button[data-tab=wip]').click()" style="color:var(--blue)">去「库存工单」建单 →</a></p>
     </div>
     <div class="panel">
       <h2>④ 物品标签生成（设备 / 工具 / 展品等耐用品，WP 流水码）</h2>
@@ -599,6 +627,25 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   <!-- ========== 库存工单（Phase 3 管理页） ========== -->
   <section class="tab" id="tab-wip">
     <p class="page-purpose"><span>建单 → 打印 → 扫码确认执行；支持部分执行、取消、冲销</span><span class="impact impact--confirm">确认执行后改库存</span></p>
+    <div class="panel">
+      <h2>新建库存工单（建单只登记计划，库存不变）</h2>
+      <div class="form-row"><label>工单类型</label>
+        <select id="gWipType">
+          <option value="LL">LL 领料出库（扣减库存）</option><option value="BH">BH 补货入库（增加库存）</option>
+          <option value="JH">JH 拣货出库（扣减库存）</option><option value="TL">TL 退料入库（增加库存）</option>
+        </select>
+        日期 <input type="date" id="gWipDate">
+        <button class="btn small" id="btnGenWip">生成工单</button>
+        <span class="hint">流水号按 类型+日期 自动递增，例：LL20260909007</span>
+      </div>
+      <table class="grid" id="wipItemTable">
+        <thead><tr><th>物料码（可从台账选）</th><th style="width:90px">数量</th><th style="width:60px"></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="toolbar" style="margin-top:8px"><button class="btn small ghost" id="btnWipAddItem">+ 添加明细行</button></div>
+      <p class="hint" id="wipMatHint">⚠️ 物料码必须先在「<a href="javascript:void 0" onclick="document.querySelector('nav.tabs button[data-tab=ledger]').click()" style="color:var(--blue)">物料台账</a>」里建档；输入后右侧会显示物料名称与当前库存，<span style="color:#d33a2c">红色 = 未建档，无法生成工单</span>。同一物料填多行会自动合并为一行。<b>创建工单只登记计划，库存不变；扫 WIP 码并确认执行才改动库存。</b></p>
+      <p class="hint">生成的工单打印后随货走；发料/补货时在「扫码工作台」页扫 <b>WIP:</b> 码执行扣减/增加库存，不扫码库存不变。</p>
+    </div>
     <div class="panel">
       <h2>库存工单管理（WIP · 建单只登记计划，扫码确认执行才改库存）</h2>
       <div class="toolbar">
@@ -1411,9 +1458,9 @@ function renderTxns() {
   const sum = document.getElementById('txnSummary');
   if (sum) sum.textContent = '📜 库存流水（共 ' + state.transactions.length + ' 条 · 只增不改 · 显示最近 50 条）';
   tb.innerHTML = state.transactions.slice(0, 50).map(t => '<tr><td>' + esc(t.time) + '</td><td>' + esc(t.operator) + '</td><td>' + esc(t.type) + '</td><td>' + esc(t.matCode) + '</td>' +
-    '<td style="font-weight:bold;color:' + (t.delta < 0 ? '#d33a2c' : '#2d9d4f') + '">' + (t.delta > 0 ? '+' : '') + t.delta + '</td>' +
+    '<td class="num-delta ' + (t.delta < 0 ? 'num-delta--negative' : 'num-delta--positive') + '">' + (t.delta > 0 ? '+' : '') + t.delta + '</td>' +
     '<td>' + esc(t.balance) + '</td><td>' + esc(t.ref) + '</td><td>' + esc(t.reason) + '</td></tr>').join('')
-    || '<tr><td colspan="8" class="hint" style="text-align:center">（暂无流水）</td></tr>';
+    || '<tr><td colspan="8" class="empty-row">（暂无流水）</td></tr>';
 }
 document.getElementById('btnAuditReplay').addEventListener('click', replayAudit);
 
@@ -1707,6 +1754,8 @@ document.getElementById('btnGalMore').addEventListener('click', () => { galShown
 
 /* ================= ① 物料台账 ================= */
 const MAT_COLS = [['code', '物料码'], ['cat', '分类'], ['name', '名称'], ['spec', '规格型号'], ['xy', '闲鱼XY编号'], ['loc', '当前库位码'], ['container', '容器码'], ['zone', '模块区'], ['qty', '库存数量'], ['minQty', '安全库存'], ['cost', '成本'], ['img', '图片链接']];
+/* 阶段5：默认折叠的次要列（可用「显示全部列」展开） */
+const SECONDARY_MAT_COLS = ['spec', 'xy', 'cost', 'img'];
 /* 分类码：JG机构件 DJ电机驱动 DZ电子件 GZ贵重件 TS调试设备 GJ工具 HC耗材 QT其他 */
 const MAT_CATS = { JG: '机构件', DJ: '电机驱动', DZ: '电子件', GZ: '贵重件', TS: '调试设备', GJ: '工具', HC: '耗材', QT: '其他' };
 let ledgerFilter = '';
@@ -1722,9 +1771,10 @@ function renderLedger() {
         MAT_COLS.map(([k, label]) => {
           if (k === 'cat') return '<td data-th="分类"><select data-i="' + i + '" data-k="cat">' +
             Object.entries(MAT_CATS).map(([c, n]) => '<option value="' + c + '"' + ((m.cat || 'QT') === c ? ' selected' : '') + '>' + c + ' ' + n + '</option>').join('') + '</select></td>';
-          if (k === 'zone') return '<td data-th="模块区"><input type="text" list="zoneList" data-i="' + i + '" data-k="zone" value="' + esc(m.zone || '') + '" placeholder="M-01" style="width:64px"></td>';
+          if (k === 'zone') return '<td data-th="模块区"><input type="text" list="zoneList" data-i="' + i + '" data-k="zone" value="' + esc(m.zone || '') + '" placeholder="M-01" class="grid-field--w64"></td>';
           const num = (k === 'qty' || k === 'cost' || k === 'minQty');
-          return '<td data-th="' + label + '"><input type="' + (num ? 'number' : 'text') + '" data-i="' + i + '" data-k="' + k + '" value="' + esc(m[k]) + '"' + (k === 'cost' ? ' step="0.01"' : '') + '></td>';
+          const cls = (SECONDARY_MAT_COLS.includes(k) ? 'col-secondary ' : '') + (k === 'qty' ? 'cell-qty-risk' : '');
+          return '<td data-th="' + label + '"' + (cls ? ' class="' + cls.trim() + '"' : '') + '><input type="' + (num ? 'number' : 'text') + '" data-i="' + i + '" data-k="' + k + '" value="' + esc(m[k]) + '"' + (k === 'cost' ? ' step="0.01"' : '') + '></td>';
         }).join('') + '</tr>';
     }).join('');
   tb.querySelectorAll('[data-k]').forEach(inp => inp.addEventListener('change', async () => {
@@ -1803,6 +1853,24 @@ document.getElementById('btnAutoCode').addEventListener('click', () => {
   // 离线队列只进不出，重试 5 次后连数据一起丢掉。
   fsPushRecord('materials', blanks);
 });
+/* 阶段5：台账次要列折叠开关。纯呈现：只切 body 上的 class，不改任何数据与渲染逻辑。 */
+(function initColsToggle() {
+  const btn = document.getElementById('btnColsMore');
+  if (!btn) return;
+  const KEY = 'mes416_cols_compact';
+  const apply = compact => {
+    document.body.classList.toggle('cols-compact', compact);
+    btn.textContent = compact ? '\ud83d\udc41 显示全部列' : '\ud83d\udc41 收起次要列';
+  };
+  let compact = false;
+  try { compact = localStorage.getItem(KEY) === '1'; } catch (e) { }
+  apply(compact);
+  btn.addEventListener('click', () => {
+    compact = !compact;
+    try { localStorage.setItem(KEY, compact ? '1' : '0'); } catch (e) { }
+    apply(compact);
+  });
+})();
 document.getElementById('btnDelMat').addEventListener('click', () => {
   const idx = [...document.querySelectorAll('.matSel:checked')].map(c => +c.dataset.i).sort((a, b) => b - a);
   if (!idx.length || !confirm('删除勾选的 ' + idx.length + ' 行物料？（标签编码作废规则：仅物理报废才作废）')) return;
@@ -1864,7 +1932,7 @@ function renderMembers() {
           (has ? '•••• 已设置' : '未设置') + '</span>' +
           '<button type="button" class="btn small ghost pin-btn" data-i="' + i + '">' + (has ? '重置' : '设置') + '</button></td>';
       }
-      return '<td data-th="' + label + '"><input type="text" data-i="' + i + '" data-k="' + k + '" value="' + esc(m[k]) + '"' + (k === 'code' ? ' readonly style="color:#667;background:#f5f7fa;"' : '') + '></td>';
+      return '<td data-th="' + label + '"><input type="text" data-i="' + i + '" data-k="' + k + '" value="' + esc(m[k]) + '"' + (k === 'code' ? ' readonly class="grid-field--readonly"' : '') + '></td>';
     }).join('') + '</tr>'
   ).join('');
   tb.querySelectorAll('input[data-k], select[data-k]').forEach(inp => inp.addEventListener('change', () => {
@@ -3039,7 +3107,7 @@ function renderWip() {
       '<td>' + ((w.execBatches || []).length || '—') + '</td>' +
       '<td><button class="btn small ghost" data-detail="' + esc(w.code) + '">详情</button></td>' +
       '</tr>';
-  }).join('') || '<tr><td colspan="7" class="hint" style="text-align:center">（没有符合条件的工单）</td></tr>';
+  }).join('') || '<tr><td colspan="7" class="empty-row">（没有符合条件的工单）</td></tr>';
 
   tb.querySelectorAll('[data-detail]').forEach(b => b.addEventListener('click', () => showWipDetail(b.dataset.detail)));
 
@@ -3067,28 +3135,28 @@ function showWipDetail(code) {
     '<div class="kv"><b>类型</b>' + esc(WIP_NAMES[w.type] || w.type) + '（' + (sign < 0 ? '扣减库存' : '增加库存') + '）　' +
     '<b>日期</b>' + esc(w.date) + '　<b>计划合计</b>' + p.plannedTotal + '　<b>已执行</b>' + p.executedTotal + '　<b>剩余</b>' + p.remainingTotal + '　<b>进度</b>' + p.percent + '%</div>' +
 
-    '<h3 style="margin:12px 0 6px;font-size:15px">明细：计划 / 实际 / 剩余</h3>' +
+    '<h3 class="detail-section">明细：计划 / 实际 / 剩余</h3>' +
     '<table class="grid"><thead><tr><th>物料码</th><th>名称</th><th style="width:80px">计划</th><th style="width:80px">已执行</th><th style="width:80px">剩余</th><th style="width:80px">当前库存</th></tr></thead><tbody>' +
     p.items.map(it => {
       const m = findMat(it.matCode);
       return '<tr><td>' + esc(it.matCode) + '</td><td>' + esc(m ? m.name : '⚠未建档') + '</td>' +
-        '<td>' + it.planned + '</td><td style="color:' + (it.executed > 0 ? '#2d9d4f' : '#8892a2') + '">' + it.executed + '</td>' +
-        '<td style="color:' + (it.remaining > 0 ? '#d33a2c' : '#8892a2') + '">' + it.remaining + '</td>' +
+        '<td>' + it.planned + '</td><td class="' + (it.executed > 0 ? 'wip-num--done' : 'wip-num--muted') + '">' + it.executed + '</td>' +
+        '<td class="' + (it.remaining > 0 ? 'wip-num--short' : 'wip-num--muted') + '">' + it.remaining + '</td>' +
         '<td>' + (m ? m.qty : '—') + '</td></tr>';
     }).join('') + '</tbody></table>' +
 
-    '<h3 style="margin:12px 0 6px;font-size:15px">执行历史</h3>' +
-    '<table class="grid"><thead><tr><th style="width:90px">动作</th><th style="width:150px">时间</th><th style="width:90px">操作人</th><th>明细</th></tr></thead><tbody>' +
+    '<h3 class="detail-section">执行历史</h3>' +
+    '<table class="grid"><thead><tr><th style="width:90px">动作</th><th class="col-w150">时间</th><th style="width:90px">操作人</th><th>明细</th></tr></thead><tbody>' +
     hist.map(h => '<tr><td>' + ({ create: '创建', execute: '执行', cancel: '取消', reverse: '冲销' }[h.kind] || h.kind) + '</td>' +
       '<td>' + esc(h.at || '—') + '</td><td>' + esc(h.operator || '—') + '</td><td>' + esc(h.text) + '</td></tr>').join('') +
     '</tbody></table>' +
 
-    '<h3 style="margin:12px 0 6px;font-size:15px">关联库存流水（' + txns.length + ' 条）</h3>' +
-    '<table class="grid"><thead><tr><th style="width:60px">#</th><th style="width:150px">时间</th><th style="width:90px">操作人</th><th style="width:90px">类型</th><th>物料</th><th style="width:70px">变动</th><th style="width:70px">余量</th></tr></thead><tbody>' +
+    '<h3 class="detail-section">关联库存流水（' + txns.length + ' 条）</h3>' +
+    '<table class="grid"><thead><tr><th style="width:60px">#</th><th class="col-w150">时间</th><th style="width:90px">操作人</th><th style="width:90px">类型</th><th>物料</th><th style="width:70px">变动</th><th style="width:70px">余量</th></tr></thead><tbody>' +
     (txns.map(t => '<tr><td>' + t.seq + '</td><td>' + esc(t.time) + '</td><td>' + esc(t.operator) + '</td><td>' + esc(t.type) + '</td>' +
-      '<td>' + esc(t.matCode) + '</td><td style="font-weight:bold;color:' + (t.delta < 0 ? '#d33a2c' : '#2d9d4f') + '">' + (t.delta > 0 ? '+' : '') + t.delta + '</td>' +
+      '<td>' + esc(t.matCode) + '</td><td class="num-delta ' + (t.delta < 0 ? 'num-delta--negative' : 'num-delta--positive') + '">' + (t.delta > 0 ? '+' : '') + t.delta + '</td>' +
       '<td>' + esc(t.balance) + '</td></tr>').join('') ||
-      '<tr><td colspan="7" class="hint" style="text-align:center">（该工单尚未产生流水）</td></tr>') +
+      '<tr><td colspan="7" class="empty-row">（该工单尚未产生流水）</td></tr>') +
     '</tbody></table>' +
 
     '<div class="toolbar" style="margin-top:12px">' +
@@ -3159,7 +3227,7 @@ function renderNec() {
     '<td><input type="text" data-i="' + i + '" data-k="owner" value="' + esc(o.owner) + '"></td>' +
     '<td><select data-i="' + i + '" data-k="priority">' + ['高', '中', '低'].map(p => '<option' + (p === o.priority ? ' selected' : '') + '>' + p + '</option>').join('') + '</select></td>' +
     '<td><input type="date" data-i="' + i + '" data-k="due" value="' + esc(o.due) + '"></td>' +
-    '<td><span class="badge st-' + o.status + '">' + o.status + '</span><br><select data-i="' + i + '" data-k="status" style="margin-top:2px">' +
+    '<td><span class="badge st-' + o.status + '">' + o.status + '</span><br><select data-i="' + i + '" data-k="status" class="status-select">' +
       NEC_STATUS.map(s => '<option' + (s === o.status ? ' selected' : '') + '>' + s + '</option>').join('') + '</select></td>' +
     '<td><input type="text" data-i="' + i + '" data-k="materials" value="' + esc(o.materials) + '"></td>' +
     '<td><input type="text" data-i="' + i + '" data-k="note" value="' + esc(o.note) + '"></td>' +
