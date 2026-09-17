@@ -8,7 +8,67 @@
 <link rel="icon" type="image/svg+xml" href="icon.svg">
 <title>416MES 仓储管理系统</title>
 <style>
+/* ============================================================
+   01 TOKENS —— 旧变量（迁移期保留，值不动，保证零视觉变化）
+   阶段 3 起才把 --green/--amber/--red 等逐步指向下方新语义色。
+   ============================================================ */
 :root{--blue:#1f6fd6;--green:#2d9d4f;--amber:#e8a020;--red:#d33a2c;--ink:#222;--line:#d8dce2;--bg:#f4f6f9;}
+/* ============================================================
+   01 TOKENS（新增层）—— 只引入新名字，不被任何现存规则引用，
+   因此本层为纯新增、不产生任何视觉变化。对比度实测见 ui优化.md §7.1。
+   ============================================================ */
+:root{
+  /* 品牌（NEC26「BUILT TO DAWN」） */
+  --nec-navy-950:#0E1A55;
+  --nec-navy-800:#172A88;
+  --nec-cyan-500:#00B0F0;
+  --brand-gradient:linear-gradient(100deg,#0E1A55 0%,#172A88 65%,#00B0F0 170%);
+  /* 深色骨架（侧栏/终端，阶段 4 启用） */
+  --sidebar-bg:#0E1A55;
+  --sidebar-fg:#B9C7DD;          /* 对比度 9.46:1 */
+  --sidebar-fg-active:#FFFFFF;   /* 16.18:1 */
+  --sidebar-active-bar:#00B0F0;  /* 深底 6.53:1 */
+  /* 中性（浅色工作台） */
+  --ink-strong:#16233A;          /* 15.72:1 */
+  --text-sub:#4A5A73;            /* 7.00:1 */
+  --text-muted:#667085;          /* 4.97:1 */
+  --line-strong:#B8C0CC;
+  --surface:#FFFFFF;
+  --surface-2:#EEF2F7;
+  --surface-hover:#F7FAFD;
+  /* 交互 */
+  --color-primary:#1F6FD6;       /* 4.88:1 */
+  --primary-hover:#1A5FBC;
+  --cyan-ink:#0077B6;            /* 浅底青文字 4.87:1；亮青 #00B0F0 浅底仅约 2.5:1，只用于深底 */
+  --focus-ring:0 0 0 3px rgba(0,119,182,.28);
+  /* 状态语义五档（深字浅底，全部 ≥4.5:1，实测值见注释） */
+  --todo-fg:#0E5F80;      --todo-bg:#E0F2FB;      /* 6.15:1 */
+  --doing-fg:#8A5A00;     --doing-bg:#FCF3DC;     /* 5.36:1 */
+  --done-fg:#17613B;      --done-bg:#E9F6EE;      /* 6.72:1 */
+  --cancelled-fg:#4A5568; --cancelled-bg:#EEF1F5; /* 6.64:1 */
+  --danger-fg:#A92323;    --danger-bg:#FDECEA;    /* 6.22:1 */
+  /* 尺寸阶梯 */
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px;
+  --r-sm:4px; --r-md:6px; --r-lg:10px;
+  --shadow-1:0 1px 2px rgba(14,26,85,.06);
+  --shadow-2:0 4px 12px rgba(14,26,85,.12);
+  /* 字体与字号 */
+  --font-ui:"Microsoft YaHei","PingFang SC",sans-serif;
+  --font-mono:"Cascadia Mono",Consolas,"Courier New",monospace;
+  --fs-11:11px; --fs-12:12px; --fs-13:13px; --fs-14:14px; --fs-16:16px;
+  --fs-20:20px; --fs-page:22px; --fs-data:28px;
+  /* 层级 */
+  --z-nav:10; --z-modal:50; --z-overlay:99;
+  /* ⚠ 冻结：--lfs 不在此定义（由 JS 在运行期设置），且禁止改名或改语义。
+     .label .bar/.code/.attr/.pdate 用 calc(... * var(--lfs,1)) 缩放；
+     fitCodes()/fitAttrs() 通过 getComputedStyle(...).getPropertyValue('--lfs') 读取。 */
+}
+/* ============================================================
+   02 RESET+BASE / 03 LAYOUT / 04 COMPONENTS / 05 PAGES
+   —— 现有规则本阶段【保持原顺序不动】：重排会改变同优先级规则的
+   层叠结果，属打印与视觉回归风险。按 ui优化.md §8.2 的批次 A–F
+   逐步归位，每批单独验证。
+   ============================================================ */
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:var(--bg);color:var(--ink);font-size:14px;}
 header{background:linear-gradient(100deg,#0E1A55 0%,#172A88 65%,#00B0F0 170%);color:#fff;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:3px solid #00B0F0;}
@@ -85,6 +145,11 @@ table.grid tr:hover td{background:#f7fafd;}
 .nec-gallery .g-item .g-dl{position:absolute;right:4px;bottom:4px;background:rgba(22,35,58,.85);color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;opacity:0;transition:opacity .15s;}
 .nec-gallery .g-item:hover .g-dl{opacity:1;}
 #tab-design.dropping{outline:3px dashed var(--blue);outline-offset:-6px;border-radius:8px;}
+/* ============================================================
+   07 PRINT — FROZEN
+   @page 与 @media print 整块冻结：选择器、尺寸、可见性语义一律不得改动。
+   任何对该段的改动都必须先通过 ui优化.md §11.3 的打印回归（PDF 对比）。
+   ============================================================ */
 /* 打印：只输出标签，60×40 纸张，零边距 */
 @page{size:60mm 40mm;margin:0;}
 @media print{
@@ -148,6 +213,12 @@ tr.row-low td{background:#fff8e1;}
 .zc-rule{height:2.5mm;background:#22a9f0;margin-top:2mm;border-radius:1px;}
 .log{font-family:Consolas,monospace;font-size:12px;max-height:220px;overflow:auto;background:#16233a;color:#bfe0c8;border-radius:6px;padding:8px 10px;margin-top:10px;white-space:pre-wrap;}
 footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
+/* ============================================================
+   06 RESPONSIVE —— 现仅一个窄屏断点，且只保护 #matTable。
+   注意：本块当前物理位置在 07 PRINT 之后（阶段 2 不移动规则）。
+   目标顺序是 RESPONSIVE 在 PRINT 之前，由批次 F 连同三档断点
+   （900 / 768 / 560）一起迁移，届时必须过打印回归。
+   ============================================================ */
 @media(max-width:560px){header .slogan{display:none;}header h1{font-size:16px;}header .sub{display:none;}
 /* 台账表格 → 卡片式 */
 #matTable thead{display:none;}
