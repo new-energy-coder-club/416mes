@@ -561,3 +561,18 @@ test('阶段7：核对必须发完整字段，否则比不出内容差异', () =
   assert.match(s, /Object\.keys\(r \|\| \{\}\)/, '要发记录的完整字段（含空值保护的写法）');
   assert.match(s, /RECONCILE_SKIP/, '体积大又不比对的列（图片链接）要能排除');
 });
+
+test('阶段7：仅本地的键必须带内容预览（否则用户判断不了该推还是该删）', () => {
+  const s = fnSrc('dataConsistencyHtml');
+  assert.match(s, /recPreview\(/, '光给业务键判断不了「ZZT9174214-MAT 是真实物料还是脚本哨兵」');
+  const pv = fnSrc('recPreview');
+  assert.match(pv, /findRec\(table, key\)/, '必须回本地记录里取内容');
+  assert.match(pv, /RES_PREVIEW_FIELDS/, '每张表要看什么字段，按表配置');
+  /* 数组字段（工单明细）必须渲染成人看得懂的形式，不能是 [object Object] */
+  assert.match(pv, /Array\.isArray\(v\)/, '明细这类数组要展开成「物料×数量」');
+  assert.ok(!/\[object/.test(pv));
+  /* 每张表都要有预览字段，漏配的表会退化成「只有键」 */
+  const map = HTML.slice(HTML.indexOf('const RES_PREVIEW_FIELDS'), HTML.indexOf('function recPreview'));
+  ['materials', 'locations', 'containers', 'members', 'items', 'manuals', 'workorders', 'transactions']
+    .forEach(t => assert.ok(map.includes(t + ':'), t + ' 缺少预览字段配置'));
+});
