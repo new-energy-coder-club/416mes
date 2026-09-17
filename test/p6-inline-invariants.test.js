@@ -180,7 +180,8 @@ test('阶段0：同号重复未收敛前，详情/扫码执行/普通删除都�
 test('阶段0：本地重复去重提供安全撤销入口，且撤销后重新核对', () => {
   assert.ok(/id="btnUndoLocalDup"/.test(HTML), '缺少本地去重撤销入口');
   const i = HTML.indexOf("id=\"btnUndoLocalDup\"");
-  const body = HTML.slice(i, i + 5000);
+  const end = HTML.indexOf("  const dj = document.getElementById('btnDelJournal');", i);
+  const body = HTML.slice(i, end > i ? end : i + 9000);
   assert.ok(/restoreWorkorderDuplicateCollapse/.test(body), '撤销必须走带哈希保护的纯函数');
   assert.ok(/state\.__localDupJournal\.shift/.test(body), '成功撤销后必须消费凭据');
   assert.ok(/await runReconcile\(\)/.test(body), '撤销后必须重新核对');

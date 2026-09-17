@@ -1447,3 +1447,20 @@ test('「图片链接」列【2026-09-16 新增】物料必须带上图片链接
   assert.equal(row['图片链接'], 'https://x/a.jpg', '图片链接必须进飞书，否则换设备就丢图');
   assert.ok(lib.TABLE_DEFS.materials.fields.some(f => f[1] === '图片链接'), 'TABLE_DEFS.materials 必须有「图片链接」映射');
 });
+
+test('censusTable：空业务键行是数据质量问题，不得误判分页不完整', async (t) => {
+  const mock = await startMock({
+    tables: { tblMAT: { fields: ['物料码', '名称'], rows: [
+      { '物料码': 'A-1', '名称': '正常' },
+      { '物料码': '', '名称': '空键行' }
+    ] }, tblTXN: { fields: ['流水号'], rows: [] } },
+    fieldTypes: { tblMAT: [{ name: '物料码', type: 1 }, { name: '名称', type: 1 }], tblTXN: [{ name: '流水号', type: 1 }] }
+  });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  const r = await lib.censusTable('materials');
+  assert.equal(r.complete, true, JSON.stringify(r));
+  assert.equal(r.scanned, 2, '完整性按收到的行数判断');
+  assert.equal(r.blankKeys, 1, '空业务键应单独报告');
+  assert.deepEqual(r.keys, ['A-1']);
+});

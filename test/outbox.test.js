@@ -381,3 +381,23 @@ test('project【P5】带绝对 qty 的条目仍然以 qty 为准（两种写法�
   const r = Outbox.project(snap(), [{ op: 'stock', matCode: 'A-1', qty: 42, delta: -3, id: 'd2' }]);
   assert.equal(r.view.materials.find(x => x.code === 'A-1').qty, 42, '给了绝对 qty 就用它（那是本地算好的目标值）');
 });
+
+test('outbox：removeRecord 只移除批量 upsert 中指定业务键，不误删同批其它记录', () => {
+  const ob = mk();
+  ob.append({ op: 'upsert', table: 'materials', records: [{ code: 'A-1' }, { code: 'A-2' }, { code: 'A-3' }] });
+  ob.append({ op: 'upsert', table: 'members', records: [{ code: 'M-1' }] });
+  ob.removeRecord('materials', 'A-2');
+  const q = ob.list();
+  const mats = q.find(x => x.table === 'materials');
+  assert.deepEqual(mats.records.map(r => r.code), ['A-1', 'A-3']);
+  assert.deepEqual(q.find(x => x.table === 'members').records.map(r => r.code), ['M-1']);
+});
+
+test('outbox：removeRecord 移除批量中的最后一条时才删除该队列项', () => {
+  const ob = mk();
+  ob.append({ op: 'upsert', table: 'materials', records: [{ code: 'A-1' }] });
+  ob.removeRecord('materials', 'A-1');
+  assert.equal(ob.list().length, 0);
+});
+
+/* async removeRecord 由同一组同步语义覆盖；存储事务实现在 store 单测中另有覆盖。 */
