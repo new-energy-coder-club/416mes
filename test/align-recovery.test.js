@@ -363,3 +363,37 @@ test('资源档案新增必须兜底防止落到已存在的业务键上（绝�
   assert.match(s, /do \{ code = pre \+ '-' \+ pad\(\+\+n, 3\); \} while/,
     '撞键必须换号重试，而不是照推');
 });
+
+/* ================= 幽灵流水（仅在本地、飞书已无）的收场 ================= */
+
+test('幽灵流水：必须由对账的 localOnly 认定，且号码连续时也能认出来', () => {
+  const src = fnSrc('txnGhosts');
+  assert.match(src, /_lastReport/, '必须依据对账结果，不能凭猜测删账本');
+  assert.match(src, /localOnly/, '只认「对账确认仅本地」的流水');
+  assert.match(src, /state\.transactions/, '必须回到本地流水里按 seq 取整条记录');
+});
+
+test('清理幽灵流水：先写凭据、只删本机、回落高水位、绝不碰飞书', () => {
+  const s = fnSrc('cleanGhostTxns');
+  const jIdx = s.indexOf('fsJournalDeletion');
+  const delIdx = s.indexOf('state.transactions = state.transactions.filter');
+  assert.ok(jIdx > 0 && delIdx > jIdx, '凭据必须写在删除之前');
+  assert.match(s, /if \(!j \|\| !j\.ok\)/, '凭据写失败必须放弃（fsJournalDeletion 不抛异常）');
+  assert.match(s, /removeRecord\('transactions'/, '必须从 outbox 摘除，否则又被推回去');
+  assert.ok(!/fsPushDelete/.test(s), '幽灵流水本来就不在飞书，绝不允许调 fsPushDelete');
+  assert.match(s, /state\.txnSeq = real \+ 1/, '必须把高水位回落到真实最大 + 1');
+  assert.match(s, /confirm\(/, '必须二次确认');
+  assert.match(s, /await runReconcile\(\)/, '清理后必须重新核对，把真实状态报出来');
+});
+
+test('幽灵流水入口必须出现在同步页健康面板里（否则用户无路可走）', () => {
+  assert.match(fnSrc('renderHealthPanel'), /txnGhostHtml\(\)/);
+  assert.match(HTML, /btnCleanGhostTxn/, '必须有可点的清理按钮');
+  const wire = HTML.slice(HTML.indexOf("document.getElementById('btnCleanGhostTxn')"));
+  assert.match(wire.slice(0, 160), /cleanGhostTxns\(\)/);
+});
+
+test('流水仍不得被普通本地删除通道处理（账本凭证不能被随手删）', () => {
+  assert.match(fnSrc('deleteOneLocalRecord'), /table === 'transactions'\) return \{ ok: false/,
+    '流水必须继续走专门的、有凭据的收场通道');
+});
