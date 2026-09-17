@@ -809,6 +809,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
 /* 阶段8：手机「全部」入口。默认隐藏（桌面/平板用不到），只在 ≤767px 显示。 */
 .nav-all{display:none}
 
+
 /* ============================================================
    06 RESPONSIVE（阶段7 重写）—— 手机适配：扫码的主战场
    手机是扫码的主要设备，优先保证：底部可达的导航、大号扫码输入与摄像头按钮、
@@ -839,6 +840,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
     margin-bottom:env(safe-area-inset-bottom,0);}
   .nav-all[aria-expanded="true"]{background:var(--primary);color:#fff;border-color:var(--primary);}
   nav.tabs button{padding:10px 12px;font-size:13px;min-height:44px;}
+
   nav.tabs a.tab-link{padding:10px 12px;min-height:44px;display:inline-flex;align-items:center;}
   body{padding-bottom:58px;}
   #appFooter{margin-bottom:58px;}
@@ -925,16 +927,16 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
 <nav class="tabs" id="mainTabs">
   <div class="nav-group">现场作业</div>
   <button data-tab="scan" data-primary="1">扫码工作台</button>
-  <button data-tab="wip" data-primary="1">库存工单</button>
+  <button data-tab="wip" data-primary="1" data-label="库存工单（WIP）" data-short="库存工单">库存工单（WIP）</button>
   <div class="nav-group">台账与建档</div>
   <button data-tab="ledger" class="on" data-primary="1">物料台账</button>
-  <button data-tab="gen">建档与编码</button>
+  <button data-tab="gen" data-label="批量建档与编码" data-short="建档编码">批量建档与编码</button>
   <button data-tab="member">成员名录</button>
   <div class="nav-group">标签与制作</div>
   <button data-tab="label" data-primary="1">标签打印</button>
   <button data-tab="design">排版工具</button>
   <div class="nav-group">实验室协作</div>
-  <button data-tab="nec">NEC 任务</button>
+  <button data-tab="nec" data-label="NEC 任务（NEC）" data-short="NEC 任务">NEC 任务（NEC）</button>
   <div class="nav-group">其他</div>
   <a class="tab-link tab-link--push" href="home.html">🏠 首页</a>
   <a class="tab-link" href="flyer-a4.html" target="_blank" rel="noopener">📄 宣传页</a>
@@ -1041,7 +1043,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       </div></details>
     </div>
   </section>
-  <!-- ========== 人员台账 ========== -->
+  <!-- ========== 成员名录 ========== -->
   <section class="tab" id="tab-member">
     <p class="page-purpose"><span>社团成员名录，姓名直通「操作人」与 NEC 任务负责人</span><span class="impact impact--none">不改库存</span><span class="hint">姓名同步右上角「操作人」；PIN 仅用于切换校验，不进 Excel 明文</span></p>
     <div class="panel">
@@ -1062,7 +1064,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <tbody></tbody>
       </table>
       </div>
-      <p class="hint mt-8">姓名会自动出现在右上角「操作人」下拉和 NEC 工单「负责人」候选中；编号（MB-xxx）生成后不变，人员退出请删除整行。「标签」用于分组（如 天权1楼实验台 / 416整理），上方标签条可一键筛选。所有修改自动保存到浏览器本地。</p>
+      <p class="hint mt-8">姓名会自动出现在右上角「操作人」下拉和 NEC 任务「负责人」候选中；编号（MB-xxx）生成后不变，人员退出请删除整行。「标签」用于分组（如 天权1楼实验台 / 416整理），上方标签条可一键筛选。所有修改自动保存到浏览器本地。</p>
     </div>
   </section>
   <!-- ========== 标签打印 ========== -->
@@ -1452,7 +1454,7 @@ const TYPES = {
   itm: { name: '物品标签', color: '#0891b2', prefix: 'ITM:' },
   man: { name: '手册标签', color: '#be185d', prefix: 'MAN:' },
   wip: { name: '工单码', color: '#d33a2c', prefix: 'WIP:' },
-  nec: { name: 'NEC工单', color: '#7c3aed', prefix: 'NEC:' },
+  nec: { name: 'NEC 任务', color: '#7c3aed', prefix: 'NEC:' },
   zone: { name: '模块区卡', color: '#22a9f0', prefix: 'LOC:' }
 };
 const WIP_NAMES = { LL: '领料工单', BH: '补货工单', JH: '拣货工单', TL: '退料工单' };
@@ -1484,6 +1486,28 @@ if (!CHECKPOINT) throw new Error('缺少 lib/replay-checkpoint.js（账本 check
 if (!INC) throw new Error('缺少 lib/incremental.js（增量协议模块）');
 if (!TWM) throw new Error('缺少 lib/three-way-merge.js（三方合并模块）');
 const NEC_TYPE_NAMES = { RW: '任务', LL: '领料', CG: '采购', WX: '维修', HD: '活动', QT: '其他' };
+/** 阶段27（§3.6）：导航项按视口长度切换「全名 / 短名」。
+ *  全名带「（WIP）」「（NEC）」消歧后缀 —— 实测 4 个手机主入口加后缀后总宽
+ *  367.6px > 可用 318px，会把「标签打印」挤出可视区、逼用户横滚（阶段 8 特意消掉的问题）。
+ *  用 JS 换文本而不是「两个 span + CSS 隐藏」：后者会让 textContent 拼成
+ *  「库存工单（WIP）库存工单」，虽然视觉没问题，但文本内容不干净。 */
+function syncNavLabels() {
+  const mini = innerWidth <= 767;
+  document.querySelectorAll('#mainTabs button[data-label]').forEach(b => {
+    const want = mini ? (b.dataset.short || b.dataset.label) : b.dataset.label;
+    if (b.textContent.trim() !== want) b.textContent = want;
+  });
+}
+window.addEventListener('resize', syncNavLabels);
+
+/* 阶段27（§3.6）：类型名的**仅显示**映射。
+   ⚠ 绝不能改 WIP_NAMES / NEC_TYPE_NAMES 本身 —— 它们的值会被写进流水 type、
+   经 feishu-sync.mjs 的固定映射回读飞书单选列，改名属数据语义变更。
+   所以这里单独放一份只用于屏幕显示的标签。 */
+const WIP_TYPE_LABEL = { LL: '领料出库', BH: '补货入库', JH: '拣货出库', TL: '退料入库' };
+const NEC_TYPE_LABEL = Object.assign({}, NEC_TYPE_NAMES, { LL: '领料记录 · 不改库存' });
+function wipTypeLabel(t) { return WIP_TYPE_LABEL[t] || WIP_NAMES[t] || t; }
+function necTypeLabel(t) { return NEC_TYPE_LABEL[t] || t; }
 /* NEC 工单码前缀。仓库工单码是 `<类型><YYYYMMDD><3位>`（如 LL20260916001），
    而 NEC 的类型下拉里也有 LL —— 不隔离就会撞号，扫错标签会真的扣库存。
    老数据（无前缀）继续可用：识别逻辑两种都认。 */
@@ -2269,13 +2293,13 @@ function dsTextOf(t, r) {
   if (t === 'mat') return [r.name, r.spec, r.code, '库位 ' + (r.loc || '—')].filter(Boolean).join('\n');
   if (t === 'loc') return [r.desc, r.code].filter(Boolean).join('\n');
   if (t === 'ctn') return [r.type + ' ' + r.spec, r.code].filter(Boolean).join('\n');
-  if (t === 'wip') return [(WIP_NAMES[r.type] || r.type) + ' ' + r.date, r.items.map(i => i.matCode + '×' + i.qty).join(' '), r.code].filter(Boolean).join('\n');
-  return [r.title, (NEC_TYPE_NAMES[r.type] || r.type) + ' · ' + (r.owner || '—'), r.code].filter(Boolean).join('\n');
+  if (t === 'wip') return [wipTypeLabel(r.type) + ' ' + r.date, r.items.map(i => i.matCode + '×' + i.qty).join(' '), r.code].filter(Boolean).join('\n');
+  return [r.title, necTypeLabel(r.type) + ' · ' + (r.owner || '—'), r.code].filter(Boolean).join('\n');
 }
 function dsRecLabel(t, r) {
   if (t === 'mat') return r.code + ' ' + r.name;
   if (t === 'nec') return r.code + ' ' + r.title;
-  if (t === 'wip') return r.code + ' ' + (WIP_NAMES[r.type] || r.type);
+  if (t === 'wip') return r.code + ' ' + wipTypeLabel(r.type);
   return r.code + ' ' + (r.desc || r.type || '');
 }
 function renderDesign() {
@@ -2537,7 +2561,7 @@ document.getElementById('btnDelMat').addEventListener('click', () => {
 document.getElementById('matCheckAll').addEventListener('change', e =>
   document.querySelectorAll('.matSel').forEach(c => c.checked = e.target.checked));
 
-/* ================= ①b 人员台账 ================= */
+/* ================= ①b 成员名录 ================= */
 const MEMBER_COLS = [['code', '编号'], ['name', '姓名'], ['sid', '学号'], ['dept', '部门/SIG'], ['role', '职务'], ['group', '标签'], ['pin', 'PIN码'], ['phone', '电话'], ['note', '备注']];
 /* 「职务」在飞书是多选一（单选字段），选项只有这三个。
    网页端以前是自由文本输入框 —— 填「管理员」之类要么被飞书自动新建选项
@@ -3170,7 +3194,7 @@ function mergePackage(pkg, { from = '备份文件', upsertMembers = false } = {}
 function mergeStatText(stat) {
   return '新增物料 ' + stat.mat + '、库位 ' + stat.loc + '、容器 ' + stat.ctn + '、物品 ' + stat.itm + '、手册 ' + stat.man +
     '、人员 ' + stat.mbr + (stat.mbrUpd ? '（同号更新 ' + stat.mbrUpd + '）' : '') +
-    '、工单 ' + stat.wip + '、NEC工单 ' + stat.nec + (stat.necUpd ? '（另更新 ' + stat.necUpd + ' 张）' : '') + '、流水 ' + stat.txn + ' 条';
+    '、工单 ' + stat.wip + '、NEC 任务 ' + stat.nec + (stat.necUpd ? '（另更新 ' + stat.necUpd + ' 张）' : '') + '、流水 ' + stat.txn + ' 条';
 }
 
 /* ---------- 云端同步（飞书后端 → 本机，经 /api/feishu/state） ---------- */
@@ -3263,8 +3287,8 @@ function labelAttrs(t, r) {
   if (t === 'mat') return [['名称', r.name], ['规格', r.spec], ['库位', r.loc || '—']];
   if (t === 'itm') return [['名称', r.name], ['规格', r.spec || '—'], ['库位', r.loc || '—']];
   if (t === 'man') return [['名称', r.name], ['版本', r.ver || '—'], ['库位', r.loc || '—']];
-  if (t === 'nec') return [['标题', r.title], ['类型', NEC_TYPE_NAMES[r.type] || r.type], ['负责人', r.owner || '—'], ['截止', r.due || '—'], ['状态', r.status]];
-  return [['类型', WIP_NAMES[r.type] || r.type], ['日期', r.date], ['明细', r.items.map(i => i.matCode + '×' + i.qty).join(' ') || '—'], ['状态', r.status]];
+  if (t === 'nec') return [['标题', r.title], ['类型', necTypeLabel(r.type)], ['负责人', r.owner || '—'], ['截止', r.due || '—'], ['状态', r.status]];
+  return [['类型', wipTypeLabel(r.type)], ['日期', r.date], ['明细', r.items.map(i => i.matCode + '×' + i.qty).join(' ') || '—'], ['状态', r.status]];
 }
 /* NEC26 主视觉：白色 N Logo（取自 BUILT TO DAWN 主视觉 pptx），内嵌保持单文件离线 */
 const NEC_LOGO_W = 'data:image/png;base64,' + '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';
@@ -3317,7 +3341,7 @@ function renderLabelTab() {
   const cells = {
     loc: r => [r.code, r.kind, r.desc], ctn: r => [r.code, r.type, r.spec, r.loc],
     mat: r => [r.code, r.name, r.spec, r.loc], itm: r => [r.code, r.name, r.spec, r.loc], man: r => [r.code, r.name, r.ver, r.loc],
-    wip: r => [r.code, WIP_NAMES[r.type] || r.type, r.date, r.status],
+    wip: r => [r.code, wipTypeLabel(r.type), r.date, r.status],
     nec: r => [r.code, r.title, r.owner, r.status],
     zone: r => [r.code, r.desc, 'LOC:' + r.code]
   };
@@ -3637,7 +3661,7 @@ document.getElementById('btnGenWip').addEventListener('click', async () => {
   if (dropped.length) notes.push('已忽略 ' + dropped.length + ' 行无效明细（' + dropped.map(d => d.reason).join('；') + '）');
   // 分级：无风险/无备注时只是纯确认 → toast；一旦带上撞号警告或无效行说明，
   // 就是需要停下来读的信息 → 仍用 alert。
-  const createMsg = '已生成工单 ' + code + '（' + WIP_NAMES[type] + '，明细 ' + r.order.items.length + ' 项）';
+  const createMsg = '已生成工单 ' + code + '（' + wipTypeLabel(type) + '，明细 ' + r.order.items.length + ' 项）';
   const createDetail = ((seqInfo.warned ? '⚠️ 没能问到飞书侧的号段，已按本地计数器生成（本地 ' + seqInfo.local + '）。' +
       '若此时别的设备正在建单，可能撞号，请稍后在工单列表核对。' : '') +
     (seqInfo.remote > seqInfo.local ? '（飞书侧已有 ' + seqInfo.remote + ' 号，已自动接在其后）' : '') +
@@ -3805,7 +3829,7 @@ function renderWip() {
       '<div class="progress__bar ' + barCls + '" style="width:' + pct + '%"></div></div>';
     return '<tr>' +
       '<td data-th="工单号"><b>' + esc(w.code) + '</b></td>' +
-      '<td data-th="类型">' + esc(WIP_NAMES[w.type] || w.type) + '</td>' +
+      '<td data-th="类型">' + esc(wipTypeLabel(w.type)) + '</td>' +
       '<td data-th="日期">' + esc(w.date) + '</td>' +
       '<td data-th="状态">' + wipStatusBadge(w) + '</td>' +
       '<td data-th="进度">' + p.executedTotal + ' / ' + p.plannedTotal + ' <span class="hint">(' + p.percent + '%)</span>' + bar + '</td>' +
@@ -3915,7 +3939,7 @@ function showWipDetail(code) {
     '<div class="progress" aria-label="工单进度 ' + Math.min(100, p.percent) + '%">' +
       '<div class="progress__bar ' + (CORE.isCancelled(w) ? 'progress__bar--cancelled' : (p.percent >= 100 ? 'progress__bar--done' : (p.percent <= 0 ? 'progress__bar--todo' : 'progress__bar--active'))) +
       '" style="width:' + Math.min(100, p.percent) + '%"></div></div>' +
-    '<div class="kv"><b>类型</b>' + esc(WIP_NAMES[w.type] || w.type) + '（' + (sign < 0 ? '扣减库存' : '增加库存') + '）　' +
+    '<div class="kv"><b>类型</b>' + esc(wipTypeLabel(w.type)) + '（' + (sign < 0 ? '扣减库存' : '增加库存') + '）　' +
     '<b>日期</b>' + esc(w.date) + '　<b>计划合计</b>' + p.plannedTotal + '　<b>已执行</b>' + p.executedTotal + '　<b>剩余</b>' + p.remainingTotal + '　<b>进度</b>' + p.percent + '%</div>' +
 
     '<h3 class="detail-section">明细：计划 / 实际 / 剩余</h3>' +
@@ -4125,7 +4149,7 @@ document.getElementById('necCheckAll').addEventListener('change', e =>
   document.querySelectorAll('.necSel').forEach(c => c.checked = e.target.checked));
 document.getElementById('btnNecDel').addEventListener('click', () => {
   const idx = [...document.querySelectorAll('.necSel:checked')].map(c => +c.dataset.i).sort((a, b) => b - a);
-  if (!idx.length || !confirm('删除勾选的 ' + idx.length + ' 张 NEC 工单？')) return;
+  if (!idx.length || !confirm('删除勾选的 ' + idx.length + ' 张 NEC 任务？')) return;
   sel.nec.clear();   // 同删物料：下标整体失效，必须清掉，否则标签页会打错标签
   idx.forEach(i => state.necOrders.splice(i, 1)); save(); renderNec();
 });
@@ -4331,7 +4355,7 @@ function locationCard(code, { withTimes = true } = {}) {
       (L.lastTxn.ref ? ' · 关联单 ' + esc(L.lastTxn.ref) : '') + '</span></div>');
   }
   if (L.lastOrder) {
-    ev.push('<div><b>最近工单</b>' + esc(L.lastOrder.code) + ' <span class="hint">' + esc(WIP_NAMES[L.lastOrder.type] || L.lastOrder.type) + ' · ' +
+    ev.push('<div><b>最近工单</b>' + esc(L.lastOrder.code) + ' <span class="hint">' + esc(wipTypeLabel(L.lastOrder.type)) + ' · ' +
       esc(CORE.statusLabel(L.lastOrder.status)) + (L.lastOrder.execTime ? ' · ' + esc(L.lastOrder.execTime) : '') + '</span></div>');
   }
 
@@ -4534,7 +4558,7 @@ function scanNec(code, box) {
       detailHtml: '<p class="hint">请在「NEC 任务」页确认工单号。</p>'
     });
     addScan('nec', 'NEC:', code, false, null);
-    log('未命中 NEC 工单 ' + code);
+    log('未命中 NEC 任务 ' + code);
     return;
   }
   const related = state.materials.filter(m => o.materials && String(o.materials).includes(m.code));
@@ -4549,7 +4573,7 @@ function scanNec(code, box) {
       { label: '优先级', value: o.priority || '—' }
     ],
     detailHtml:
-      '<div class="kv"><b>类型</b>' + esc(NEC_TYPE_NAMES[o.type] || o.type || '—') +
+      '<div class="kv"><b>类型</b>' + esc(necTypeLabel(o.type) || '—') +
       '　<b>截止</b>' + esc(o.due || '—') + '　<b>创建</b>' + esc(o.createdAt || '—') +
       (o.doneAt ? '　<b>完成</b>' + esc(o.doneAt) : '') + '</div>' +
       (o.materials ? '<div class="kv"><b>物料</b>' + esc(o.materials) + '</div>' : '') +
@@ -4561,7 +4585,7 @@ function scanNec(code, box) {
         : '')
   });
   addScan('nec', 'NEC:', code, true, o);
-  log('查询 NEC 工单 ' + code + '（' + o.status + '）');
+  log('查询 NEC 任务 ' + code + '（' + o.status + '）');
 }
 
 /* ---------- ITM: 物品（设备/工具/展品） ---------- */
@@ -4647,7 +4671,7 @@ function scanWip(code, box) {
   box.innerHTML = renderScanCard({
     kind: st[0], statusText: st[1],
     prefix: 'WIP:', prefixCls: 'wip',
-    title: (WIP_NAMES[w.type] || w.type) + ' ' + w.code, code: 'WIP:' + w.code,
+    title: wipTypeLabel(w.type) + ' ' + w.code, code: 'WIP:' + w.code,
     tag: wipStatusBadge(w),
     readings: [
       { label: '剩余', value: prog.remainingTotal, unit: '件', primary: true },
@@ -4731,7 +4755,7 @@ function scanWip(code, box) {
       r.applied.forEach(a => { invPush(a.matCode, a.balance); fsPushStock(a.matCode, a.balance, a.delta, WIP_NAMES[w.type] || w.type, '', w.code, a.txn); });
       fsPushRecord('workorders', [w]);   // 工单状态（未执行/部分执行/已执行）写回飞书
       save(); renderLedger(); renderTxns(); renderWip();
-      log('执行工单 ' + w.code + '（' + WIP_NAMES[w.type] + '）：' + r.applied.map(a => a.matCode + (a.delta < 0 ? '' : '+') + a.delta).join('，') +
+      log('执行工单 ' + w.code + '（' + wipTypeLabel(w.type) + '）：' + r.applied.map(a => a.matCode + (a.delta < 0 ? '' : '+') + a.delta).join('，') +
         '｜状态 ' + CORE.statusLabel(w.status) + '｜操作人 ' + state.operator);
       scanWip(code, box);
     });
@@ -4760,10 +4784,10 @@ function handleScan(raw) {
     if (asWip && asNec) {
       box.className = 'scan-result panel flash-bad';
       box.innerHTML = '<div class="kv"><b>⚠️ 这个码有歧义，已停止操作</b><br>' + esc(raw) +
-        '<br><span class="hint">它同时匹配一张仓库工单和一张 NEC 工单（都是 NEC- 前缀之前建的老单）。' +
+        '<br><span class="hint">它同时匹配一张仓库工单和一张 NEC 任务（都是 NEC- 前缀之前建的老单）。' +
         '为避免扫错标签动错库存，这里不替你选。请用 <code>WIP:' + esc(raw) + '</code> 或 <code>NEC:' + esc(raw) + '</code> 明确指定。</span></div>';
       addScan('unknown', '', raw, false, null);
-      log('⚠️ 扫码歧义（仓库工单与 NEC 工单同号），已停止：' + raw);
+      log('⚠️ 扫码歧义（仓库工单与 NEC 任务同号），已停止：' + raw);
       return;
     }
     if (asWip) prefix = 'WIP:';
@@ -4820,7 +4844,9 @@ const CTX = { material: null, order: null, from: null };
 
 function tabLabelOf(t) {
   const b = document.querySelector('nav.tabs button[data-tab="' + t + '"]');
-  return b ? b.textContent.trim() : t;
+  if (!b) return t;
+  // 阶段27（§3.6）：按钮里有「全名/短名」两份文本，程序侧一律取全名
+  return b.dataset.label || b.textContent.trim();
 }
 function goTab(t) { const b = document.querySelector('nav.tabs button[data-tab="' + t + '"]'); if (b) b.click(); }
 
@@ -7233,6 +7259,7 @@ function renderDataStoreHint() {
 load(); renderDataStoreHint(); renderLedger(); refreshMatDatalist(); refreshMemberDatalist(); renderNec(); renderOperators(); renderTxns(); renderWip(); renderCtxBar(); renderStatusBar();
 // 阶段13：为初始当前页签补 aria-current（深链进入时也要正确）
 (function () { const on = document.querySelector('nav.tabs button.on'); if (on) on.setAttribute('aria-current', 'page'); })();
+syncNavLabels();
 applyHash();
 /* 阶段26（§3.7）：兼容 hashchange 与浏览器前进/后退。
    原先只在启动时读一次 hash，用户按后退键页面不动 —— 深链分享出去后体验很割裂。 */
