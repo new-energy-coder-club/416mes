@@ -700,6 +700,27 @@ body.cols-compact .col-secondary{display:none}
 /* 扫码页 */
 .scan-input{width:100%;font-size:18px;padding:12px;border:2px solid var(--blue);border-radius:8px;letter-spacing:1px;}
 .scan-result{margin-top:12px;}
+/* ============================================================
+   06 RESPONSIVE（阶段23 · §7.5）：摄像头识别后结果全屏卡
+   现场举着手机看一个嵌在长页面里的小卡片，很容易看漏「负库存 / 库存不足」这类结论。
+   z-index 取 nav+1：卡片盖住内容但**不盖住底部导航** —— 否则用户除了关闭按钮无路可走。
+   ============================================================ */
+.scan-fs-close{display:none}
+@media screen and (max-width:767px){
+  .cam-frame{inset:12% 20%;}          /* §7.5：取景框内缩到约 60vw */
+  .cam-corner{width:22px;height:22px;}
+  body.scan-fs #scanResult{position:fixed;left:0;right:0;top:0;bottom:0;
+    z-index:calc(var(--z-nav) + 1);margin:0;border-radius:0;overflow:auto;
+    padding:14px;padding-top:56px;
+    padding-bottom:calc(72px + env(safe-area-inset-bottom,0));
+    background:var(--surface);}
+  body.scan-fs .scan-fs-close{display:flex;align-items:center;justify-content:center;
+    position:fixed;top:8px;right:8px;z-index:calc(var(--z-nav) + 2);
+    min-height:44px;min-width:44px;padding:0 14px;
+    border:1px solid var(--line);border-radius:var(--r-md);
+    background:var(--surface);color:var(--text-sub);
+    font-size:13px;font-family:inherit;cursor:pointer;box-shadow:0 2px 10px rgba(10,16,28,.18);}
+}
 .kv{font-size:13px;line-height:1.9;}
 .kv b{display:inline-block;min-width:90px;color:#556;}
 .flash-ok{background:#e7f6ec;border:1px solid #9fd7b2;}
@@ -1300,6 +1321,10 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <button class="btn small ghost" id="btnInvTest">测试连接</button>
         <span class="hint" id="invStatus"></span>
       </div></details>
+      <!-- 阶段23（§7.5）：摄像头识别后手机上把结果卡推成全屏。
+           关闭按钮刻意放在 #scanResult 之外 —— 结果卡是整块 innerHTML 重建的，
+           放里面会被冲掉。 -->
+      <button type="button" class="scan-fs-close" id="btnScanFsClose" aria-label="关闭全屏结果">✕ 关闭</button>
       <div class="scan-result" id="scanResult"></div>
     </div>
     <div class="panel">
@@ -2289,6 +2314,17 @@ const SECONDARY_MAT_COLS = ['spec', 'xy', 'cost', 'img'];
 /* 分类码：JG机构件 DJ电机驱动 DZ电子件 GZ贵重件 TS调试设备 GJ工具 HC耗材 QT其他 */
 const MAT_CATS = { JG: '机构件', DJ: '电机驱动', DZ: '电子件', GZ: '贵重件', TS: '调试设备', GJ: '工具', HC: '耗材', QT: '其他' };
 let ledgerFilter = '';
+/** 阶段23（§7.5）：手机端摄像头识别后把结果卡推成全屏（≤767px 生效，桌面无影响）。
+ *  只由摄像头路径开启 —— 手动输入/扫码枪仍用页内卡片，避免打断连续扫码。 */
+function scanFullscreen(on) {
+  document.body.classList.toggle('scan-fs', !!on);
+}
+document.getElementById('btnScanFsClose').addEventListener('click', () => scanFullscreen(false));
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.body.classList.contains('scan-fs')) scanFullscreen(false);
+});
+document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('click', () => scanFullscreen(false)));
+
 /** 阶段22（§5.4）：库存改完后让那一格闪一下。
  *  表格是整块重渲染的，用户很难确认「刚才那一下到底生效没有」。 */
 function flashQty(code) {
@@ -4737,7 +4773,7 @@ document.getElementById('scanInput').addEventListener('keydown', e => {
         stream = null;
         hintEl.innerHTML = '✓ 已识别 <b>' + esc(q.data) + '</b>，正在填入…';
         clearErr();
-        setTimeout(() => { stop(); handleScan(q.data); }, 520);
+        setTimeout(() => { stop(); handleScan(q.data); scanFullscreen(true); }, 520);
         return;
       }
     }
