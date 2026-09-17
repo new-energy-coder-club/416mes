@@ -986,6 +986,10 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
     <p class="page-purpose"><span>主数据维护：编码不变、属性可变</span><span class="impact impact--confirm">手工改库存会写流水</span></p>
     <div class="panel">
       <h2>物料台账（主数据：编码不变，属性可变）</h2>
+      <!-- 阶段28（§3.7）：深链带了 code 但当前数据空间里没有 → 显式提示 + 搜索入口。
+           file:// 打开时 home.html 与 index.html 各有独立的存储空间，门户链接
+           常常「指过来却查不到」，此时**绝不自动创建记录**，只给入口。 -->
+      <div class="notice notice--warn" id="deepMissBox" hidden role="status"></div>
       <!-- 阶段22（§5.4）：工具栏拆两行 —— 高频业务操作与低频数据维护不再同权 -->
       <div class="toolbar toolbar--main">
         <input class="field field--md field--w240" type="text" id="matSearch" placeholder="🔍 搜索：编码/名称/规格/库位/容器">
@@ -1486,6 +1490,34 @@ if (!CHECKPOINT) throw new Error('缺少 lib/replay-checkpoint.js（账本 check
 if (!INC) throw new Error('缺少 lib/incremental.js（增量协议模块）');
 if (!TWM) throw new Error('缺少 lib/three-way-merge.js（三方合并模块）');
 const NEC_TYPE_NAMES = { RW: '任务', LL: '领料', CG: '采购', WX: '维修', HD: '活动', QT: '其他' };
+/** 阶段28（§3.7）：深链「当前数据空间未命中」提示。
+ *  场景：file:// 打开时 home.html 与 index.html 各有独立存储空间，
+ *  门户/看板上的 `#ledger?code=…` 链接指过来常常查不到那条记录。
+ *  **绝不自动创建记录** —— 只显式说明 + 给一个搜索入口，由人决定。 */
+let _pendingMissCheck = null;
+function deepLinkMiss(kind, code) {
+  const box = document.getElementById('deepMissBox');
+  if (!box) return;
+  /* 阶段28（§3.7）：applyHash() 可能在本地存储（IndexedDB 恢复）就位**之前**执行 ——
+     那时 state 里的记录可能不全，会把**存在的编码误报成「未命中」**（实测首屏那一刻
+     materials 只有 2 条、随后才是 4 条）。所以这里记住待复检项，
+     等 localStoreReady 之后再核一遍。 */
+  _pendingMissCheck = { kind, code };
+  const list = kind === 'workorders' ? (state.workorders || []) : (state.materials || []);
+  const hit = list.some(r => String(r.code) === String(code));
+  if (hit) { box.hidden = true; box.innerHTML = ''; _pendingMissCheck = null; return; }
+  box.hidden = false;
+  box.innerHTML = '△ <b>当前数据空间未命中</b> <code>' + esc(code) + '</code>' +
+    ' —— 链接来自另一台设备或另一个浏览器（数据各自存在本地）。' +
+    '<button type="button" class="btn small ghost" id="btnDeepMissSearch" data-code="' + esc(code) + '">在本空间搜索该编码</button>';
+  const b = document.getElementById('btnDeepMissSearch');
+  if (b) b.addEventListener('click', () => {
+    const si = document.getElementById('matSearch');
+    if (si) { si.value = code; si.dispatchEvent(new Event('input', { bubbles: true })); }
+    box.hidden = true;
+  });
+}
+
 /** 阶段27（§3.6）：导航项按视口长度切换「全名 / 短名」。
  *  全名带「（WIP）」「（NEC）」消歧后缀 —— 实测 4 个手机主入口加后缀后总宽
  *  367.6px > 可用 318px，会把「标签打印」挤出可视区、逼用户横滚（阶段 8 特意消掉的问题）。
@@ -4248,6 +4280,7 @@ function applyHash() {
     if (code) {
       const si = document.getElementById('matSearch');
       if (si) { si.value = code; si.dispatchEvent(new Event('input', { bubbles: true })); }
+      deepLinkMiss('materials', code);
     }
     if (q.get('view') === 'transactions') {
       const ts = document.getElementById('txnSummary');
@@ -4256,6 +4289,7 @@ function applyHash() {
     }
   } else if (parts[0] === 'wip' && code) {
     showWipDetail(code);                 // 只展开详情，不改工单状态
+    deepLinkMiss('workorders', code);
   } else if (parts[0] === 'scan' && code) {
     const si = document.getElementById('scanInput');
     // 只预填，**不自动提交** —— 扫错标签动错库存，必须由人按回车确认
@@ -7271,6 +7305,8 @@ renderScanLog();
    __syncedKeys 还是空的（于是「本地新建」判定失真），基线整份被冲掉。 */
 (async function boot() {
   try { await localStoreReady; } catch (e) { /* initLocalStore 内部已兜底，这里只保证顺序 */ }
+  // 阶段28（§3.7）：本地存储就位后复检一次深链未命中，避免首屏误报
+  if (_pendingMissCheck) { const p = _pendingMissCheck; _pendingMissCheck = null; deepLinkMiss(p.kind, p.code); }
   // 首屏 = 从导航开始到本地数据渲染完成（不含飞书往返 —— 那不该挡住首屏）
   // performance.now() 就是「距导航开始」的毫秒数，这里正是本地数据渲染完的时刻
   try { HEALTH.bootMs = Math.round(performance.now()); } catch (e) { HEALTH.bootMs = null; }
