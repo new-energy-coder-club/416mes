@@ -656,3 +656,31 @@ test('本机 ↔ 飞书 关系必须写在产品里且结论准确', () => {
   assert.match(sync, /离线时改动会排队/, '要讲清离线队列会在之后补交（我踩过两次的坑）');
   assert.match(sync, /NEC 任务[\s\S]{0,80}仅本机/, '要讲清 NEC 任务不同步');
 });
+
+/* ================= InvenTree 集成已按需求整体移除（防回流） ================= */
+
+test('InvenTree 集成必须已被彻底移除，且不得回流', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const REPO = path.join(__dirname, '..');
+  /* 用户决定：这个服务不需要，全部删掉。
+     加这条断言是为了防止以后又有人（包括我）把代码/UI/脚本加回来。 */
+  const gone = ['inventree-sync.mjs', 'INVENTREE-INTEGRATION.md', 'inventree-sync.config.json'];
+  gone.forEach(f => assert.ok(!fs.existsSync(path.join(REPO, f)), f + ' 应已删除'));
+
+  /* 网页端：不该再有任何 InvenTree 的 UI 或调用 */
+  ['invPush', 'invEnabled', 'invUrl', 'invToken', 'btnInvTest', 'invStatus', 'INV_LS'].forEach(sym =>
+    assert.ok(!HTML.includes(sym), 'index.html 不得再出现 ' + sym));
+  assert.ok(!/InvenTree/i.test(HTML), 'index.html 不得再出现 InvenTree 字样');
+
+  /* 页面里也不该再有指向 InvenTree 服务的地址 */
+  [['home.html'], ['join.html'], ['flyer-a4.html']].forEach(([f]) => {
+    const t = fs.readFileSync(path.join(REPO, f), 'utf8');
+    assert.ok(!/InvenTree|inventree/i.test(t), f + ' 不得再出现 InvenTree');
+  });
+  assert.ok(!/8001/.test(fs.readFileSync(path.join(REPO, 'home.html'), 'utf8')), 'home.html 不得再指向 :8001');
+
+  /* package.json 的语法检查也不该再引用已删除的脚本 */
+  const pkg = fs.readFileSync(path.join(REPO, 'package.json'), 'utf8');
+  assert.ok(!/inventree/.test(pkg), 'package.json 不得再引用 inventree-sync.mjs');
+});

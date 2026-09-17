@@ -47,11 +47,6 @@ main{flex:1;max-width:1080px;margin:0 auto;padding:26px 24px 40px;width:100%;}
 .c-red .icon{background:var(--red);}     .c-red{border-top:3px solid var(--red);}
 .c-purple .icon{background:var(--purple);}.c-purple{border-top:3px solid var(--purple);}
 .c-navy .icon{background:var(--navy);}   .c-navy{border-top:3px solid var(--navy);}
-/* 宽卡：InvenTree */
-.card.wide{grid-column:1/-1;flex-direction:row;align-items:center;gap:18px;background:linear-gradient(120deg,#fff 60%,#f2f7ff);}
-.card.wide .icon{width:56px;height:56px;font-size:28px;flex:none;}
-.card.wide .meta{flex:1;min-width:0;}
-.card.wide .tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;}
 .tag{font-size:11px;background:#eef2f7;border:1px solid var(--line);border-radius:4px;padding:2px 8px;color:#556;}
 /* 运维面板 */
 .ops{background:#16233a;border-radius:12px;padding:18px 20px;color:#c8d4e6;font-size:13px;line-height:2;}
@@ -82,10 +77,9 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
   <div class="wrap">
     <div class="eyebrow">BUILT TO DAWN · KEEP BUILDING&#9608;</div>
     <h1><span class="logo"><img src="nec-logo-white.png" alt="NEC"></span>常州工NEC · 智能仓库MES</h1>
-    <div class="sub">七类标签（库位 / 容器 / 物料 / 物品 / 手册 / 库存工单 / NEC工单）· 扫码工作台（查询只读 · 执行需确认）· Excel 台账 · InvenTree 集成镜像<br>Design by 常州工 NEC · newenergycoder.club</div>
+    <div class="sub">七类标签（库位 / 容器 / 物料 / 物品 / 手册 / 库存工单 / NEC工单）· 扫码工作台（查询只读 · 执行需确认）· Excel 台账 · 扫码出入库闭环<br>Design by 常州工 NEC · newenergycoder.club</div>
     <div class="status-row">
       <span class="chip" id="chip-mes"><span class="dot"></span>416MES 前端检测中…</span>
-      <span class="chip" id="chip-inv"><span class="dot"></span>InvenTree 后端检测中…</span>
     </div>
   </div>
 </header>
@@ -137,35 +131,11 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
     </a>
   </div>
 
-  <div class="section-title">🔗 集成平台</div>
-  <div class="grid">
-    <a class="card wide c-navy" id="card-inv" href="http://localhost:8001" target="_blank" rel="noopener">
-      <div class="icon">🗄️</div>
-      <div class="meta">
-        <h3>InvenTree 库存平台 <span class="tag" id="inv-ver">检测中…</span></h3>
-        <p>物料 / 库位 / 库存的网页后台与报表中心，台账经 <b>inventree-sync.mjs</b> 单向镜像。原生支持扫码出入库、标签模板、BOM 与采购管理。<b>凭据见团队内部文档</b>（勿贴在公网页面）。</p>
-        <div class="tags"><span class="tag">Part 物料</span><span class="tag">StockLocation 库位树</span><span class="tag">REST API</span><span class="tag">条码 MAT:/LOC:/CTN:</span></div>
-      </div>
-      <span class="go">打开 →</span>
-    </a>
-    <a class="card wide c-blue" href="https://trinacli.feishu.cn/base/NpWBb0RXYayqfosYqnScWdlDnMb" target="_blank" rel="noopener">
-      <div class="icon">📊</div>
-      <div class="meta">
-        <h3>飞书多维表后端 <span class="tag">数据收集</span></h3>
-        <p>仓储管理系统云端后端：物料台账 / 库位 / 容器 / 人员 / 物品 / 手册 / 工单记录 / 库存流水 8 张数据表，列结构与 Excel 双向模板一致，表 ID 见 <b>feishu-backend.config.json</b>。</p>
-        <div class="tags"><span class="tag">8 张数据表</span><span class="tag">lark-cli base</span><span class="tag">库存流水审计</span></div>
-      </div>
-      <span class="go">打开 →</span>
-    </a>
-  </div>
 
   <div class="section-title">🛠️ 日常运维（数据同步闭环）</div>
   <div class="ops">
-    <h3>416MES → InvenTree 台账同步</h3>
-    <div class="step"><span class="num">1</span><span>416MES「物料台账」页 → <code>导出 Excel 台账</code>，文件放入本项目目录</span></div>
-    <div class="step"><span class="num">2</span><span><code>node inventree-sync.mjs push --dry-run</code> 预演确认，再去掉 <code>--dry-run</code> 正式同步</span></div>
-    <div class="step"><span class="num">3</span><span>NEC 工单与飞书双向同步：<code>node nec-sync.mjs push</code>（推）/ <code>node nec-sync.mjs pull</code>（拉，生成文件后在台账页「导入合并」）</span></div>
-    <div class="step"><span class="num">4</span><span>详细方案见项目目录 <code>INVENTREE-INTEGRATION.md</code>（仅本地，不公网发布）；库存真源 = 416MES 扫码闭环，InvenTree 只做镜像</span></div>
+    <h3>NEC 工单与飞书双向同步</h3>
+    <div class="step"><span class="num">1</span><span>NEC 工单与飞书双向同步：<code>node nec-sync.mjs push</code>（推）/ <code>node nec-sync.mjs pull</code>（拉，生成文件后在台账页「导入合并」）</span></div>
   </div>
 </main>
 
@@ -175,10 +145,6 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
 (function(){
   var host = location.hostname || 'localhost';
   var isHttps = location.protocol === 'https:';
-  // 反代场景（自托管 nginx：/inventree/ → :8001）走同源路径，避开 HTTPS 混合内容拦截；
-  // 本地/局域网 HTTP 场景直连 :8001；公网 HTTPS 且无反代时优雅降级为「本地服务」
-  var invUrl = isHttps ? (location.origin + '/inventree') : ('http://' + host + ':8001');
-  document.getElementById('card-inv').href = isHttps ? (invUrl + '/') : invUrl;
 
   // 416MES 芯片：读出 localStorage 里的真实运营数据（同源有效，跨设备各自独立）
   var chipMes = document.getElementById('chip-mes');
@@ -226,24 +192,6 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
     chipMes.innerHTML = '<span class="dot"></span><span class="t">416MES 前端在线</span>';
   }
 
-  // InvenTree 在线检测：3 秒超时兜底，不永远卡「检测中」
-  var chip = document.getElementById('chip-inv');
-  var tag = document.getElementById('inv-ver');
-  var ctl = new AbortController();
-  var timer = setTimeout(function(){ ctl.abort(); }, 3000);
-  fetch(invUrl + '/api/', { signal: ctl.signal }).then(function(r){ return r.json(); }).then(function(d){
-    clearTimeout(timer);
-    chip.className = 'chip ok';
-    chip.innerHTML = '<span class="dot"></span><span class="t">InvenTree 在线 · ' + (d.version || '') + '</span>';
-    if (tag) tag.textContent = 'v' + (d.version || '?') + ' 在线';
-  }).catch(function(){
-    clearTimeout(timer);
-    chip.className = 'chip bad';
-    chip.innerHTML = '<span class="dot"></span><span class="t">' + (isHttps
-      ? 'InvenTree 为本地服务（公网不可达；自托管可配 /inventree 反代）'
-      : 'InvenTree 未响应（docker start inventree）') + '</span>';
-    if (tag) tag.textContent = '离线';
-  });
 })();
 </script>
 </body>

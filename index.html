@@ -639,7 +639,6 @@ body.stocktake-on .stocktake-banner{display:block}
 .field--md{padding:6px 10px;font-size:13px;border-radius:5px}
 .field--sm{padding:3px 8px;font-size:13px;border-radius:5px}
 .field--xs{padding:2px 8px;font-size:13px;border-radius:4px;border:none;background:var(--surface-2)}
-.field--inv{padding:5px 8px;font-size:12px;border-radius:5px}
 .field--w200{width:200px}
 .field--w220{width:220px}
 .field--w240{width:240px}
@@ -1594,14 +1593,6 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       </div>
       <div class="stocktake-banner" id="stocktakeBanner">📦 <b>盘点模式已开启</b> —— 扫 <b>MAT:</b> 物料码后输入实盘数，点「确认盘点」才会写入库存流水；其他码型仍按原方式处理。<button type="button" class="btn small ghost" id="btnStocktakeOff" style="margin-left:8px">退出盘点模式</button></div>
       <label style="display:inline-flex;align-items:center;gap:6px;margin-top:10px;font-size:13px;cursor:pointer;"><input type="checkbox" id="chkStocktake"> 📦 盘点模式（扫物料码 → 输实盘数 → 自动生成盘点差异流水）</label>
-      <details class="mt-8"><summary class="hint-line">☁️ InvenTree 实时同步（可选，设置一次即可）</summary>
-      <div class="toolbar mt-8">
-        <label style="font-size:13px"><input type="checkbox" id="invEnabled"> 变动后自动写入</label>
-        <input class="field field--inv field--w240" type="text" id="invUrl" placeholder="API 地址">
-        <input class="field field--inv field--w220" type="password" id="invToken" placeholder="API Token（仅存在本浏览器）">
-        <button class="btn small ghost" id="btnInvTest">测试连接</button>
-        <span class="hint" id="invStatus"></span>
-      </div></details>
       <!-- 阶段23（§7.5）：摄像头识别后手机上把结果卡推成全屏。
            关闭按钮刻意放在 #scanResult 之外 —— 结果卡是整块 innerHTML 重建的，
            放里面会被冲掉。 -->
@@ -2506,7 +2497,6 @@ async function fsLedgerRepair() {
   for (const f of plan.qtyFixes) {
     const t = CORE.applyStocktake(state, f.code, f.to);
     if (!t.ok) { log('🔧 账本修数：' + f.code + ' 收敛失败 ' + t.error); continue; }
-    invPush(f.code, t.balance);
     await fsPushStock(f.code, t.balance, t.delta, '盘点', '账本修数后收敛', '', t.txn);
     fixedQty++;
   }
@@ -2830,7 +2820,6 @@ function renderLedger() {
       save(); renderLedger(); renderTxns();
       flashQty(m.code);
       log('手工调整 ' + m.code + ' ' + (r.delta > 0 ? '+' : '') + r.delta + '（' + (reason || '未填原因') + '）｜操作人 ' + state.operator);
-      invPush(m.code, r.balance);   // InvenTree 实时同步
       // 物料必须先在飞书台账里存在，否则写库存会以「物料码 xx 不在飞书台账」失败并进队列。
       // 新建的物料若先填「物料码」再填「库存数量」，就正好踩这个坑。
       await fsPushRecord('materials', [m]);
@@ -4491,7 +4480,7 @@ function showWipDetail(code) {
     const reason = readReason();
     const r = CORE.reverseOrder(state, w, { reason, operator: state.operator });
     if (!r.ok) { alert('冲销失败：' + r.error); return; }
-    r.applied.forEach(a => { invPush(a.matCode, a.balance); fsPushStock(a.matCode, a.balance, a.delta, '冲销', reason || ('冲销 ' + w.code), w.code, a.txn); });
+    r.applied.forEach(a => { fsPushStock(a.matCode, a.balance, a.delta, '冲销', reason || ('冲销 ' + w.code), w.code, a.txn); });
     save(); renderLedger(); renderTxns(); renderWip(); showWipDetail(code);
     log('冲销工单 ' + w.code + '：' + r.applied.map(a => a.matCode + (a.delta > 0 ? '+' : '') + a.delta).join('，') + '｜操作人 ' + state.operator);
     fsPushRecord('workorders', [w]);   // 冲销记录 + 已取消状态写回飞书
@@ -4973,7 +4962,6 @@ function scanMat(code, box) {
       // 严格校验实盘数量：空 / 非数字 / 负数一律拒绝，绝不静默转 0
       const r = CORE.applyStocktake(state, m.code, document.getElementById('stocktakeQty').value);
       if (!r.ok) { alert('盘点失败：' + r.error); return; }
-      invPush(m.code, r.balance);   // InvenTree 实时同步
       fsPushStock(m.code, r.balance, r.delta, '盘点', r.txn.reason, '', r.txn);   // 飞书真源直写
       save(); renderLedger(); renderTxns();
       log('盘点 ' + m.code + '：' + (r.delta === 0 ? '账实相符（' + r.balance + '）' : '差异 ' + (r.delta > 0 ? '+' : '') + r.delta + '，实盘 ' + r.balance) + '｜操作人 ' + state.operator);
@@ -5270,7 +5258,7 @@ function scanWip(code, box) {
         log('执行被拒 ' + w.code + '：' + r.errors.join('；'));
         return;
       }
-      r.applied.forEach(a => { invPush(a.matCode, a.balance); fsPushStock(a.matCode, a.balance, a.delta, WIP_NAMES[w.type] || w.type, '', w.code, a.txn); });
+      r.applied.forEach(a => { fsPushStock(a.matCode, a.balance, a.delta, WIP_NAMES[w.type] || w.type, '', w.code, a.txn); });
       fsPushRecord('workorders', [w]);   // 工单状态（未执行/部分执行/已执行）写回飞书
       save(); renderLedger(); renderTxns(); renderWip();
       log('执行工单 ' + w.code + '（' + wipTypeLabel(w.type) + '）：' + r.applied.map(a => a.matCode + (a.delta < 0 ? '' : '+') + a.delta).join('，') +
@@ -5584,57 +5572,6 @@ document.getElementById('selOperator').addEventListener('change', e => {
   log('切换操作人：' + state.operator);
 });
 
-/* ---------- InvenTree 实时同步（可选，扫码即写） ---------- */
-const INV_LS = 'mes416_inventree_cfg';
-function invCfg() { try { return JSON.parse(localStorage.getItem(INV_LS) || '{}'); } catch { return {}; } }
-function invCfgSave(c) { localStorage.setItem(INV_LS, JSON.stringify(c)); }
-async function invPush(matCode, qty) {
-  const c = invCfg();
-  if (!c.enabled || !c.url || !c.token) return;
-  const base = c.url.replace(/\/$/, '');
-  const H = { 'Authorization': 'Token ' + c.token, 'Content-Type': 'application/json', 'Accept': 'application/json' };
-  try {
-    const ps = await fetch(base + '/api/part/?IPN=' + encodeURIComponent(matCode), { headers: H }).then(r => r.json());
-    const parts = Array.isArray(ps) ? ps : (ps.results || []);
-    let part = parts.find(p => p.IPN === matCode);
-    if (!part) {
-      const m = state.materials.find(x => x.code === matCode);
-      part = await fetch(base + '/api/part/', { method: 'POST', headers: H, body: JSON.stringify({ name: (m && m.name) || matCode, IPN: matCode, description: m ? ('规格：' + (m.spec || '')) : '', purchaseable: true, active: true }) }).then(r => r.json());
-    }
-    if (!part || !part.pk) throw new Error('Part 创建失败');
-    const ss = await fetch(base + '/api/stock/?part=' + part.pk, { headers: H }).then(r => r.json());
-    const items = (Array.isArray(ss) ? ss : (ss.results || [])).filter(x => x.part === part.pk);
-    if (items.length) {
-      const r = await fetch(base + '/api/stock/' + items[0].pk + '/', { method: 'PATCH', headers: H, body: JSON.stringify({ quantity: qty }) });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-    } else {
-      const r = await fetch(base + '/api/stock/', { method: 'POST', headers: H, body: JSON.stringify({ part: part.pk, quantity: qty, status: 10 }) });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-    }
-    log('☁️ InvenTree 已同步 ' + matCode + ' → ' + qty);
-  } catch (e) {
-    log('⚠️ InvenTree 同步失败 ' + matCode + '：' + e.message + '（可稍后 inventree-sync.mjs push 对账）');
-  }
-}
-(function initInvSync() {
-  const c = invCfg();
-  const en = document.getElementById('invEnabled'), url = document.getElementById('invUrl'), tk = document.getElementById('invToken');
-  if (!en) return;
-  en.checked = !!c.enabled;
-  url.value = c.url || (location.protocol === 'https:' ? 'https://inv.newenergycoder.club' : 'http://' + location.hostname + ':8001');
-  tk.value = c.token || '';
-  const persist = () => invCfgSave({ enabled: en.checked, url: url.value.trim(), token: tk.value.trim() });
-  [en, url, tk].forEach(el => el.addEventListener('change', persist));
-  document.getElementById('btnInvTest').addEventListener('click', async () => {
-    persist();
-    const st = document.getElementById('invStatus');
-    st.textContent = '测试中…';
-    try {
-      const d = await fetch(url.value.trim().replace(/\/$/, '') + '/api/', { headers: { 'Authorization': 'Token ' + tk.value.trim() } }).then(r => r.json());
-      st.textContent = '✅ ' + d.server + ' ' + d.version;
-    } catch (e) { st.textContent = '❌ ' + e.message; }
-  });
-})();
 
 /* ---------- 飞书真源（路线 A：服务可达时，启动拉取 + 写口直写；不可达自动离线） ---------- */
 const FS_QUEUE_LS = 'mes416_fs_queue';
@@ -7740,7 +7677,6 @@ function fsResolveGroup(group, choice) {
   /* qty 冲突的裁决结果**不能**靠物料 upsert 落地（那是绝对值覆盖，会抹掉对方的并发改动）。
      applyMerge 把它换算成了增量并要求走库存直写 —— 这里提交，账本里会留下流水。 */
   (r.stockWrites || []).forEach(w => {
-    invPush(w.matCode, w.qty);
     fsPushStock(w.matCode, w.qty, w.delta, w.type, w.reason, '', null);
   });
   if (r.stockWrites && r.stockWrites.length) {
