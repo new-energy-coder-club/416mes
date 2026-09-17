@@ -466,3 +466,45 @@ test('阶段5：详情打开期间工单消失必须能自愈（不许白屏）'
     '工单不存在时必须回列表并清当前对象');
   assert.match(s, /workorderLocalDuplicate\(code\)/, '同号重复不得打开详情');
 });
+
+/* ================= 阶段6：标签页回归纯打印 + 打印守卫 ================= */
+
+test('阶段6：label 页不得再承担业务删除（只保留打印选择）', () => {
+  assert.ok(!HTML.includes('id="btnDelRec"'), 'label 页不得再有「删除勾选记录」——它曾是第二个业务删除入口');
+  /* 它原先能删库位/容器/模块区/物料/物品/手册/工单，删错会作废标签编码 */
+  const labelSec = HTML.slice(HTML.indexOf('id="tab-label"'), HTML.indexOf('</section>', HTML.indexOf('id="tab-label"')));
+  assert.ok(!/fsPushDelete/.test(labelSec), 'label 页不得直接调用 fsPushDelete');
+  ['btnSelAll', 'btnSelNone', 'btnPrint', 'recFilter'].forEach(id =>
+    assert.ok(labelSec.includes('id="' + id + '"'), 'label 页必须保留打印选择相关的 #' + id));
+  assert.ok(labelSec.includes('id="lnkToRes"'), '删掉业务入口后必须给出「去资源档案」的指引，否则用户无路可走');
+});
+
+test('阶段6：模块区（原本只能在 label 页删）必须仍可管理', () => {
+  /* label 页的删除是模块区唯一的删除入口；移到资源档案后必须确认它真的覆盖了模块区 */
+  const res = HTML.slice(HTML.indexOf('id="tab-res"'), HTML.indexOf('</section>', HTML.indexOf('id="tab-res"')));
+  assert.ok(res.includes('data-restype="locations"'), '资源档案的「库位」段用的是 state.locations');
+  assert.match(fnSrc('renderRes'), /state\[resType\]/, '必须直接渲染 state.locations（含 kind=模块区），不能只渲染非模块区');
+  /* 且删除/编辑能力对模块区一视同仁 */
+  assert.match(fnSrc('resDelete'), /resImpact|resSyncState/);
+});
+
+test('阶段6：打印守卫 —— 未勾选不打印；模块区卡在标签纸模式下拦下并切 A4', () => {
+  const s = HTML.slice(HTML.indexOf("document.getElementById('btnPrint').addEventListener"), HTML.indexOf('/* ================= ③ 编码生成'));
+  assert.match(s, /if \(!sel\[curType\]\.size\)[\s\S]{0,80}return/, '未勾选必须拦下，不能打出一张白纸');
+  assert.match(s, /curType === 'zone'[\s\S]{0,120}a4paper/, '模块区卡在标签纸模式下必须被拦下');
+  assert.match(s, /setPaper\('a4'\)/, '拦下后要自动切到 A4 并说明，而不是让用户自己猜');
+  assert.match(s, /alert\(/, '必须给出文字解释（「打印机又坏了」是最容易误判的失败）');
+  /* 打印守卫必须在 window.print 之前 */
+  assert.ok(s.indexOf("curType === 'zone'") < s.indexOf('window.print()'), '守卫必须早于实际打印');
+});
+
+test('阶段6：条码机读串前缀必须与扫码识别一致（对象来源可辨）', () => {
+  const html = HTML;
+  /* 文档里声明的前缀集合 */
+  ['MAT:', 'LOC:', 'CTN:', 'WIP:', 'NEC:', 'ITM:', 'MAN:'].forEach(p =>
+    assert.ok(html.includes(p), '缺少机读串前缀 ' + p));
+  /* 扫码图例与实际识别必须覆盖同一套前缀（否则打印出来的码扫不动） */
+  const legend = html.slice(html.indexOf('扫码工作台'), html.indexOf('id="scanInput"'));
+  ['MAT:', 'LOC:', 'CTN:', 'WIP:', 'NEC:', 'ITM:', 'MAN:'].forEach(p =>
+    assert.ok(legend.includes(p), '扫码图例未列出 ' + p + '：用户拿到标签不知道扫出来是什么'));
+});
