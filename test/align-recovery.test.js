@@ -397,3 +397,72 @@ test('流水仍不得被普通本地删除通道处理（账本凭证不能被�
   assert.match(fnSrc('deleteOneLocalRecord'), /table === 'transactions'\) return \{ ok: false/,
     '流水必须继续走专门的、有凭据的收场通道');
 });
+
+/* ================= 阶段5：工单生命周期与上下文 ================= */
+
+test('阶段5：只有未执行且未取消的工单才给「编辑计划」入口', () => {
+  const s = fnSrc('showWipDetail');
+  assert.match(s, /btnWipEditPlan/, '详情里必须有编辑计划入口');
+  const guard = s.slice(s.indexOf('btnWipEditPlan') - 120, s.indexOf('btnWipEditPlan') + 40);
+  assert.match(guard, /!p\.anyExecuted/, '已执行过就不该给入口（计划是冲销依据）');
+  assert.match(guard, /isCancelled/, '已取消不该给入口');
+});
+
+test('阶段5：计划编辑器不得提供修改工单号的控件', () => {
+  const s = fnSrc('showPlanEditor');
+  assert.ok(!/planEditCode|id="planEditItemCode"/.test(s), '工单号是流水 ref / 二维码 / 飞书主键，不能给编辑控件');
+  assert.match(s, /planEditDate/, '日期可改');
+  assert.match(s, /planEditTable/, '明细可改');
+  /* 复用建单的行组件，保证「未建档 / 数量」校验与建单一致 */
+  assert.match(s, /wipItemRow\(\)/, '应复用建单的行组件，避免两套校验漂移');
+});
+
+test('阶段5：保存计划必须走 CORE.updateOrderPlan 并同步飞书、留痕', () => {
+  const s = fnSrc('savePlanEdit');
+  assert.match(s, /CORE\.updateOrderPlan\(/, '必须走核心校验，不能直接改 order.items');
+  assert.ok(!/\.items\s*=\s*items/.test(s), '不得绕过核心直接赋值');
+  assert.match(s, /fsPushRecord\('workorders'/, '计划改动要同步飞书');
+  assert.match(s, /log\(/, '要留日志');
+  /* 校验失败必须原样报出、不吞掉 */
+  const failIdx = s.indexOf('if (!r.ok)');
+  assert.ok(failIdx > 0 && s.slice(failIdx, failIdx + 200).includes('alert'), '失败必须告知用户');
+});
+
+test('阶段5：已执行工单不得直接删除，必须先冲销（入口与文案都要说清）', () => {
+  const s = fnSrc('showWipDetail');
+  assert.match(s, /p\.anyExecuted && !CORE\.isCancelled\(w\)[\s\S]{0,120}先「冲销工单」再删除/,
+    '删除按钮必须拦住已执行的工单并说明先冲销');
+  assert.match(s, /workorderLocalDuplicate\(w\.code\)[\s\S]{0,120}数据对齐/,
+    '同号重复工单不得走普通删除（会连飞书唯一记录一起删）');
+});
+
+test('阶段5：冲销预览必须只列已执行数量，并给出冲销后库存', () => {
+  const s = fnSrc('showWipDetail');
+  assert.match(s, /filter\(it => it\.executed > 0\)/, '只列已执行的项，未执行的不该被冲销');
+  assert.match(s, /冲销后/, '必须给出冲销后库存，让用户看清影响');
+  assert.match(s, /确认冲销/, '必须二次确认');
+});
+
+test('阶段5：删除/取消/冲销后都必须回到列表并清掉当前对象条', () => {
+  const html = HTML;
+  /* 删除后 */
+  const delIdx = html.indexOf("state.workorders = state.workorders.filter(x => x.code !== w.code)");
+  assert.ok(delIdx > 0, '找不到删除逻辑');
+  const delAfter = html.slice(delIdx, delIdx + 600);
+  assert.match(delAfter, /backToWipList\(\)/, '删完必须回列表视图');
+  assert.match(delAfter, /ctxClear\(\)/, '「当前对象」条不能继续指向已删除的工单');
+  /* backToWipList 自身必须摘掉 wip-detail-open，否则列表被隐藏 + 详情隐藏 = 白屏 */
+  assert.match(fnSrc('backToWipList'), /wip-detail-open/, '返回列表必须摘掉详情态类');
+});
+
+test('阶段5：详情打开期间工单消失必须能自愈（不许白屏）', () => {
+  const s = fnSrc('showWipDetail');
+  /* 顺序铁律：先确认存在，再切详情视图 */
+  const findIdx = s.indexOf("state.workorders.find(x => x.code === code)");
+  const addIdx = s.indexOf("classList.add('wip-detail-open')");
+  assert.ok(findIdx > 0 && addIdx > 0 && findIdx < addIdx,
+    '必须先确认工单存在再切详情视图；反过来会在工单消失时留下「列表隐藏+详情未显示」= 整页空白');
+  assert.match(s, /backToWipList\(\),\s*ctxClear\(\)|backToWipList\(\);[\s\S]{0,40}ctxClear\(\)/,
+    '工单不存在时必须回列表并清当前对象');
+  assert.match(s, /workorderLocalDuplicate\(code\)/, '同号重复不得打开详情');
+});

@@ -618,6 +618,88 @@
     return { ok: true, order: order, applied: applied, reverseInfo: order.reverseInfo };
   }
 
+  /**
+   * 修改工单计划（明细 / 数量 / 日期）。
+   *
+   * **只允许「未执行任何数量」的工单改计划**。原因不是保守，而是正确性：
+   *   · 冲销的依据是 `it.executed`（见 reverseOrder），而「已执行」是相对计划算出来的；
+   *     事后改计划会让「计划 / 已执行 / 剩余」三者对不上，流水金额也无法解释；
+   *   · 部分执行的工单若把计划改到低于已执行数量，进度条会出现 >100% 或负数剩余。
+   * 所以已执行（含部分）的工单必须先「冲销」，再改计划。
+   *
+   * 工单号（业务键）**不允许改** —— 它是流水 ref、二维码机读串、飞书主键，
+   * 改了会让已有流水指向一个不存在的单号（幽灵引用）。
+   *
+   * 变更写进 order.planEdits 留痕，并由 orderHistory 呈现，保证「谁在什么时候把计划从什么改成了什么」可追。
+   */
+  function updateOrderPlan(state, order, patch, opts) {
+    opts = opts || {};
+    patch = patch || {};
+    if (!order) return { ok: false, error: '工单不存在' };
+    if (isCancelled(order)) return { ok: false, error: '工单 ' + order.code + ' 已取消，不能再改计划' };
+    var prog = orderProgress(order);
+    if (prog.anyExecuted) {
+      return { ok: false, error: '工单已执行 ' + prog.executedTotal + ' 件，计划数量是冲销与对账的依据，不能再改；如确需调整请先「冲销」' };
+    }
+
+    var errors = [];
+    var nextItems, nextMerged = [];
+    if (patch.items !== undefined) {
+      var norm = normalizeItems(patch.items);
+      if (!norm.items.length) errors.push('请至少保留一行有效明细（物料码 + 正数数量）');
+      var missing = [];
+      norm.items.forEach(function (e) { if (!findMaterial(state, e.matCode)) missing.push(e.matCode); });
+      if (missing.length) errors.push('物料未建档：' + missing.join('、'));
+      if (errors.length) {
+        return { ok: false, errors: errors, dropped: norm.dropped, merged: mergedCodes(norm.items) };
+      }
+      nextItems = norm.items.map(function (e) { return { matCode: e.matCode, qty: e.qty }; });
+      /* mergedCodes 需要 normalizeItems 产出的 lines 字段，所以必须在这里算 ——
+         上面的 map 把 lines 丢掉了，事后再算永远是空数组。 */
+      nextMerged = mergedCodes(norm.items);
+    }
+    var nextDate = (patch.date !== undefined) ? String(patch.date == null ? '' : patch.date) : undefined;
+    if (nextItems === undefined && nextDate === undefined) {
+      return { ok: false, error: '没有要修改的内容' };
+    }
+
+    var before = normalizeItems(order.items).items.map(function (e) { return { matCode: e.matCode, qty: e.qty }; });
+    var changes = [];
+    if (nextItems !== undefined) {
+      /* 逐项列出「改了什么」：只报「项数变化」不够，用户要看到具体是哪一行、从多少到多少 */
+      var beforeMap = Object.create(null);
+      before.forEach(function (e) { beforeMap[e.matCode] = e.qty; });
+      var afterMap = Object.create(null);
+      nextItems.forEach(function (e) { afterMap[e.matCode] = e.qty; });
+      before.forEach(function (e) {
+        if (afterMap[e.matCode] === undefined) changes.push('移除 ' + e.matCode + '（原计划 ' + e.qty + '）');
+        else if (afterMap[e.matCode] !== e.qty) changes.push(e.matCode + ' 数量 ' + e.qty + ' → ' + afterMap[e.matCode]);
+      });
+      nextItems.forEach(function (e) {
+        if (beforeMap[e.matCode] === undefined) changes.push('新增 ' + e.matCode + '（计划 ' + e.qty + '）');
+      });
+      if (!changes.length) changes.push('明细内容未变（仅重新提交）');
+    }
+    if (nextDate !== undefined && nextDate !== (order.date || '')) {
+      changes.push('日期 ' + (order.date || '空') + ' → ' + (nextDate || '空'));
+    }
+
+    if (nextItems !== undefined) order.items = nextItems;
+    if (nextDate !== undefined) order.date = nextDate;
+
+    var now = opts.now ? new Date(opts.now) : new Date();
+    var rec = {
+      at: now.toLocaleString(),
+      operator: opts.operator != null ? opts.operator : (state && state.operator) || '',
+      reason: opts.reason || '',
+      changes: changes,
+      before: before,
+      after: normalizeItems(order.items).items.map(function (e) { return { matCode: e.matCode, qty: e.qty }; })
+    };
+    order.planEdits = (order.planEdits || []).concat([rec]);
+    return { ok: true, order: order, changes: changes, planEdit: rec, merged: nextMerged };
+  }
+
   /** 工单关联的库存流水（时间正序） */
   function orderTransactions(state, code) {
     return orderedTransactions(state).filter(function (t) { return t.ref === code; });
@@ -632,6 +714,14 @@
         kind: 'execute', at: b.at || '', operator: b.operator || '', batch: i + 1,
         items: b.items || [],
         text: '第 ' + (i + 1) + ' 次执行：' + (b.items || []).map(function (x) { return x.matCode + ' ' + (x.delta > 0 ? '+' : '') + x.delta; }).join('，')
+      });
+    });
+    /* 计划修改也要进历史：只改 items 不记录的话，事后没人能说清
+       「这条工单当初计划的是 5 件还是 3 件」，对账时无法解释差异。 */
+    ((order.planEdits) || []).forEach(function (e) {
+      hist.push({
+        kind: 'plan-edit', at: e.at || '', operator: e.operator || '',
+        text: '修改计划：' + ((e.changes || []).join('；') || '（无变化）') + (e.reason ? '（' + e.reason + '）' : '')
       });
     });
     if (order.cancelInfo) hist.push({ kind: 'cancel', at: order.cancelInfo.at || '', operator: order.cancelInfo.operator || '', text: '取消工单' + (order.cancelInfo.reason ? '（' + order.cancelInfo.reason + '）' : '') });
@@ -1559,6 +1649,7 @@
     orderSummary: orderSummary,
     executedMap: executedMap,
     cancelOrder: cancelOrder,
+    updateOrderPlan: updateOrderPlan,
     reverseOrder: reverseOrder,
     orderTransactions: orderTransactions,
     orderHistory: orderHistory,

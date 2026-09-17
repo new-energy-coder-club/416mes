@@ -1777,3 +1777,126 @@ test('阶段0：去重回退在后续工单变化后拒绝，避免覆盖新操�
   assert.equal(back.ok, false);
   assert.match(back.error, /已经发生变化/);
 });
+
+/* ================= 阶段5：工单计划编辑 ================= */
+
+function planOrder(state, code = 'LL-1', items = [{ matCode: 'MAT-A', qty: 5 }, { matCode: 'MAT-B', qty: 3 }]) {
+  const r = Core.createOrder(state, { code, type: 'LL', date: '2026-09-17', items });
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+  return state.workorders[state.workorders.length - 1];
+}
+/** 让工单变成「部分执行」：走真实记账，保证 execQty 与流水一致 */
+function executeSome(state, w, matCode, qty) {
+  const r = Core.applyStockChange(state, { matCode, mode: 'delta', qty: -qty, type: '出库', ref: w.code, operator: '测试员' });
+  assert.equal(r.ok, true, r.error);
+  w.execQty = (w.execQty || []).concat([{ matCode, qty }]);
+  return r;
+}
+
+test('计划编辑【未执行】可以改数量、删行、加行、改日期，且工单号不变', () => {
+  const st = mkState();
+  const w = planOrder(st);
+  const r = Core.updateOrderPlan(st, w, {
+    items: [{ matCode: 'MAT-A', qty: 2 }, { matCode: 'MAT-B', qty: 7 }],
+    date: '2026-09-20'
+  }, { operator: '张三', reason: '客户改量' });
+  assert.equal(r.ok, true, r.error);
+  assert.deepEqual(w.items, [{ matCode: 'MAT-A', qty: 2 }, { matCode: 'MAT-B', qty: 7 }]);
+  assert.equal(w.date, '2026-09-20');
+  assert.equal(w.code, 'LL-1', '工单号是流水 ref / 二维码 / 飞书主键，绝不能改');
+  assert.deepEqual(w.status, '未执行');
+  /* 变化要逐项说清，不能只说「项数变了」 */
+  assert.ok(r.changes.some(c => c.includes('MAT-A') && c.includes('5') && c.includes('2')), JSON.stringify(r.changes));
+  /* 进度必须跟着计划走 */
+  const p = Core.orderProgress(w);
+  assert.equal(p.plannedTotal, 9);
+  assert.equal(p.remainingTotal, 9);
+});
+
+test('计划编辑【已执行/部分执行】必须被拒绝（计划是冲销与对账的依据）', () => {
+  const st = mkState();
+  const w = planOrder(st);
+  executeSome(st, w, 'MAT-A', 2);          // 部分执行
+  const r = Core.updateOrderPlan(st, w, { items: [{ matCode: 'MAT-A', qty: 1 }] });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /已执行/);
+  /* 关键：拒绝时**不能**留下半个改动 */
+  assert.deepEqual(w.items, [{ matCode: 'MAT-A', qty: 5 }, { matCode: 'MAT-B', qty: 3 }]);
+  assert.equal(w.planEdits, undefined);
+});
+
+test('计划编辑【已取消】必须被拒绝', () => {
+  const st = mkState();
+  const w = planOrder(st);
+  assert.equal(Core.cancelOrder(st, w, {}).ok, true);
+  const r = Core.updateOrderPlan(st, w, { items: [{ matCode: 'MAT-A', qty: 1 }] });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /取消/);
+});
+
+test('计划编辑：非法输入一律拒绝且零变更（空明细 / 非正数 / 未建档 / 无内容）', () => {
+  const st = mkState();
+  const w = planOrder(st);
+  const before = JSON.stringify(w.items);
+  for (const patch of [
+    { items: [] },
+    { items: [{ matCode: 'MAT-A', qty: 0 }] },
+    { items: [{ matCode: 'MAT-A', qty: -3 }] },
+    { items: [{ matCode: '不存在', qty: 1 }] },
+    {}
+  ]) {
+    const r = Core.updateOrderPlan(st, w, patch);
+    assert.equal(r.ok, false, '应拒绝：' + JSON.stringify(patch));
+    assert.equal(JSON.stringify(w.items), before, '拒绝时不得改动计划');
+  }
+});
+
+test('计划编辑：同一物料重复行按既有规则合并，不产生重复明细', () => {
+  const st = mkState();
+  const w = planOrder(st);
+  const r = Core.updateOrderPlan(st, w, { items: [{ matCode: 'MAT-A', qty: 2 }, { matCode: 'MAT-A', qty: 3 }] });
+  assert.equal(r.ok, true, r.error);
+  assert.deepEqual(w.items, [{ matCode: 'MAT-A', qty: 5 }], '两行同物料必须合并成一行（与建单一致）');
+  assert.ok(r.merged.includes('MAT-A'), '合并过的物料码要回报出来');
+});
+
+test('计划编辑必须留痕，并出现在执行历史里', () => {
+  const st = mkState();
+  const w = planOrder(st);
+  Core.updateOrderPlan(st, w, { items: [{ matCode: 'MAT-A', qty: 4 }] }, { operator: '李四', reason: '录错单' });
+  assert.equal(w.planEdits.length, 1);
+  assert.equal(w.planEdits[0].operator, '李四');
+  assert.equal(w.planEdits[0].reason, '录错单');
+  assert.deepEqual(w.planEdits[0].before, [{ matCode: 'MAT-A', qty: 5 }, { matCode: 'MAT-B', qty: 3 }]);
+  assert.deepEqual(w.planEdits[0].after, [{ matCode: 'MAT-A', qty: 4 }]);
+  const hist = Core.orderHistory(w);
+  const he = hist.find(h => h.kind === 'plan-edit');
+  assert.ok(he, '历史里必须有 plan-edit：否则事后没人能说清当初计划的是几件');
+  assert.match(he.text, /修改计划/);
+  assert.equal(he.operator, '李四');
+});
+
+test('计划编辑不产生任何库存流水（改计划不是执行）', () => {
+  const st = mkState();
+  const w = planOrder(st);
+  const txnBefore = st.transactions.length;
+  Core.updateOrderPlan(st, w, { items: [{ matCode: 'MAT-A', qty: 9 }], date: '2026-10-01' });
+  assert.equal(st.transactions.length, txnBefore, '改计划绝不能记流水');
+  assert.equal(Core.findMaterial(st, 'MAT-A').qty, 5, '库存不得变动');
+});
+
+test('部分执行后冲销：只回退已执行数量，计划保持原样', () => {
+  const st = mkState();
+  const w = planOrder(st);
+  const q0 = Core.findMaterial(st, 'MAT-A').qty;
+  executeSome(st, w, 'MAT-A', 2);                       // 计划 5，执行 2
+  assert.equal(Core.findMaterial(st, 'MAT-A').qty, q0 - 2);
+  const r = Core.reverseOrder(st, w, { reason: '退料' });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(Core.findMaterial(st, 'MAT-A').qty, q0, '冲销只回退已执行的 2，不是计划的 5');
+  assert.equal(Core.findMaterial(st, 'MAT-B').qty, 10, '未执行的物料不得被回退');
+  assert.deepEqual(w.items, [{ matCode: 'MAT-A', qty: 5 }, { matCode: 'MAT-B', qty: 3 }], '计划保持原样');
+  assert.equal(Core.isCancelled(w), true);
+  /* 冲销后仍不能再改计划（已取消） */
+  assert.equal(Core.updateOrderPlan(st, w, { items: [{ matCode: 'MAT-A', qty: 1 }] }).ok, false);
+});
