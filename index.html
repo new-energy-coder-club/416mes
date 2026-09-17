@@ -371,6 +371,21 @@ body.stocktake-on .stocktake-banner{display:block}
   border-radius:var(--r-md);background:var(--danger-bg)}
 .reverse-panel[hidden]{display:none}
 .reverse-panel__h{font-size:12.5px;font-weight:600;color:var(--danger-fg);margin-bottom:6px}
+/* ============================================================
+   05 PAGES（阶段19）：批量建档与编码（ui优化.md §5.6）
+   两栏作业台（左位置体系 / 右载体）+ 生成后的「下一程」条
+   ============================================================ */
+.gen-grid{display:flex;gap:14px;align-items:flex-start}
+.gen-col{flex:1 1 0;min-width:0}
+.gen-col__h{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;
+  color:var(--text-muted);margin:0 0 8px}
+.gen-col__h::before{content:"";flex:none;width:3px;height:12px;border-radius:2px;background:var(--cyan-ink)}
+.next-strip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px;
+  padding:8px 10px;border:1px solid var(--done-fg);border-left:3px solid var(--done-fg);
+  border-radius:var(--r-md);background:var(--done-bg);font-size:12.5px}
+.next-strip[hidden]{display:none}
+.next-strip__t{color:var(--done-fg);font-weight:600}
+@media screen and (max-width:899px){ .gen-grid{flex-direction:column;} }
 /* §7.2 触控目标：桌面 ≥32px、手机 ≥44px。这三颗是定位卡的主动作，不能是 23px 的默认小按钮 */
 .locate-actions .btn{min-height:32px;padding-left:12px;padding-right:12px;display:inline-flex;align-items:center}
 /* 移动端覆盖见 06 RESPONSIVE 块内（需排在 .btn.small 之后才能生效） */
@@ -911,7 +926,10 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   </section>
   <!-- ========== 编码生成 ========== -->
   <section class="tab" id="tab-gen">
-    <p class="page-purpose"><span>主数据建档与编码：库位 / 容器 / 物品 / 手册（建单已移至「库存工单」页）</span><span class="impact impact--none">本页不改库存</span></p>
+    <p class="page-purpose"><span>主数据建档 / <b>空位提前打码</b>：库位 · 模块区 · 容器 · 物品 · 手册（建单已移至「库存工单」页）</span><span class="impact impact--none">本页不改库存</span></p>
+    <div class="gen-grid">
+      <div class="gen-col">
+        <p class="gen-col__h">位置体系</p>
     <div class="panel">
       <h2>① 库位码批量生成（空位提前全打，贴上即启用）</h2>
       <div class="form-row"><label>货架库位</label>
@@ -946,8 +964,11 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         名称 <input type="text" id="gZoneName" placeholder="如：传感器、结构件" style="width:170px">
         <button class="btn small" id="btnGenZone">生成模块区</button>
         <span class="hint">自动编 M-xx（内置 M-01~05），A4 大区卡到「标签打印 → 模块区卡」打印</span>
-      </div>
+      </div>      <div class="next-strip" id="nextLoc" hidden></div>
     </div>
+      </div>
+      <div class="gen-col">
+        <p class="gen-col__h">载体</p>
     <div class="panel">
       <h2>② 容器码批量生成</h2>
       <div class="form-row"><label>容器类型</label>
@@ -963,11 +984,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         数量 <input type="number" id="gCtnCount" value="10" min="1" inputmode="decimal">
         <button class="btn small" id="btnGenCtn">生成容器码</button>
         <span class="hint">例：A4SH-015</span>
-      </div>
-    </div>
-    <div class="panel">
-      <h2>③ 工单生成 → 已移至「库存工单」页</h2>
-      <p class="hint">为避免同一功能出现两处入口，建单表单已<b>归位到「库存工单」页顶部</b>；本页只负责主数据建档与编码。<a class="link-inline" href="javascript:void 0" onclick="document.querySelector('nav.tabs button[data-tab=wip]').click()">去「库存工单」建单 →</a></p>
+      </div>      <div class="next-strip" id="nextCtn" hidden></div>
     </div>
     <div class="panel">
       <h2>④ 物品标签生成（设备 / 工具 / 展品等耐用品，WP 流水码）</h2>
@@ -977,7 +994,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         库位 <input type="text" id="gItmLoc" placeholder="如 W01-G01" style="width:90px">
         <button class="btn small" id="btnGenItm">生成物品标签</button>
         <span class="hint">例：WP-001，二维码机读串 <b>ITM:WP-001</b>（消耗品请走物料台账）</span>
-      </div>
+      </div>      <div class="next-strip" id="nextItm" hidden></div>
     </div>
     <div class="panel">
       <h2>⑤ 手册标签生成（资料册 / 手册，SC 流水码）</h2>
@@ -987,15 +1004,24 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         库位 <input type="text" id="gManLoc" placeholder="如 B-01-01-02" style="width:100px">
         <button class="btn small" id="btnGenMan">生成手册标签</button>
         <span class="hint">例：SC-001，二维码机读串 <b>MAN:SC-001</b></span>
+      </div>      <div class="next-strip" id="nextMan" hidden></div>
+    </div>
       </div>
     </div>
     <div class="panel">
-      <h2>⚠ 数据维护</h2>
-      <div class="toolbar">
-        <button class="btn ghost" id="btnSeed">重置为出厂种子数据</button>
-        <button class="btn danger" id="btnWipe">清空全部数据</button>
-      </div>
+      <h2>③ 工单生成 → 已移至「库存工单」页</h2>
+      <p class="hint">为避免同一功能出现两处入口，建单表单已<b>归位到「库存工单」页顶部</b>；本页只负责主数据建档与编码。<a class="link-inline" href="javascript:void 0" onclick="document.querySelector('nav.tabs button[data-tab=wip]').click()">去「库存工单」建单 →</a></p>
     </div>
+    <details class="danger-zone">
+      <summary>⚠ 数据维护（重置种子数据 / 清空全部数据）</summary>
+      <div class="danger-zone__body">
+        <p class="hint">两者都只影响<b>本机 localStorage</b>：「重置为出厂种子数据」会用种子覆盖本机台账；「清空全部数据」会删除本机全部记录（之后需重新从飞书同步）。</p>
+        <div class="toolbar">
+          <button class="btn ghost" id="btnSeed">重置为出厂种子数据</button>
+          <button class="btn danger" id="btnWipe">清空全部数据</button>
+        </div>
+      </div>
+    </details>
   </section>
   <!-- ========== 库存工单（Phase 3 管理页） ========== -->
   <section class="tab" id="tab-wip">
@@ -3226,7 +3252,9 @@ document.getElementById('btnGenShelf').addEventListener('click', () => {
   const items = [];
   for (let s = 1; s <= ns; s++) for (let l = 1; l <= nl; l++) for (let p = 1; p <= np; p++)
     items.push({ code: rg + '-' + pad(s, 2) + '-' + pad(l, 2) + '-' + pad(p, 2), kind: '货架', desc: (SITE_NAMES[rg] || rg + '区') + ' ' + s + '号货架 第' + l + '层 第' + p + '位' });
-  alert('新增 ' + addUnique(state.locations, items, 'code', 'locations') + ' 个货架库位（重复自动跳过）');
+  const b1 = new Set(state.locations.map(x => x.code));
+  const n1 = addUnique(state.locations, items, 'code', 'locations');
+  nextStrip('nextLoc', 'loc', state.locations.filter(x => !b1.has(x.code)).map(x => x.code), items.length);
 });
 document.getElementById('btnGenOpen').addEventListener('click', () => {
   const SITE_NAMES = { TQ: '天权楼', YH: '玉衡A416', K401: '401开放空地', B: 'B区' };
@@ -3239,20 +3267,26 @@ document.getElementById('btnGenOpen').addEventListener('click', () => {
     const ch = String.fromCharCode(a);
     items.push({ code: site + '-' + ch + pad(p, 2), kind: '空地', desc: (SITE_NAMES[site] || site) + ' ' + ch + '通道 ' + p + '号块位' });
   }
-  alert('新增 ' + addUnique(state.locations, items, 'code', 'locations') + ' 个开放区块位码（重复自动跳过）');
+  const b2 = new Set(state.locations.map(x => x.code));
+  addUnique(state.locations, items, 'code', 'locations');
+  nextStrip('nextLoc', 'loc', state.locations.filter(x => !b2.has(x.code)).map(x => x.code), items.length);
 });
 document.getElementById('btnGenWs').addEventListener('click', () => {
   const a = +document.getElementById('gWsFrom').value, b = +document.getElementById('gWsTo').value, g = +document.getElementById('gWsGrid').value;
   const items = [];
   for (let w = a; w <= b; w++) for (let i = 1; i <= g; i++)
     items.push({ code: 'W' + pad(w, 2) + '-G' + pad(i, 2), kind: '工位', desc: w + '号工位 第' + i + '格收纳' });
-  alert('新增 ' + addUnique(state.locations, items, 'code', 'locations') + ' 个工位库位（重复自动跳过）');
+  const b3 = new Set(state.locations.map(x => x.code));
+  addUnique(state.locations, items, 'code', 'locations');
+  nextStrip('nextLoc', 'loc', state.locations.filter(x => !b3.has(x.code)).map(x => x.code), items.length);
 });
 document.getElementById('btnGenCtn').addEventListener('click', () => {
   const [pre, type, spec] = document.getElementById('gCtnType').value.split('|');
   const from = +document.getElementById('gCtnFrom').value, n = +document.getElementById('gCtnCount').value;
   const items = []; for (let i = from; i < from + n; i++) items.push({ code: pre + '-' + pad(i, 3), type, spec, loc: '' });
-  alert('新增 ' + addUnique(state.containers, items, 'code', 'containers') + ' 个容器码（重复自动跳过）');
+  const b4 = new Set(state.containers.map(x => x.code));
+  addUnique(state.containers, items, 'code', 'containers');
+  nextStrip('nextCtn', 'ctn', state.containers.filter(x => !b4.has(x.code)).map(x => x.code), items.length);
 });
 /* ---- 模块区（A4 大卡） ---- */
 document.getElementById('btnGenZone').addEventListener('click', () => {
@@ -3265,12 +3299,7 @@ document.getElementById('btnGenZone').addEventListener('click', () => {
   fsPushRecord('locations', [{ code, kind: '模块区', desc: name }]);
   save();
   document.getElementById('gZoneName').value = '';
-  if (confirm('已生成模块区 ' + code + '（' + name + '），与库位码同台账、同导出。\n是否立即去打印 A4 区卡？')) {
-    curType = 'zone';
-    sel.zone.clear(); sel.zone.add(recordsOf('zone').length - 1);
-    setPaper('a4');
-    document.querySelector('nav.tabs button[data-tab=label]').click();
-  }
+  nextStrip('nextLoc', 'zone', [code], 1);
 });
 /* ---- 物品 / 手册流水码 ---- */
 function nextCode(arr, prefix) {
@@ -3286,10 +3315,7 @@ document.getElementById('btnGenItm').addEventListener('click', () => {
   state.items.push(newItem);
   fsPushRecord('items', [newItem]);
   save();
-  if (confirm('已生成物品标签 ' + code + '（' + name + '）。' + '\n' + '是否立即去打印？')) {
-    curType = 'itm'; sel.itm.clear(); sel.itm.add(state.items.length - 1);
-    document.querySelector('nav.tabs button[data-tab=label]').click();
-  }
+  nextStrip('nextItm', 'itm', [code], 1);
 });
 document.getElementById('btnGenMan').addEventListener('click', () => {
   const name = document.getElementById('gManName').value.trim();
@@ -3299,10 +3325,7 @@ document.getElementById('btnGenMan').addEventListener('click', () => {
   state.manuals.push(newManual);
   fsPushRecord('manuals', [newManual]);
   save();
-  if (confirm('已生成手册标签 ' + code + '（' + name + '）。' + '\n' + '是否立即去打印？')) {
-    curType = 'man'; sel.man.clear(); sel.man.add(state.manuals.length - 1);
-    document.querySelector('nav.tabs button[data-tab=label]').click();
-  }
+  nextStrip('nextMan', 'man', [code], 1);
 });
 /* ---- 工单 ---- */
 function refreshMatDatalist() {
@@ -3476,6 +3499,39 @@ function wipMatchesFilter(w, kw, st, ty) {
 }
 
 /** 阶段16（§5.2）：顶部状态摘要卡。五档各带数量，点击即筛选。 */
+/** 阶段19（§5.6）：生成成功后的「下一程」条。
+ *  原先要么弹 alert 就结束（用户还得自己切页、自己勾选），要么弹 confirm 打断；
+ *  改为页内常驻条 + 一个按钮，复用 curType / sel.add 跳转。 */
+function nextStrip(hostId, type, newCodes, attempted) {
+  const el = document.getElementById(hostId);
+  if (!el) return;
+  const n = (newCodes || []).length;
+  if (!n) {
+    el.hidden = false;
+    el.innerHTML = '<span class="next-strip__t">本次没有新增（' + attempted + ' 条全部已存在，重复自动跳过）</span>';
+    return;
+  }
+  el.hidden = false;
+  el.innerHTML = '<span class="next-strip__t">✓ 已生成 <b>' + n + '</b> 条' +
+    (attempted > n ? '（重复跳过 ' + (attempted - n) + ' 条）' : '') + '</span>' +
+    '<button type="button" class="btn small next-strip__go" data-type="' + esc(type) + '" data-codes="' +
+    esc(newCodes.join(',')) + '">去标签打印（预勾选 ' + n + ' 条）</button>';
+}
+document.addEventListener('click', e => {
+  const b = e.target && e.target.closest ? e.target.closest('.next-strip__go') : null;
+  if (!b) return;
+  const type = b.dataset.type;
+  if (!sel[type]) return;
+  const want = (b.dataset.codes || '').split(',').filter(Boolean);
+  const list = recordsOf(type);
+  sel[type].clear();
+  want.forEach(c => { const i = list.findIndex(r => r.code === c); if (i >= 0) sel[type].add(i); });
+  curType = type;
+  if (type === 'zone') setPaper('a4');   // 区卡只能在 A4 打
+  try { localStorage.setItem('mes416_label_type', type); } catch (e) { }
+  document.querySelector('nav.tabs button[data-tab=label]').click();
+});
+
 function renderWipSummary() {
   const el = document.getElementById('wipSummary');
   if (!el) return;
