@@ -19,7 +19,9 @@ module.exports = async (req, res) => {
     const p = JSON.parse((await readBody(req)) || '{}');
     if (!p.table) { res.status(400).json({ ok: false, error: '缺 table' }); return; }
     if (!Array.isArray(p.records) || !p.records.length) { res.status(400).json({ ok: false, error: '缺 records（非空数组）' }); return; }
-    const r = await upsertRecords(p.table, p.records, { dryRun: !!p.dryRun });
+    /* clearFields：本地字段名数组，表示「这几列要显式清空」。
+       没有它就没法把「当前库位码」这类字段清掉（空值默认不写，避免静默抹掉飞书的值）。 */
+    const r = await upsertRecords(p.table, p.records, { dryRun: !!p.dryRun, clearFields: Array.isArray(p.clearFields) ? p.clearFields : [] });
     if (r.error) { res.status(400).json({ ok: false, error: r.error }); return; }
     res.status(200).json({ ok: true, table: p.table, ...r });
   } catch (e) {

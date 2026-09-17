@@ -316,7 +316,7 @@ test('阶段4：删除必须先写凭据、必须显示影响范围与同步状�
 test('阶段4：编辑必须「先写本地再造同步链」，且不得 await 网络', () => {
   const s = fnSrc('resSave');
   const saveIdx = s.indexOf('save();');
-  const pushIdx = s.indexOf('fsPushRecord(table, [pushed])');
+  const pushIdx = s.search(/fsPushRecord\(table, \[pushed\]/);
   assert.ok(saveIdx > 0 && pushIdx > saveIdx, '本地保存必须在推送之前');
   assert.ok(!/await fsPushRecord/.test(s),
     'await 推送会让编辑器卡在网络往返上（离线时更久），用户看到「点了保存没反应」；' +
@@ -337,4 +337,29 @@ test('阶段4：旧深链 #gen 必须跳到资源档案', () => {
   const s = fnSrc('applyHash');
   assert.match(s, /parts\[0\] === 'gen'/, 'home.html 的建档入口仍指向 #gen，不兼容就静默失效');
   assert.match(s, /parts = \['res'\]/);
+});
+
+/* ================= 编号生成绝不允许撞已有业务键 ================= */
+
+test('nextCode 必须支持含数字的前缀（A4SH / SC4 / K401）', () => {
+  const fn = new Function('pad', fnSrc('nextCode') + '; return nextCode;')(
+    (n, w) => String(n).padStart(w, '0'));
+  /* 旧正则 ^([A-Z]+)-(\d+)$ 遇到 A4SH 里的 '4' 匹配失败 → 永远返回 -001，
+     而 -001 已经存在 → 新增会覆盖飞书里的真实记录。 */
+  assert.strictEqual(fn([{ code: 'A4SH-001' }, { code: 'A4SH-002' }], 'A4SH'), 'A4SH-003');
+  assert.strictEqual(fn([{ code: 'SC4-001' }], 'SC4'), 'SC4-002');
+  assert.strictEqual(fn([{ code: 'B-01-01-01' }], 'B'), 'B-001', '带分隔的多段码不应被当成同前缀流水');
+  assert.strictEqual(fn([{ code: 'WP-005' }], 'WP'), 'WP-006');
+  assert.strictEqual(fn([], 'SC'), 'SC-001');
+  /* 不同前缀互不干扰 */
+  assert.strictEqual(fn([{ code: 'SLG-009' }, { code: 'XK-003' }], 'XK'), 'XK-004');
+});
+
+test('资源档案新增必须兜底防止落到已存在的业务键上（绝不覆盖真实记录）', () => {
+  const s = fnSrc('resSave');
+  /* 断言要盯住整个 if 条件 —— 只搜 some(...) 的话，把条件改成 if (false) 也照样通过（实测过）。 */
+  assert.match(s, /if \(\(state\[table\] \|\| \[\]\)\.some\(x => String\(x\[cfg\.key\]\) === code\)\)/,
+    '必须显式检查生成的码是否已存在；飞书按业务键 upsert，撞键等于覆盖真实记录');
+  assert.match(s, /do \{ code = pre \+ '-' \+ pad\(\+\+n, 3\); \} while/,
+    '撞键必须换号重试，而不是照推');
 });

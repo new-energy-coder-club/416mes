@@ -1465,3 +1465,27 @@ test('censusTable：空业务键行是数据质量问题，不得误判分页不
   assert.equal(r.blankKeys, 1, '空业务键应单独报告');
   assert.deepEqual(r.keys, ['A-1']);
 });
+
+/* ================= 显式清空字段（clearFields） ================= */
+
+test('clearFields：默认不写空值，但显式申报的列必须真被清空', async (t) => {
+  const mock = await startMock({
+    tables: { tblCTN: { fields: ['容器码', '容器类型', '规格', '当前库位码'], rows: [] } },
+    fieldTypes: { tblCTN: [{ name: '容器码', type: 1 }, { name: '容器类型', type: 1 }, { name: '规格', type: 1 }, { name: '当前库位码', type: 1 }] }
+  });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: JSON.stringify({ containers: 'tblCTN' }) });
+  const cell = () => mock.tables.tblCTN.rows[0]['当前库位码'];
+  /* 先灌一个「当前库位码」 */
+  await lib.upsertRecords('containers', [{ code: 'CT-1', type: '盒', spec: 'S', loc: 'B-01-01-01' }]);
+  assert.equal(cell(), 'B-01-01-01');
+  /* 不申报 clearFields → 空值不写（默认保护：防止字段缺失的推送静默抹掉飞书的值） */
+  await lib.upsertRecords('containers', [{ code: 'CT-1', type: '盒', spec: 'S', loc: '' }]);
+  assert.equal(cell(), 'B-01-01-01', '空值默认不得抹掉飞书已有值');
+  /* 显式申报 → 必须清空（否则容器从货位拿走后再也清不掉，只能删记录重建） */
+  await lib.upsertRecords('containers', [{ code: 'CT-1', type: '盒', spec: 'S', loc: '' }], { clearFields: ['loc'] });
+  assert.equal(cell(), '', '显式申报的列必须被清空');
+  /* 清空只作用于申报的列 */
+  await lib.upsertRecords('containers', [{ code: 'CT-1', type: '盒', spec: 'S2', loc: 'B-02-02-02' }], { clearFields: ['loc'] });
+  assert.equal(mock.tables.tblCTN.rows[0]['规格'], 'S2');
+});
