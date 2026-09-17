@@ -576,3 +576,83 @@ test('阶段7：仅本地的键必须带内容预览（否则用户判断不了�
   ['materials', 'locations', 'containers', 'members', 'items', 'manuals', 'workorders', 'transactions']
     .forEach(t => assert.ok(map.includes(t + ':'), t + ' 缺少预览字段配置'));
 });
+
+/* ================= 「仅在本地 + 已执行」工单的收场 ================= */
+
+test('收场资格：必须同时满足「对账确认仅本地」且「没有流水已进飞书」', () => {
+  const src = fnSrc('wipLocalOnlyCleanupEligibility');
+  /* 用最小替身构造环境（不引整个 index.html 的运行时） */
+  const build = (localOnlyWip, txnLocalOnly, txns) => {
+    const _lastReport = { tables: { workorders: { localOnly: localOnlyWip }, transactions: { localOnly: txnLocalOnly } } };
+    const state = {
+      workorders: [{ code: 'W-1', status: '已执行', items: [], execQty: [], execBatches: [] }],
+      transactions: txns || []
+    };
+    const CORE = { orderTransactions: (st, code) => (st.transactions || []).filter(t => t.ref === code) };
+    return new Function('_lastReport', 'state', 'CORE', src + '; return wipLocalOnlyCleanupEligibility;')(_lastReport, state, CORE);
+  };
+  /* 没核对过 → 拒绝：不能凭猜测删账本 */
+  const noReport = new Function('_lastReport', 'state', 'CORE',
+    src + '; return wipLocalOnlyCleanupEligibility;')(null, { workorders: [] }, { orderTransactions: () => [] });
+  assert.equal(noReport('W-1').ok, false, '没核对过绝不能删');
+
+  /* 不是仅本地 → 拒绝（飞书里也有，该用推回或正常删除） */
+  assert.equal(build([], [])('W-1').ok, false);
+
+  /* 仅本地、无流水 → 允许 */
+  assert.equal(build(['W-1'], [])('W-1').ok, true);
+
+  /* 仅本地，流水也只在本地 → 允许，并提示流水不会被一起删 */
+  const r1 = build(['W-1'], ['7'], [{ seq: 7, ref: 'W-1' }])('W-1');
+  assert.equal(r1.ok, true);
+  assert.equal(r1.localTxnCount, 1);
+
+  /* 仅本地，但有流水已进飞书 → 必须拒绝 */
+  const r2 = build(['W-1'], [], [{ seq: 7, ref: 'W-1' }])('W-1');
+  assert.equal(r2.ok, false, '飞书里已有引用流水时删本机工单，会让飞书凭证失去对应单据');
+  assert.match(r2.reason, /已经写进飞书/);
+  assert.equal(r2.inFeishu.length, 1);
+
+  /* 本地已经找不到这张单 → 拒绝 */
+  assert.equal(build(['W-2'], [])('W-1').ok, false);
+});
+
+test('收场动作：先写凭据、只删本机、绝不调用飞书删除、清干净本地痕迹', () => {
+  const s = fnSrc('cleanLocalOnlyExecutedWip');
+  const jIdx = s.indexOf('fsJournalDeletion');
+  const delIdx = s.indexOf("state.workorders = state.workorders.filter");
+  assert.ok(jIdx > 0 && delIdx > jIdx, '凭据必须写在删除之前');
+  assert.match(s, /if \(!j \|\| !j\.ok\)/, '凭据写失败必须放弃（该函数不抛异常）');
+  /* 只查**调用**：注释里说明「没有调用 fsPushDelete」不该算违规（阶段0 踩过同一个坑） */
+  assert.ok(!/\bfsPushDelete\s*\(/.test(s), '飞书里本来就没有这张单，绝不能调用飞书删除');
+  ['__syncedKeys', '_pendingPush', '_censusPending', 'removeRecord'].forEach(k =>
+    assert.ok(s.includes(k), '必须清理本地同步痕迹：' + k));
+  assert.match(s, /confirm\(/, '必须二次确认');
+  /* 资格判定必须复用同一个函数，不能各写一套 */
+  assert.match(s, /wipLocalOnlyCleanupEligibility\(code\)/);
+});
+
+test('收场入口：对账面板与工单详情都要有（否则用户还是无路可走）', () => {
+  /* 断言要盯住**条件**：只检查字符串存在的话，把条件改成 false 也照样通过（实测过，假绿）。 */
+  assert.match(fnSrc('dataConsistencyHtml'),
+    /protectedDelete && k === 'workorders'[\s\S]{0,120}data-wip-localonly-del/,
+    '对账面板那个「卡住」的提示旁必须有出口按钮，且只在工单被保护时出现');
+  assert.match(HTML, /btnWipLocalOnlyDel/, '工单详情里也要能给出口');
+  const wire = HTML.slice(HTML.indexOf("document.getElementById('btnWipLocalOnlyDel')"));
+  assert.match(wire.slice(0, 160), /cleanLocalOnlyExecutedWip/);
+  /* 入口必须按资格显示，不能无条件给 —— 否则用户点了才发现不行 */
+  const detail = fnSrc('showWipDetail');
+  assert.match(detail, /wipLocalOnlyCleanupEligibility\(w\.code\)\.ok/, '入口要按资格显示');
+});
+
+test('本机 ↔ 飞书 关系必须写在产品里且结论准确', () => {
+  const sync = HTML.slice(HTML.indexOf('id="tab-sync"'), HTML.indexOf('</section>', HTML.indexOf('id="tab-sync"')));
+  assert.match(sync, /rel-panel/, '同步页必须有「本机 ↔ 飞书是什么关系」的常驻说明');
+  /* 四条核心关系都要讲清，缺一条就会重新产生「云端同步到底做什么」这类困惑 */
+  assert.match(sync, /飞书多维表格（真源）/, '要讲清真源是谁');
+  assert.match(sync, /库存流水<\/b>/, '要讲清数量的权威是流水而不是物料行');
+  assert.match(sync, /覆盖同一行/, '要讲清业务键 upsert 是覆盖不是新增（重复工单的根因）');
+  assert.match(sync, /最后写入者胜/, '要讲清两边都能写时的胜负规则');
+  assert.match(sync, /离线时改动会排队/, '要讲清离线队列会在之后补交（我踩过两次的坑）');
+  assert.match(sync, /NEC 任务[\s\S]{0,80}仅本机/, '要讲清 NEC 任务不同步');
+});
