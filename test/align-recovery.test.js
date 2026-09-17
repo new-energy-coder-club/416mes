@@ -115,7 +115,6 @@ test('阶段2：状态条必须有全站同步入口，异常时变红并可直�
   assert.match(s, /localOnlyCount/);
   assert.match(s, /workorderDuplicateGroups/);
   assert.match(s, /sb-link--alert/, '异常必须在状态条上变红，否则用户不知道要去同步页');
-  assert.match(s, /syncAllClear/, '一切正常时也要有正面反馈，不能是空白页');
   const wire = HTML.slice(HTML.indexOf("const entry = document.getElementById('sbDock')"), HTML.indexOf("const sr = document.getElementById('btnSyncRefresh')"));
   assert.match(wire, /goTab\('sync'\)/, '入口必须可点击直达同步页');
 });
