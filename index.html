@@ -183,6 +183,21 @@ table.grid tr:hover td{background:#f7fafd;}
 /* 密集表格横向滚动容器：只提供滚动，不改表格自身尺寸。
    打印域（.label / .zonecard / #printSheet）不在其内，且 @media print 已隐藏 .label-list。 */
 .table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%;min-width:0}
+/* ============================================================
+   06 RESPONSIVE（阶段29 · §5.4）：粘性表头 —— 自适应方案，不是二选一
+   背景：表格包在 .table-scroll(overflow-x:auto) 里以支持横向滚动，而该容器**同时成为
+   纵向滚动容器** → 纵向 position:sticky 失效（横向不受影响，见阶段22 的左侧粘性列）。
+   要让表头粘住，就必须让这个容器真的能纵向滚动。
+   做法：给它一个视口相关的高度上界，并用 max(320px, …) 兜底 ——
+     · 短表（工单 5 行 ≈ 200px）**根本触不到上界** → 不会凭空多出一条内滚条，仍是页滚
+     · 长表（物料台账/流水/成员）才会内滚，此时表头粘在顶部
+   手机 ≤560px 表格已卡片化（thead 隐藏），不适用本规则。
+   ============================================================ */
+@media screen and (min-width:561px){
+  .table-scroll{max-height:max(320px,calc(100vh - 220px));overflow:auto;}
+  /* z-index 3 必须高于阶段22 的左右侧粘性列(2)，否则纵向滚动时行的粘性格会盖住表头 */
+  .table-scroll table.grid thead th{position:sticky;top:0;z-index:3;background:var(--surface-2);}
+}
 /* 人员 PIN 脱敏：表格内不回显明文 */
 .pin-state{display:inline-block;min-width:60px;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums}
 .pin-state.is-set{color:var(--done-fg);font-weight:600}
