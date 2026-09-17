@@ -71,13 +71,17 @@
    ============================================================ */
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:var(--bg);color:var(--ink);font-size:14px;}
+/* 02 BASE（阶段3 新增）：可见键盘焦点。
+   扫码枪本质是键盘设备，焦点不可见会直接影响现场连续扫码作业。
+   原先 table.grid input:focus{outline:none} 是全站唯一的焦点样式，已移除。 */
+:focus-visible{outline:3px solid var(--cyan-ink);outline-offset:2px;}
 header{background:linear-gradient(100deg,#0E1A55 0%,#172A88 65%,#00B0F0 170%);color:#fff;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:3px solid #00B0F0;}
 header .nec-logo{height:26px;width:auto;}
 header h1{font-size:20px;letter-spacing:1px;}
 header .sub{font-size:12px;color:#9fb2cf;}
 header .slogan{font-size:11px;color:#00B0F0;letter-spacing:2px;font-weight:bold;}
-nav.tabs{display:flex;background:#fff;border-bottom:1px solid var(--line);padding:0 12px;}
-nav.tabs button{border:none;background:none;padding:12px 18px;font-size:14px;cursor:pointer;border-bottom:3px solid transparent;color:#555;}
+nav.tabs{display:flex;background:#fff;border-bottom:1px solid var(--line);padding:0 12px;overflow-x:auto;scrollbar-width:thin;}
+nav.tabs button{border:none;background:none;padding:12px 18px;font-size:14px;cursor:pointer;border-bottom:3px solid transparent;color:#555;white-space:nowrap;}
 nav.tabs button.on{border-bottom-color:var(--blue);color:var(--blue);font-weight:bold;}
 nav.tabs a.tab-link{display:inline-block;padding:12px 18px;font-size:14px;border-bottom:3px solid transparent;color:#555;text-decoration:none;}
 nav.tabs a.tab-link:hover{color:var(--blue);border-bottom-color:#bcd4f6;}
@@ -95,12 +99,39 @@ table.grid{border-collapse:collapse;width:100%;font-size:13px;}
 table.grid th,table.grid td{border:1px solid var(--line);padding:4px 6px;text-align:left;}
 table.grid th{background:#eef2f7;white-space:nowrap;}
 table.grid input[type=text],table.grid input[type=number]{width:100%;border:none;background:transparent;font-size:13px;padding:2px;}
-table.grid input:focus{background:#fff8e6;outline:none;}
+table.grid input:focus{background:#fff8e6;}   /* 阶段3：移除 outline:none，改用全局 :focus-visible 焦点环 */
 table.grid tr:hover td{background:#f7fafd;}
 .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
 .toolbar .spacer{flex:1;}
-.hint{font-size:12px;color:#8892a2;}
+.hint{font-size:12px;color:var(--text-muted);}   /* 阶段3：对比度 3.14:1 → 4.97:1 */
 .badge{display:inline-block;padding:1px 8px;border-radius:10px;color:#fff;font-size:11px;}
+/* ============================================================
+   04 COMPONENTS（阶段3 新增）
+   ============================================================ */
+/* 库存工单状态徽章：深字浅底，与 NEC 的 .st-* 共用同一套语义色。
+   替代原先写死在 WIP_STATUS_STYLE 里的「白字 + 饱和底色」。 */
+.wip-status{display:inline-block;padding:1px 8px;border-radius:var(--r-sm);font-size:11px;font-weight:600;white-space:nowrap}
+.wip-status.is-pending{background:var(--todo-bg);color:var(--todo-fg)}
+.wip-status.is-active{background:var(--doing-bg);color:var(--doing-fg)}
+.wip-status.is-done{background:var(--done-bg);color:var(--done-fg)}
+.wip-status.is-cancelled{background:var(--cancelled-bg);color:var(--cancelled-fg)}
+.wip-status.is-danger{background:var(--danger-bg);color:var(--danger-fg)}
+.wip-reversed{display:inline-block;margin-left:4px;font-size:11px;color:var(--cancelled-fg)}
+/* 密集表格横向滚动容器：只提供滚动，不改表格自身尺寸。
+   打印域（.label / .zonecard / #printSheet）不在其内，且 @media print 已隐藏 .label-list。 */
+.table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
+/* 人员 PIN 脱敏：表格内不回显明文 */
+.pin-state{display:inline-block;min-width:60px;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums}
+.pin-state.is-set{color:var(--done-fg);font-weight:600}
+.pin-btn{margin-left:6px;padding:1px 8px;font-size:11px}
+/* 工单进度条：按「流程状态」着色（0% 灰 / 1–99% 蓝 / 100% 绿 / 已取消 灰），
+   红色只保留给校验错误。宽度保持为逐单动态值，只把颜色交给 class。 */
+.progress{height:8px;margin-top:3px;overflow:hidden;border-radius:var(--r-sm);background:var(--surface-2)}
+.progress__bar{height:100%;transition:width .15s ease}
+.progress__bar--todo{background:var(--cancelled-fg)}
+.progress__bar--active{background:var(--color-primary)}
+.progress__bar--done{background:var(--done-fg)}
+.progress__bar--cancelled{background:var(--line-strong)}
 /* 标签打印页 */
 .typebar{display:flex;gap:8px;margin-bottom:10px;}
 .typebar button{border:1px solid var(--line);background:#fff;border-radius:5px;padding:6px 14px;cursor:pointer;}
@@ -135,8 +166,13 @@ table.grid tr:hover td{background:#f7fafd;}
 .label .foot{position:absolute;left:0;right:0;bottom:0;height:3.6mm;line-height:3.6mm;background:#0E1A55;color:#fff;
   font-size:5.8pt;font-weight:bold;padding:0 1.6mm;display:flex;justify-content:space-between;align-items:center;letter-spacing:0;white-space:nowrap;overflow:hidden;}
 .label .foot .url{color:#00B0F0;font-weight:normal;}
-/* NEC 工单状态徽章色 */
-.st-待处理{background:#8892a2}.st-进行中{background:#1f6fd6}.st-已完成{background:#2d9d4f}.st-已取消{background:#b0574f}
+/* NEC 工单状态徽章色（阶段3：统一为「深字浅底」五档语义色，对比度全部 ≥4.5:1。
+   原实现为「白字 + 饱和底色」，其中 #e8a020 白字仅 2.22:1、#2d9d4f 3.47:1、#8892a2 3.14:1 均不达标。
+   取值来自 01 TOKENS 的 --todo/--doing/--done/--cancelled。 */
+.st-待处理{background:var(--todo-bg);color:var(--todo-fg)}
+.st-进行中{background:var(--doing-bg);color:var(--doing-fg)}
+.st-已完成{background:var(--done-bg);color:var(--done-fg)}
+.st-已取消{background:var(--cancelled-bg);color:var(--cancelled-fg)}
 /* NEC 图库 */
 .nec-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;max-height:380px;overflow:auto;margin-top:8px;}
 .nec-gallery .g-item{position:relative;aspect-ratio:4/3;background:#e9edf3;border-radius:6px;overflow:hidden;cursor:pointer;border:2px solid transparent;}
@@ -212,7 +248,7 @@ tr.row-low td{background:#fff8e1;}
 .zc-url{font-size:8.5pt;color:#555;text-align:right;margin-top:1mm;}
 .zc-rule{height:2.5mm;background:#22a9f0;margin-top:2mm;border-radius:1px;}
 .log{font-family:Consolas,monospace;font-size:12px;max-height:220px;overflow:auto;background:#16233a;color:#bfe0c8;border-radius:6px;padding:8px 10px;margin-top:10px;white-space:pre-wrap;}
-footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
+footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:center;}   /* 阶段3：对比度 2.58:1 → 4.97:1 */
 /* ============================================================
    06 RESPONSIVE —— 现仅一个窄屏断点，且只保护 #matTable。
    注意：本块当前物理位置在 07 PRINT 之后（阶段 2 不移动规则）。
@@ -265,6 +301,7 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         <span class="spacer"></span>
         <button class="btn warn small" id="btnDelMat">删除勾选行</button>
       </div>
+      <div class="table-scroll">
       <table class="grid" id="matTable">
         <thead><tr>
           <th style="width:28px"><input type="checkbox" id="matCheckAll"></th>
@@ -273,6 +310,7 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         </tr></thead>
         <tbody></tbody>
       </table>
+      </div>
       <datalist id="zoneList"></datalist>
       <div class="toolbar" style="margin-top:10px">
         <button class="btn small ghost" id="btnLocateAudit">🎯 定位抽查（随机 10 件）</button>
@@ -292,10 +330,12 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         <button class="btn small ghost" id="btnAuditExport">⬇ 导出审计日志（JSON）</button>
         <span class="hint">流水追加写、只增不改；回放可从首条余量逐条重算，定位篡改/丢数</span>
       </div>
+      <div class="table-scroll">
       <table class="grid" id="txnTable" style="margin-top:8px">
         <thead><tr><th>时间</th><th>操作人</th><th>类型</th><th>物料码</th><th>变动</th><th>余量</th><th>关联单</th><th>原因/备注</th></tr></thead>
         <tbody></tbody>
-      </table></details>
+      </table>
+      </div></details>
     </div>
   </section>
   <!-- ========== 人员台账 ========== -->
@@ -309,13 +349,15 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         <button class="btn warn small" id="btnDelMember">删除勾选行</button>
       </div>
       <div class="toolbar" id="memberTagBar" style="margin-top:6px"></div>
+      <div class="table-scroll">
       <table class="grid" id="memberTable">
         <thead><tr>
           <th style="width:28px"><input type="checkbox" id="memberCheckAll"></th>
-          <th style="width:80px">编号</th><th>姓名</th><th>学号</th><th>部门/SIG</th><th>职务</th><th style="width:120px">标签</th><th>电话</th><th>备注</th>
+          <th style="width:80px">编号</th><th>姓名</th><th>学号</th><th>部门/SIG</th><th>职务</th><th style="width:120px">标签</th><th style="width:110px">PIN码</th><th style="width:120px">电话</th><th>备注</th>
         </tr></thead>
         <tbody></tbody>
       </table>
+      </div>
       <p class="hint" style="margin-top:8px">姓名会自动出现在右上角「操作人」下拉和 NEC 工单「负责人」候选中；编号（MB-xxx）生成后不变，人员退出请删除整行。「标签」用于分组（如 天权1楼实验台 / 416整理），上方标签条可一键筛选。所有修改自动保存到浏览器本地。</p>
     </div>
   </section>
@@ -474,6 +516,7 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         <button class="btn small ghost" id="btnWipRefresh">刷新</button>
         <span class="hint" id="wipStats"></span>
       </div>
+      <div class="table-scroll">
       <table class="grid" id="wipTable" style="margin-top:10px">
         <thead><tr>
           <th>工单号</th><th style="width:90px">类型</th><th style="width:90px">日期</th>
@@ -481,6 +524,7 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         </tr></thead>
         <tbody></tbody>
       </table>
+      </div>
       <p class="hint" style="margin-top:8px">点「详情」查看计划/实际/剩余数量、执行历史与关联流水。待执行可「取消」，已执行或部分执行可「冲销」（把库存还回后关闭工单）。</p>
     </div>
     <div class="panel" id="wipDetailPanel" style="display:none">
@@ -515,6 +559,7 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         <span class="spacer"></span>
         <button class="btn small warn" id="btnNecDel">删除勾选</button>
       </div>
+      <div class="table-scroll">
       <table class="grid" id="necTable">
         <thead><tr>
           <th style="width:28px"><input type="checkbox" id="necCheckAll"></th>
@@ -523,6 +568,7 @@ footer{padding:10px 20px;font-size:12px;color:#98a2b3;text-align:center;}
         </tr></thead>
         <tbody></tbody>
       </table>
+      </div>
       <p class="hint" style="margin-top:8px">同步到飞书：① 点「导出同步文件」得到 nec-wip-export.json → ② 终端运行 <b>node nec-sync.mjs push</b>（首次先 node nec-sync.mjs init 建表选群）。状态改为「已完成/已取消」会写入完成时间并触发群通知。</p>
     </div>
   </section>
@@ -1702,10 +1748,18 @@ function renderMembers() {
     (!f || [m.code, m.name, m.sid, m.dept, m.role, m.group, m.phone, m.note].some(v => String(v || '').toLowerCase().includes(f)))
   ).map(({ m, i }) =>
     '<tr><td><input type="checkbox" class="memberSel" data-i="' + i + '"></td>' +
-    MEMBER_COLS.map(([k]) => {
-      if (k === 'role') return '<td data-th="职务"><select data-i="' + i + '" data-k="role">' +
+    MEMBER_COLS.map(([k, label]) => {
+      if (k === 'role') return '<td data-th="' + label + '"><select data-i="' + i + '" data-k="role">' +
         ROLE_OPTS.map(o => '<option' + (((m.role || '成员') === o) ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select></td>';
-      return '<td><input type="text" data-i="' + i + '" data-k="' + k + '" value="' + esc(m[k]) + '"' + (k === 'code' ? ' readonly style="color:#667;background:#f5f7fa;"' : '') + '></td>';
+      /* 阶段3：PIN 不再以明文输入框回显（原实现还会因表头少一列而错位到「电话」下）。
+         改为脱敏显示 + 设置/重置按钮，仍写同一个 m.pin 字段、同一套 4 位数字校验。 */
+      if (k === 'pin') {
+        const has = !!(m.pin && String(m.pin).trim());
+        return '<td data-th="' + label + '"><span class="pin-state' + (has ? ' is-set' : '') + '">' +
+          (has ? '•••• 已设置' : '未设置') + '</span>' +
+          '<button type="button" class="btn small ghost pin-btn" data-i="' + i + '">' + (has ? '重置' : '设置') + '</button></td>';
+      }
+      return '<td data-th="' + label + '"><input type="text" data-i="' + i + '" data-k="' + k + '" value="' + esc(m[k]) + '"' + (k === 'code' ? ' readonly style="color:#667;background:#f5f7fa;"' : '') + '></td>';
     }).join('') + '</tr>'
   ).join('');
   tb.querySelectorAll('input[data-k], select[data-k]').forEach(inp => inp.addEventListener('change', () => {
@@ -1716,6 +1770,18 @@ function renderMembers() {
     if (k === 'name') { renderOperators(); refreshMemberDatalist(); }
     if (k === 'group') renderMemberTagBar();
     fsPushRecord('members', [m]);   // 人员改动同样写回飞书
+  }));
+  tb.querySelectorAll('.pin-btn').forEach(btn => btn.addEventListener('click', () => {
+    const m = state.members[+btn.dataset.i];
+    if (!m) return;
+    const has = !!(m.pin && String(m.pin).trim());
+    const v = prompt((has ? '重置 ' : '设置 ') + (m.name || m.code) + ' 的 PIN 码（4 位数字，切换操作人时校验）：', '');
+    if (v === null) return;
+    const t = v.trim();
+    if (!/^\d{4}$/.test(t)) { alert('PIN 码必须是 4 位数字，本次未修改。'); return; }
+    m.pin = t;
+    save(); renderMembers();
+    fsPushRecord('members', [m]);
   }));
 }
 document.getElementById('memberSearch').addEventListener('input', e => { memberFilter = e.target.value; renderMembers(); });
@@ -2813,14 +2879,16 @@ document.getElementById('btnWipe').addEventListener('click', () => {
 });
 
 /* ================= 库存工单管理（Phase 3） ================= */
-const WIP_STATUS_STYLE = { '未执行': '#d33a2c', '待执行': '#d33a2c', '部分执行': '#e8a020', '已执行': '#2d9d4f', '已取消': '#8892a2' };
+/* 阶段3：状态由「写死十六进制色」改为「语义类名」，五档与 NEC 的 .st-* 共用同一套
+   --todo/--doing/--done/--cancelled 语义色。待执行不再是红色（红色从此只表示异常）。 */
+const WIP_STATUS_CLASS = { '未执行': 'is-pending', '待执行': 'is-pending', '部分执行': 'is-active', '已执行': 'is-done', '已取消': 'is-cancelled' };
 let wipDetailCode = '';
 
 function wipStatusBadge(order) {
   const label = CORE.statusLabel(order.status);
-  const color = WIP_STATUS_STYLE[order.status] || '#8892a2';
-  return '<span class="badge" style="background:' + color + '">' + esc(label) + '</span>' +
-    (order.reverseInfo ? '<br><span class="hint">已冲销</span>' : '');
+  const cls = WIP_STATUS_CLASS[order.status] || 'is-pending';
+  return '<span class="wip-status ' + cls + '">' + esc(label) + '</span>' +
+    (order.reverseInfo ? '<span class="wip-reversed">已冲销</span>' : '');
 }
 
 function wipMatchesFilter(w, kw, st, ty) {
@@ -2852,8 +2920,11 @@ function renderWip() {
 
   tb.innerHTML = shown.map(w => {
     const p = CORE.orderProgress(w);
-    const bar = '<div style="background:#eef1f6;border-radius:4px;height:8px;overflow:hidden;margin-top:3px">' +
-      '<div style="width:' + Math.min(100, p.percent) + '%;height:100%;background:' + (p.percent >= 100 ? '#2d9d4f' : '#e8a020') + '"></div></div>';
+    const pct = Math.min(100, p.percent);
+    const barCls = CORE.isCancelled(w) ? 'progress__bar--cancelled'
+      : (pct >= 100 ? 'progress__bar--done' : (pct <= 0 ? 'progress__bar--todo' : 'progress__bar--active'));
+    const bar = '<div class="progress" aria-label="工单进度 ' + pct + '%">' +
+      '<div class="progress__bar ' + barCls + '" style="width:' + pct + '%"></div></div>';
     return '<tr>' +
       '<td><b>' + esc(w.code) + '</b></td>' +
       '<td>' + esc(WIP_NAMES[w.type] || w.type) + '</td>' +
@@ -3266,8 +3337,7 @@ function scanWip(code, box) {
   const mergedHint = CORE.normalizeItems(w.items).items.length !== w.items.length;
   const partial = CORE.isPartiallyExecuted(w);
   box.className = 'scan-result panel ' + (closed ? '' : 'flash-ok');
-  box.innerHTML = '<div class="kv"><b>工单号</b>' + esc(w.code) + '　<span class="badge" style="background:' + (WIP_STATUS_STYLE[w.status] || '#8892a2') + '">' + esc(CORE.statusLabel(w.status)) + '</span>' +
-    (w.reverseInfo ? ' <span class="hint">已冲销</span>' : '') +
+  box.innerHTML = '<div class="kv"><b>工单号</b>' + esc(w.code) + '　' + wipStatusBadge(w) +
     '<br><b>类型</b>' + esc(WIP_NAMES[w.type] || w.type) + '（' + verb + '）　<b>日期</b>' + esc(w.date) + '</div>' +
     '<div class="kv" style="margin-top:6px"><b>计划</b>' + prog.plannedTotal + '　<b>已执行</b>' + prog.executedTotal + '　<b>剩余</b>' + prog.remainingTotal + '　<b>进度</b>' + prog.percent + '%</div>' +
     (mergedHint ? '<p class="hint" style="margin:6px 0 0">ℹ️ 本工单存在同一物料多行，已合并为一行按<b>合计数量</b>校验与执行。</p>' : '') +
