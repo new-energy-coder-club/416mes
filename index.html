@@ -265,6 +265,37 @@ body.stocktake-on .stocktake-banner{display:block}
   font-size:12.5px;font-weight:600;line-height:1.6}
 .locate-evidence{font-size:12px;color:var(--text-muted)}
 /* ============================================================
+   04 COMPONENTS（阶段14）：30 秒定位卡（ui优化.md §5.3）
+   · 只有标题区浅黄，不把整卡染黄
+   · 台账命中用海军蓝边 + 浅蓝底，**不用全绿**（位置存在 ≠ 现场确认）
+   · none 用灰底 + 红字「不能判断」，**不伪造建议位置**
+   ============================================================ */
+.locate-card{margin-top:8px;border:1px solid var(--line);border-left:4px solid var(--line);
+  border-radius:var(--r-lg);background:var(--surface);overflow:hidden}
+.locate-card--clue{border-left-color:var(--accent-warn)}
+.locate-card--ledger{border-left-color:#1F4E8C;background:#F4F8FD}
+.locate-card--none{border-left-color:var(--line-strong);background:var(--surface-2)}
+.locate-title{padding:8px 12px;font-size:13px;font-weight:600;background:var(--surface-2);color:var(--ink-strong)}
+.locate-card--clue .locate-title{background:#FFF8E6;color:#7a4a00}
+.locate-card--ledger .locate-title{background:#E8F1FB;color:#1F4E8C}
+.locate-card--none .locate-title{background:var(--danger-bg);color:var(--danger-fg)}
+.locate-body{padding:10px 12px}
+.locate-heading{font-size:12px;color:var(--text-muted);margin-bottom:2px}
+.locate-path{font-size:24px;line-height:34px;font-weight:700;color:var(--ink-strong);word-break:break-all}
+.locate-grade{display:inline-block;margin-left:8px;padding:1px 8px;border-radius:var(--r-sm);
+  font-size:11.5px;font-weight:600;background:var(--surface-2);color:var(--text-muted);vertical-align:middle}
+.locate-code{font-family:var(--font-mono);font-size:14px;color:var(--text-muted);margin-top:2px}
+.locate-sec{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);font-size:12.5px;line-height:1.7}
+.locate-sec__h{font-size:12px;color:var(--text-muted);font-weight:600;margin-bottom:2px}
+.locate-fresh{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:var(--r-sm);font-size:11px;font-weight:600}
+.locate-fresh--old{background:var(--surface-2);color:var(--text-muted)}
+.locate-fresh--stale{background:var(--doing-bg);color:var(--doing-fg)}
+.locate-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.locate-after{margin-top:8px;font-size:12px;color:var(--text-muted)}
+/* §7.2 触控目标：桌面 ≥32px、手机 ≥44px。这三颗是定位卡的主动作，不能是 23px 的默认小按钮 */
+.locate-actions .btn{min-height:32px;padding-left:12px;padding-right:12px;display:inline-flex;align-items:center}
+/* 移动端覆盖见 06 RESPONSIVE 块内（需排在 .btn.small 之后才能生效） */
+/* ============================================================
    04 COMPONENTS（阶段9）：统一结果卡骨架 —— head / readings / detail / actions
    六种码型共用同一结构：状态条 → 前缀徽章 + 标题 + 编码 → 关键读数 → 次级详情 → 动作区。
    本层只搭结构与呈现，不改变任何业务数据与判定逻辑。
@@ -548,6 +579,9 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   /* 触控目标与字号 */
   .btn{min-height:40px;}
   .btn.small{min-height:34px;}
+  /* 定位卡的动作按钮是主动作：必须压过上面的 .btn.small(34px)。
+     同优先级下后定义者胜，这里用 .btn.small 再提一级到 (0,3,0) 以确保生效。 */
+  .locate-actions .btn.small{min-height:44px;}
   input,select,textarea{font-size:16px;}
   /* .field 系列的优先级(0,1,0)高于上面的元素选择器(0,0,1)，必须显式覆盖，
      否则搜索框仍是 12–14px，iOS 聚焦时会自动放大整页。
@@ -3615,47 +3649,148 @@ function locationCard(code, { withTimes = true } = {}) {
   const hist = CORE.scanHistoryFor(state, code, 50) || [];
   const locEv = hist.find(h => h.loc || h.container || h.zone) || null;
   const fromHistory = L.source === '最近扫码';
+  const g = CORE.gradeLocation(state, L);
+  const GRADE_TXT = { exact: '空间精度：架-层-位', container: '空间精度：容器', zone: '空间精度：模块区', clue: '空间精度：历史线索', none: '空间精度：无' };
+  const gTxt = GRADE_TXT[g.grade] || ('空间精度：' + g.grade);
 
-  const rows = [];
+  /* 主路径：优先库位（能落到架-层-位），其次容器，最后模块区 */
+  let kind = '', targetCode = '', pathText = '', pathDesc = '';
   if (L.loc) {
     const r = CORE.resolveLocation(state, L.loc);
-    rows.push('<b>库位</b><span style="font-weight:bold">' + esc(r.text) + '</span> <span class="hint">' + esc(L.loc) + '</span>' +
-      (fromHistory ? ' <span class="hint">（当时记录，尚未现场确认）</span>' : ''));
-  }
-  if (L.container) {
+    kind = 'LOC'; targetCode = L.loc; pathText = r.text || L.loc; pathDesc = r.desc || '';
+  } else if (L.container) {
     const c = CORE.resolveLocation(state, L.container);
-    rows.push('<b>容器</b>' + esc(L.container) + (c.containerAt ? ' <span class="hint">当前台账登记在 ' + esc(c.containerAt.text) + '</span>' : ''));
-  }
-  if (L.zone) {
+    kind = 'CTN'; targetCode = L.container;
+    pathText = (c.containerAt && c.containerAt.text) || c.text || L.container; pathDesc = c.desc || '';
+  } else if (L.zone) {
     const z = CORE.resolveLocation(state, L.zone);
-    rows.push('<b>模块区</b>' + esc(L.zone) + (z.desc ? ' <span class="hint">' + esc(z.desc) + '</span>' : ''));
+    kind = 'ZONE'; targetCode = L.zone; pathText = z.desc || z.text || L.zone;
   }
-  if (!rows.length) rows.push('<span class="hint">（台账未登记库位 / 容器 / 模块区）</span>');
 
-  const times = [];
+  /* 三态：台账登记（海军蓝，**不用全绿** —— 位置存在 ≠ 现场确认）/ 历史线索（琥珀）/
+     不能判断（灰底红字，**不伪造建议位置**） */
+  const variant = !targetCode ? 'none' : (fromHistory ? 'clue' : 'ledger');
+  const who = (L.material && L.material.name) || '';
+
+  /* 新鲜度：呈现层提示，**不改 gradeLocation** */
+  const evTs = (fromHistory && locEv) ? locEv.ts : (L.lastScan ? L.lastScan.ts : null);
+  let fresh = '';
+  if (evTs) {
+    const hours = (Date.now() - new Date(evTs).getTime()) / 36e5;
+    if (hours > 24 * 7) fresh = '<span class="locate-fresh locate-fresh--stale">陈旧线索（超过 7 天）</span>';
+    else if (hours > 24) fresh = '<span class="locate-fresh locate-fresh--old">较旧（超过 24 小时）</span>';
+  }
+
+  let title;
+  if (variant === 'none') title = '△ 不能判断 —— 台账未登记位置，也没有历史线索';
+  else if (variant === 'clue') title = '△ 历史线索，不是当前位置确认 · ' + (L.found ? '' : '未找到台账物料 ') + esc(code);
+  else title = '台账登记位置 · ' + (who ? esc(who) + ' ' : '') + esc(code);
+
+  let main;
+  if (variant === 'none') {
+    main = '<div class="locate-heading">台账与历史记录里都没有位置线索</div>' +
+      '<div class="locate-path" style="font-size:16px;line-height:24px;color:var(--danger-fg)">不能判断</div>' +
+      '<div class="hint">没有任何该编码的扫码 / 流水 / 工单记录，因此无法给出建议位置。</div>';
+  } else {
+    main = '<div class="locate-heading">先去这里找</div>' +
+      '<div class="locate-path">' + esc(pathText) + '<span class="locate-grade">' + esc(gTxt) + '</span></div>' +
+      '<div class="locate-code">编码 ' + esc(targetCode) + (pathDesc && pathDesc !== pathText ? ' · ' + esc(pathDesc) : '') + '</div>';
+  }
+
+  /* 次级位置字段（保留原有全部信息，不因主路径已展示而丢弃） */
+  const extra = [];
+  if (L.loc && kind !== 'LOC') {
+    const r = CORE.resolveLocation(state, L.loc);
+    extra.push('<div><b>库位</b>' + esc(L.loc) + (r.text ? ' <span class="hint">' + esc(r.text) + '</span>' : '') + (fromHistory ? ' <span class="hint">（当时记录，尚未现场确认）</span>' : '') + '</div>');
+  }
+  if (L.container && kind !== 'CTN') {
+    const c = CORE.resolveLocation(state, L.container);
+    extra.push('<div><b>容器</b>' + esc(L.container) + (c.containerAt ? ' <span class="hint">当前台账登记在 ' + esc(c.containerAt.text) + '</span>' : '') + '</div>');
+  }
+  if (L.zone && kind !== 'ZONE') {
+    const z = CORE.resolveLocation(state, L.zone);
+    extra.push('<div><b>模块区</b>' + esc(L.zone) + (z.desc ? ' <span class="hint">' + esc(z.desc) + '</span>' : '') + '</div>');
+  }
+
+  /* 位置与经手证据 */
+  const ev = [];
   if (fromHistory && locEv) {
-    times.push('<b>位置证据</b>' + esc(locEv.time) + ' <span class="hint">' + CORE.timeAgo(locEv.ts) + ' · ' + esc(locEv.operator || '—') +
-      ' · 这次扫码记录了上面的位置</span>');
+    ev.push('<div><b>位置证据</b>' + esc(locEv.time) + ' <span class="hint">' + CORE.timeAgo(locEv.ts) + ' · ' + esc(locEv.operator || '—') +
+      ' · 这次扫码记录了上面的位置。这是当时记录，尚未现场确认。</span>' + fresh + '</div>');
   }
   if (L.lastScan) {
     const sameAsEv = fromHistory && locEv && L.lastScan.seq === locEv.seq;
-    times.push('<b>最近一次扫码</b>' + esc(L.lastScan.time) + ' <span class="hint">' + CORE.timeAgo(L.lastScan.ts) + ' · ' + esc(L.lastScan.operator || '—') +
-      (sameAsEv ? '' : ' · 只是查询，不代表位置更新') + '</span>');
+    ev.push('<div><b>最近一次扫码</b>' + esc(L.lastScan.time) + ' <span class="hint">' + CORE.timeAgo(L.lastScan.ts) + ' · ' + esc(L.lastScan.operator || '—') +
+      (sameAsEv ? '' : ' · 只是查询，不代表位置更新') + '</span>' + (fromHistory ? '' : fresh) + '</div>');
   }
-  if (L.lastTxn) times.push('<b>最近流水</b>' + esc(L.lastTxn.time) + ' <span class="hint">' + CORE.timeAgo(L.lastTxn.ts) + ' · ' + esc(L.lastTxn.type) + ' ' + (L.lastTxn.delta > 0 ? '+' : '') + L.lastTxn.delta + ' \u2192 ' + esc(L.lastTxn.balance) + (L.lastTxn.ref ? ' · 单 ' + esc(L.lastTxn.ref) : '') + '</span>');
-  if (L.lastOrder) times.push('<b>最近工单</b>' + esc(L.lastOrder.code) + ' <span class="hint">' + esc(WIP_NAMES[L.lastOrder.type] || L.lastOrder.type) + ' · ' + esc(CORE.statusLabel(L.lastOrder.status)) + (L.lastOrder.execTime ? ' · ' + esc(L.lastOrder.execTime) : '') + '</span>');
+  if (L.lastTxn) {
+    ev.push('<div><b>最近流水</b>' + esc(L.lastTxn.time) + ' <span class="hint">' + CORE.timeAgo(L.lastTxn.ts) + ' · ' + esc(L.lastTxn.type) + ' ' +
+      (L.lastTxn.delta > 0 ? '+' : '') + L.lastTxn.delta + ' \u2192 ' + esc(L.lastTxn.balance) +
+      (L.lastTxn.ref ? ' · 关联单 ' + esc(L.lastTxn.ref) : '') + '</span></div>');
+  }
+  if (L.lastOrder) {
+    ev.push('<div><b>最近工单</b>' + esc(L.lastOrder.code) + ' <span class="hint">' + esc(WIP_NAMES[L.lastOrder.type] || L.lastOrder.type) + ' · ' +
+      esc(CORE.statusLabel(L.lastOrder.status)) + (L.lastOrder.execTime ? ' · ' + esc(L.lastOrder.execTime) : '') + '</span></div>');
+  }
 
-  const g = CORE.gradeLocation(state, L);
-  const GRADE_TXT = { exact: '精确', container: '容器', zone: '模块区', clue: '历史线索', none: '无' };
-  return '<div class="kv mt-6">' +
-    (fromHistory ? '<span class="locate-banner">\u25b3 历史线索，不是当前位置确认 —— 到达后请扫描库位 / 容器标签并核对实物。</span>' : '') +
-    '<div><span class="hint">定位来源：' + esc(L.source) + '\u3000定位精度：' + esc(GRADE_TXT[g.grade] || g.grade) + '</span></div>' +
-    rows.map(r => '<div>' + r + '</div>').join('') +
-    (times.length && withTimes ? '<div style="margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">' + times.map(t => '<div>' + t + '</div>').join('') + '</div>' : '') +
-    '</div>';
+  /* 动作：用 data-* + 事件委托，避免把监听器塞进 innerHTML 拼出来的卡片 */
+  let actions = '';
+  if (targetCode) {
+    const copyText = pathText + '（' + targetCode + '）';
+    actions = '<div class="locate-actions">' +
+      (kind !== 'ZONE' ? '<button type="button" class="btn small locate-act" data-act="goto" data-kind="' + kind + '" data-code="' + esc(targetCode) + '">查看' + (kind === 'LOC' ? '库位' : '容器') + '内容</button>' : '') +
+      (L.lastOrder ? '<button type="button" class="btn small ghost locate-act" data-act="order" data-code="' + esc(L.lastOrder.code) + '">查看关联工单</button>' : '') +
+      '<button type="button" class="btn small ghost locate-act" data-act="copy" data-code="' + esc(copyText) + '">复制位置</button>' +
+      '</div>' +
+      '<div class="locate-after">到达后：扫描 <b>' + (kind === 'ZONE' ? 'LOC:' + esc(targetCode) : esc(kind + ':' + targetCode)) + '</b> 标签并核对实物。</div>';
+  }
+
+  return '<div class="locate-card locate-card--' + variant + ' mt-8">' +
+    '<div class="locate-title">' + title + '</div>' +
+    '<div class="locate-body">' +
+      main +
+      '<div class="hint mt-6">定位来源：' + esc(L.source) + '\u3000定位精度：' + esc(GRADE_TXT[g.grade] ? GRADE_TXT[g.grade].replace('空间精度：', '') : g.grade) + '</div>' +
+      (extra.length ? '<div class="locate-sec">' + extra.join('') + '</div>' : '') +
+      (ev.length && withTimes ? '<div class="locate-sec"><div class="locate-sec__h">位置与经手证据</div>' + ev.join('') + '</div>' : '') +
+      actions +
+    '</div>' +
+  '</div>';
 }
 
 /** 记录结构化扫码历史（供 30S 定位回查）+ 人类可读日志由 log() 负责 */
+/* 阶段14（§5.3）：定位卡的三个动作。用 data-* + 事件委托绑定 ——
+   locationCard() 返回的是拼进别人 innerHTML 的字符串，塞不进监听器。 */
+function locateAction(act, kind, code) {
+  if (!code) return;
+  if (act === 'goto') {
+    if (kind === 'ZONE') kind = 'LOC';                       // 模块区也走 LOC: 查询
+    const raw = kind + ':' + code;
+    goTab('scan');
+    const si = document.getElementById('scanInput');
+    if (si) { si.value = raw; si.select(); }
+    handleScan(raw);
+  } else if (act === 'order') {
+    goTab('wip');
+    showWipDetail(code);
+  } else if (act === 'copy') {
+    const ok = () => toast('已复制位置：' + code);
+    const fallback = () => {
+      const ta = document.createElement('textarea');
+      ta.value = code; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch (e) { }
+      ta.remove();
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(code).then(ok, () => { fallback(); ok(); });
+    } else { fallback(); ok(); }
+  }
+}
+document.addEventListener('click', e => {
+  const b = e.target && e.target.closest ? e.target.closest('.locate-act') : null;
+  if (!b) return;
+  locateAction(b.dataset.act, b.dataset.kind || '', b.dataset.code || '');
+});
+
 function addScan(kind, prefix, code, hit, hitObj) {
   CORE.recordScan(state, {
     raw: prefix + code, prefix, code, kind, hit,
