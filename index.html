@@ -242,6 +242,38 @@ body.stocktake-on .stocktake-banner{display:block}
   background:var(--doing-bg);border-left:4px solid var(--doing-fg);color:var(--doing-fg);
   font-size:12.5px;font-weight:600;line-height:1.6}
 .locate-evidence{font-size:12px;color:var(--text-muted)}
+/* ============================================================
+   04 COMPONENTS（阶段9）：统一结果卡骨架 —— head / readings / detail / actions
+   六种码型共用同一结构：状态条 → 前缀徽章 + 标题 + 编码 → 关键读数 → 次级详情 → 动作区。
+   本层只搭结构与呈现，不改变任何业务数据与判定逻辑。
+   ============================================================ */
+.scan-card__head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+.scan-prefix{display:inline-block;padding:2px 8px;border-radius:var(--r-sm);
+  font-family:var(--font-mono);font-size:11px;font-weight:700;color:#fff;flex:none;letter-spacing:.5px}
+.scan-prefix--mat{background:#1F6FD6}
+.scan-prefix--loc{background:#2563A6}
+.scan-prefix--ctn{background:#2D9D4F}
+.scan-prefix--wip{background:#D33A2C}
+.scan-prefix--nec{background:#7C4DBD}
+.scan-prefix--itm{background:#00A7B5}
+.scan-prefix--man{background:#C04B82}
+.scan-card__title{min-width:0;flex:1}
+.scan-card__title h3{font-size:16px;font-weight:700;color:var(--ink-strong);line-height:1.35}
+.scan-card__title code{font-family:var(--font-mono);font-size:12.5px;color:var(--text-muted);word-break:break-all}
+.scan-readings{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.scan-reading{flex:1 1 96px;min-width:88px;padding:8px 10px;border:1px solid var(--line);
+  border-radius:var(--r-md);background:var(--surface-2)}
+.scan-reading__label{display:block;font-size:11.5px;color:var(--text-muted);margin-bottom:2px}
+.scan-reading__value{font-family:var(--font-mono);font-size:18px;font-weight:700;
+  color:var(--ink-strong);font-variant-numeric:tabular-nums;word-break:break-all}
+.scan-reading--primary{background:var(--todo-bg);border-color:var(--todo-fg)}
+.scan-reading--primary .scan-reading__value{font-size:28px;color:var(--todo-fg)}
+.scan-reading--danger{background:var(--danger-bg);border-color:var(--danger-fg)}
+.scan-reading--danger .scan-reading__value{color:var(--danger-fg)}
+.scan-reading__unit{font-size:12px;font-style:normal;color:var(--text-muted);margin-left:2px}
+.scan-card__detail{font-size:13px}
+.scan-card__actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
 /* 阶段5：物料台账的「库存数量」是唯一高风险写入口（改数必须填原因并写流水），
    用左侧琥珀条把它与普通属性输入框区分开。 */
 .cell-qty-risk{position:relative;background:rgba(232,160,32,.055)}
@@ -3428,6 +3460,29 @@ function scanStatus(kind, text) {
   return '<div class="scan-status scan-status--' + kind + '" role="status" aria-live="polite">' +
     '<span class="scan-status__icon">' + icon + '</span><span>' + esc(text) + '</span></div>';
 }
+/** 阶段9：统一结果卡骨架。所有码型共用同一结构：
+ *  状态条 → head（前缀徽章 + 标题 + 机读串）→ readings（1–3 个关键读数）
+ *  → detail（次级字段，保留各码型原有内容）→ actions（动作区）。
+ *  ⚠ 本函数只「搭结构」，不参与任何库存/状态判定，也不改动传入内容。 */
+function renderScanCard(o) {
+  o = o || {};
+  const readings = (o.readings || []).filter(Boolean).map(r =>
+    '<div class="scan-reading' + (r.primary ? ' scan-reading--primary' : '') + (r.danger ? ' scan-reading--danger' : '') + '">' +
+      '<span class="scan-reading__label">' + esc(r.label) + '</span>' +
+      '<strong class="scan-reading__value">' + (r.html != null ? r.html : esc(r.value)) + '</strong>' +
+      (r.unit ? '<em class="scan-reading__unit">' + esc(r.unit) + '</em>' : '') +
+    '</div>').join('');
+  return scanStatus(o.kind, o.statusText) +
+    '<header class="scan-card__head">' +
+      (o.prefix ? '<span class="scan-prefix scan-prefix--' + o.prefixCls + '">' + esc(o.prefix) + '</span>' : '') +
+      '<div class="scan-card__title"><h3>' + (o.titleHtml != null ? o.titleHtml : esc(o.title || '')) + '</h3>' +
+        (o.code ? '<code>' + esc(o.code) + '</code>' : '') + '</div>' +
+      (o.tag || '') +
+    '</header>' +
+    (readings ? '<div class="scan-readings">' + readings + '</div>' : '') +
+    (o.detailHtml ? '<div class="scan-card__detail">' + o.detailHtml + '</div>' : '') +
+    (o.actionsHtml ? '<div class="scan-card__actions">' + o.actionsHtml + '</div>' : '');
+}
 function locationCard(code, { withTimes = true } = {}) {
   const L = CORE.locateMaterial(state, code);
   /* 阶段6 修正（诚实性）：位置证据必须与「它自己的时间」绑定。
@@ -3494,10 +3549,17 @@ function scanMat(code, box) {
   const stocktake = document.getElementById('chkStocktake').checked;
   if (m && stocktake) {
     box.className = 'scan-result panel flash-ok';
-    box.innerHTML = scanStatus('warn', '盘点模式 · 输入实盘数并点「确认盘点」才会写流水') + '<div class="kv"><b>物料码</b>' + esc(m.code) + '　<b>名称</b>' + esc(m.name) + '　<b>库位</b>' + esc(m.loc || '—') +
-      '<br><b>账面库存</b><span style="font-size:20px;font-weight:bold;color:#16233a">' + m.qty + '</span></div>' +
-      '<div class="toolbar" style="margin-top:10px"><label style="font-size:13px">实盘数量 <input type="number" id="stocktakeQty" value="' + m.qty + '" min="0" style="width:90px;border:1px solid var(--line);border-radius:4px;padding:5px 8px;font-size:14px"></label>' +
-      '<button class="btn" id="btnStocktake">确认盘点</button><span class="hint">差异自动写入库存流水</span></div>';
+    box.innerHTML = renderScanCard({
+      kind: 'warn', statusText: '盘点模式 · 输入实盘数并点「确认盘点」才会写流水',
+      prefix: 'MAT:', prefixCls: 'mat', title: m.name, code: 'MAT:' + m.code,
+      readings: [
+        { label: '账面库存', value: m.qty, unit: '件', primary: true },
+        { label: '当前库位', value: m.loc || '—' }
+      ],
+      actionsHtml:
+        '<label style="font-size:13px">实盘数量 <input type="number" id="stocktakeQty" value="' + m.qty + '" min="0" style="width:96px;border:1px solid var(--line);border-radius:var(--r-sm);padding:6px 8px;font-size:15px"></label>' +
+        '<button class="btn" id="btnStocktake">确认盘点</button><span class="hint">差异自动写入库存流水</span>'
+    });
     document.getElementById('btnStocktake').addEventListener('click', () => {
       // 严格校验实盘数量：空 / 非数字 / 负数一律拒绝，绝不静默转 0
       const r = CORE.applyStocktake(state, m.code, document.getElementById('stocktakeQty').value);
@@ -3514,14 +3576,22 @@ function scanMat(code, box) {
   box.className = 'scan-result panel ' + (m ? 'flash-ok' : 'flash-bad');
   if (m) {
     const low = m.minQty > 0 && m.qty < m.minQty;
-    box.innerHTML = scanStatus((m.qty < 0 || low) ? 'warn' : 'ok',
-      (m.qty < 0 ? '负库存 · 请核查' : low ? '低于安全库存 · 请补货' : '已找到 · 只读查询（不改库存）')) +
-      '<div class="kv" style="font-size:15px">' +
-      '<div><b>物料码</b>' + esc(m.code) + '　<b>名称</b><span style="font-size:17px;font-weight:bold">' + esc(m.name) + '</span></div>' +
-      '<div><b>规格</b>' + esc(m.spec || '—') + '　<b>成本</b>¥' + esc(m.cost) + '</div>' +
-      '<div style="margin-top:4px"><b>库存</b><span style="font-size:26px;font-weight:bold;color:' + (m.qty < 0 ? '#d33a2c' : low ? '#a4600a' : '#16233a') + '">' + m.qty + '</span>' +
-      (m.qty < 0 ? ' <span class="badge" style="background:#d33a2c">负库存</span>' : low ? ' <span class="badge" style="background:#e8a020">低于安全库存 ' + m.minQty + '</span>' : '') + '</div>' +
-      '</div>' + locationCard(code);
+    const neg = m.qty < 0;
+    box.innerHTML = renderScanCard({
+      kind: (neg || low) ? 'warn' : 'ok',
+      statusText: (neg ? '负库存 · 请核查' : low ? '低于安全库存 · 请补货' : '已找到 · 只读查询（不改库存）'),
+      prefix: 'MAT:', prefixCls: 'mat', title: m.name, code: 'MAT:' + m.code,
+      tag: neg ? '<span class="badge" style="background:var(--danger-fg)">负库存</span>'
+        : low ? '<span class="badge" style="background:var(--doing-bg);color:var(--doing-fg)">低于安全库存 ' + m.minQty + '</span>' : '',
+      readings: [
+        { label: '库存', value: m.qty, unit: '件', primary: true, danger: neg },
+        { label: '当前库位', value: m.loc || '—' },
+        m.minQty > 0 ? { label: '安全库存', value: m.minQty, unit: '件' } : null
+      ],
+      detailHtml:
+        '<div class="kv"><b>规格</b>' + esc(m.spec || '—') + '　<b>成本</b>¥' + esc(m.cost) + '</div>' +
+        locationCard(code)
+    });
     addScan('material', 'MAT:', code, true, m);
     log((low ? '查询物料（低库存）' : '查询物料 ') + code + '（库存 ' + m.qty + '）');
     return;
@@ -3529,18 +3599,20 @@ function scanMat(code, box) {
   // ===== MAT: 未命中 → 回查最近扫码 / 流水 / 工单，给出最近位置线索 =====
   const L = CORE.locateMaterial(state, code);
   const hasClue = !!(L.lastScan || L.lastTxn || L.lastOrder);
-  box.innerHTML = scanStatus(hasClue ? 'warn' : 'bad',
-      hasClue ? '未找到物料 · 下面是历史线索，不是当前位置确认' : '未找到物料 · 且没有任何历史记录') +
-    '<div class="kv" style="font-size:15px">' +
-    '<div><b>未找到物料</b>' + esc(code) + ' <span class="hint">（台账中无此编码）</span></div>' +
-    (hasClue
-      ? '<div style="margin-top:6px;padding:8px;background:#fff8e6;border:1px solid #f0d090;border-radius:6px">' +
+  box.innerHTML = renderScanCard({
+    kind: hasClue ? 'warn' : 'bad',
+    statusText: hasClue ? '未找到物料 · 下面是历史线索，不是当前位置确认' : '未找到物料 · 且没有任何历史记录',
+    prefix: 'MAT:', prefixCls: 'mat', title: '未找到物料', code: 'MAT:' + code,
+    readings: [{ label: '台账状态', value: '无此编码' }, { label: '线索来源', value: hasClue ? L.source : '无' }],
+    detailHtml: hasClue
+      ? '<div style="padding:8px;background:#fff8e6;border:1px solid #f0d090;border-radius:var(--r-md)">' +
         '<b>🔍 最近位置线索</b>' + locationCard(code) + '</div>'
-      : '<div class="hint" style="margin-top:6px">没有任何该编码的扫码 / 流水 / 工单记录，无法给出位置线索。</div>') +
-    '</div>';
+      : '<p class="hint">没有任何该编码的扫码 / 流水 / 工单记录，无法给出位置线索。</p>'
+  });
   addScan('material', 'MAT:', code, false, null);
   log('未命中物料 ' + code + (hasClue ? '（已给出最近线索：' + L.source + '）' : '（无任何历史记录）'));
 }
+
 function scanWhere(kind, code, box) {
   // 模块区（M-xx）：按物料的「模块区」字段匹配；普通库位/容器按 loc/container 匹配
   const isZone = /^M-\d+$/.test(code);
@@ -3548,21 +3620,27 @@ function scanWhere(kind, code, box) {
   const rec = kind === 'LOC:' ? state.locations.find(l => l.code === code) : state.containers.find(c => c.code === code);
   const total = list.reduce((a, m) => a + (Number(m.qty) || 0), 0);
   const lastScan = CORE.scanHistoryFor(state, code, 1)[0] || null;
+  const kindName = isZone ? '模块区' : kind === 'LOC:' ? '库位' : '容器';
   box.className = 'scan-result panel flash-ok';
-  box.innerHTML = scanStatus(list.length ? 'ok' : 'info',
-    (isZone ? '模块区 ' : kind === 'LOC:' ? '库位 ' : '容器 ') + code + (list.length ? ' · ' + list.length + ' 项物料' : ' · 该位置为空')) +
-    '<div class="kv" style="font-size:15px">' +
-    '<div><b>' + (isZone ? '模块区' : kind === 'LOC:' ? '库位' : '容器') + '</b><span style="font-size:17px;font-weight:bold">' + esc(code) + '</span>' +
-    (rec && rec.desc ? ' <span class="hint">' + esc(rec.desc) + '</span>' : '') +
-    (rec && rec.kind ? ' <span class="hint">' + esc(rec.kind) + '</span>' : '') + '</div>' +
-    '<div><b>存放物料</b>' + list.length + ' 项　<b>合计库存</b>' + total + '</div>' +
-    (lastScan ? '<div><b>最近扫码</b>' + esc(lastScan.time) + ' <span class="hint">' + CORE.timeAgo(lastScan.ts) + '</span></div>' : '') +
-    '</div>' +
-    (list.length
-      ? '<table class="grid" style="margin-top:8px"><thead><tr><th>物料码</th><th>名称</th><th style="width:70px">库存</th><th>模块区</th></tr></thead><tbody>' +
-        list.map(m => '<tr><td>' + esc(m.code) + '</td><td>' + esc(m.name) + '</td><td' + (m.qty < 0 ? ' style="color:#d33a2c;font-weight:bold"' : '') + '>' + m.qty + '</td><td>' + esc(m.zone || '—') + '</td></tr>').join('') +
-        '</tbody></table>'
-      : '<p class="hint" style="margin-top:8px">（空）</p>');
+  box.innerHTML = renderScanCard({
+    kind: list.length ? 'ok' : 'info',
+    statusText: kindName + ' ' + code + (list.length ? ' · ' + list.length + ' 项物料' : ' · 该位置为空'),
+    prefix: kind, prefixCls: isZone ? 'loc' : (kind === 'LOC:' ? 'loc' : 'ctn'),
+    title: kindName + ' ' + code, code: code,
+    tag: (rec && rec.desc) ? '<span class="hint">' + esc(rec.desc) + '</span>' : '',
+    readings: [
+      { label: '存放物料', value: list.length, unit: '项', primary: true },
+      { label: '合计库存', value: total, unit: '件' },
+      { label: '位置类型', value: (rec && rec.kind) || '—' }
+    ],
+    detailHtml:
+      (lastScan ? '<div class="kv"><b>最近扫码</b>' + esc(lastScan.time) + ' <span class="hint">' + CORE.timeAgo(lastScan.ts) + '</span></div>' : '') +
+      (list.length
+        ? '<table class="grid grid-dense" style="margin-top:8px"><thead><tr><th>物料码</th><th>名称</th><th style="width:70px">库存</th><th>模块区</th></tr></thead><tbody>' +
+          list.map(m => '<tr><td data-th="物料码">' + esc(m.code) + '</td><td data-th="名称">' + esc(m.name) + '</td><td data-th="库存"' + (m.qty < 0 ? ' class="num-delta num-delta--negative"' : '') + '>' + m.qty + '</td><td data-th="模块区">' + esc(m.zone || '—') + '</td></tr>').join('') +
+          '</tbody></table>'
+        : '<p class="hint">（该位置当前没有登记物料）</p>')
+  });
   addScan(isZone ? 'zone' : kind === 'LOC:' ? 'location' : 'container', kind, code, !!rec || list.length > 0, rec);
   log('查询' + (isZone ? '模块区 ' : kind === 'LOC:' ? '库位 ' : '容器 ') + code + '，物料 ' + list.length + ' 项');
 }
@@ -3572,27 +3650,38 @@ function scanNec(code, box) {
   const o = state.necOrders.find(x => x.code === code);
   if (!o) {
     box.className = 'scan-result panel flash-bad';
-    box.innerHTML = scanStatus('bad', '未找到该 NEC 任务') + '<div class="kv"><b>未找到 NEC 工单</b>' + esc(code) + '<br><span class="hint">请在「NEC 任务」页确认工单号</span></div>';
+    box.innerHTML = renderScanCard({
+      kind: 'bad', statusText: '未找到该 NEC 任务',
+      prefix: 'NEC:', prefixCls: 'nec', title: '未找到 NEC 任务', code: 'NEC:' + code,
+      detailHtml: '<p class="hint">请在「NEC 任务」页确认工单号。</p>'
+    });
     addScan('nec', 'NEC:', code, false, null);
     log('未命中 NEC 工单 ' + code);
     return;
   }
   const related = state.materials.filter(m => o.materials && String(o.materials).includes(m.code));
   box.className = 'scan-result panel flash-ok';
-  box.innerHTML = scanStatus('ok', 'NEC 任务 · 纯记录，不改库存') +
-    '<div class="kv" style="font-size:15px">' +
-    '<div><b>NEC 工单</b><span style="font-size:17px;font-weight:bold">' + esc(o.code) + '</span>　<span class="badge st-' + esc(o.status) + '">' + esc(o.status) + '</span></div>' +
-    '<div><b>标题</b>' + esc(o.title || '—') + '</div>' +
-    '<div><b>类型</b>' + esc(NEC_TYPE_NAMES[o.type] || o.type || '—') + '　<b>负责人</b>' + esc(o.owner || '—') + '　<b>优先级</b>' + esc(o.priority || '—') + '</div>' +
-    '<div><b>截止</b>' + esc(o.due || '—') + '　<b>创建</b>' + esc(o.createdAt || '—') + (o.doneAt ? '　<b>完成</b>' + esc(o.doneAt) : '') + '</div>' +
-    (o.materials ? '<div><b>物料</b>' + esc(o.materials) + '</div>' : '') +
-    (o.note ? '<div><b>备注</b>' + esc(o.note) + '</div>' : '') +
-    '</div>' +
-    (related.length
-      ? '<table class="grid" style="margin-top:8px"><thead><tr><th>物料码</th><th>名称</th><th style="width:70px">库存</th><th>库位</th></tr></thead><tbody>' +
-        related.map(m => '<tr><td>' + esc(m.code) + '</td><td>' + esc(m.name) + '</td><td>' + m.qty + '</td><td>' + esc(m.loc || '—') + '</td></tr>').join('') +
-        '</tbody></table>'
-      : '');
+  box.innerHTML = renderScanCard({
+    kind: 'ok', statusText: 'NEC 任务 · 纯记录，不改库存',
+    prefix: 'NEC:', prefixCls: 'nec', title: o.title || '（无标题）', code: 'NEC:' + o.code,
+    tag: '<span class="badge st-' + esc(o.status) + '">' + esc(o.status) + '</span>',
+    readings: [
+      { label: '状态', value: o.status || '—', primary: true },
+      { label: '负责人', value: o.owner || '—' },
+      { label: '优先级', value: o.priority || '—' }
+    ],
+    detailHtml:
+      '<div class="kv"><b>类型</b>' + esc(NEC_TYPE_NAMES[o.type] || o.type || '—') +
+      '　<b>截止</b>' + esc(o.due || '—') + '　<b>创建</b>' + esc(o.createdAt || '—') +
+      (o.doneAt ? '　<b>完成</b>' + esc(o.doneAt) : '') + '</div>' +
+      (o.materials ? '<div class="kv"><b>物料</b>' + esc(o.materials) + '</div>' : '') +
+      (o.note ? '<div class="kv"><b>备注</b>' + esc(o.note) + '</div>' : '') +
+      (related.length
+        ? '<table class="grid grid-dense" style="margin-top:8px"><thead><tr><th>物料码</th><th>名称</th><th style="width:70px">库存</th><th>库位</th></tr></thead><tbody>' +
+          related.map(m => '<tr><td data-th="物料码">' + esc(m.code) + '</td><td data-th="名称">' + esc(m.name) + '</td><td data-th="库存">' + m.qty + '</td><td data-th="库位">' + esc(m.loc || '—') + '</td></tr>').join('') +
+          '</tbody></table>'
+        : '')
+  });
   addScan('nec', 'NEC:', code, true, o);
   log('查询 NEC 工单 ' + code + '（' + o.status + '）');
 }
@@ -3602,19 +3691,26 @@ function scanItem(code, box) {
   const it = state.items.find(x => x.code === code);
   if (!it) {
     box.className = 'scan-result panel flash-bad';
-    box.innerHTML = scanStatus('bad', '未找到该物品') + '<div class="kv"><b>未找到物品</b>' + esc(code) + '<br><span class="hint">请在「建档与编码 → ④ 物品标签生成」建档</span></div>';
+    box.innerHTML = renderScanCard({
+      kind: 'bad', statusText: '未找到该物品',
+      prefix: 'ITM:', prefixCls: 'itm', title: '未找到物品', code: 'ITM:' + code,
+      detailHtml: '<p class="hint">请在「建档与编码 → ④ 物品标签生成」建档。</p>'
+    });
     addScan('item', 'ITM:', code, false, null);
     log('未命中物品 ' + code);
     return;
   }
   const loc = state.locations.find(l => l.code === it.loc);
   box.className = 'scan-result panel flash-ok';
-  box.innerHTML = scanStatus('ok', '物品 · 只读查询（不改库存）') +
-    '<div class="kv" style="font-size:15px">' +
-    '<div><b>物品码</b>' + esc(it.code) + '　<b>名称</b><span style="font-size:17px;font-weight:bold">' + esc(it.name) + '</span></div>' +
-    '<div><b>规格型号</b>' + esc(it.spec || '—') + '</div>' +
-    '<div><b>库位</b><span style="font-size:17px;font-weight:bold;color:#16233a">' + esc(it.loc || '—') + '</span>' + (loc && loc.desc ? ' <span class="hint">' + esc(loc.desc) + '</span>' : '') + '</div>' +
-    '</div>';
+  box.innerHTML = renderScanCard({
+    kind: 'ok', statusText: '物品 · 只读查询（不改库存）',
+    prefix: 'ITM:', prefixCls: 'itm', title: it.name || '（未命名）', code: 'ITM:' + it.code,
+    readings: [
+      { label: '库位', value: it.loc || '—', primary: true },
+      { label: '规格型号', value: it.spec || '—' }
+    ],
+    detailHtml: (loc && loc.desc) ? '<div class="kv"><b>库位说明</b>' + esc(loc.desc) + '</div>' : ''
+  });
   addScan('item', 'ITM:', code, true, it);
   log('查询物品 ' + code + '（库位 ' + (it.loc || '—') + '）');
 }
@@ -3624,25 +3720,41 @@ function scanManual(code, box) {
   const mn = state.manuals.find(x => x.code === code);
   if (!mn) {
     box.className = 'scan-result panel flash-bad';
-    box.innerHTML = scanStatus('bad', '未找到该手册') + '<div class="kv"><b>未找到手册</b>' + esc(code) + '<br><span class="hint">请在「建档与编码 → ⑤ 手册标签生成」建档</span></div>';
+    box.innerHTML = renderScanCard({
+      kind: 'bad', statusText: '未找到该手册',
+      prefix: 'MAN:', prefixCls: 'man', title: '未找到手册', code: 'MAN:' + code,
+      detailHtml: '<p class="hint">请在「建档与编码 → ⑤ 手册标签生成」建档。</p>'
+    });
     addScan('manual', 'MAN:', code, false, null);
     log('未命中手册 ' + code);
     return;
   }
   const loc = state.locations.find(l => l.code === mn.loc);
   box.className = 'scan-result panel flash-ok';
-  box.innerHTML = scanStatus('ok', '手册 · 只读查询（不改库存）') +
-    '<div class="kv" style="font-size:15px">' +
-    '<div><b>手册码</b>' + esc(mn.code) + '　<b>名称</b><span style="font-size:17px;font-weight:bold">' + esc(mn.name) + '</span></div>' +
-    '<div><b>版本</b>' + esc(mn.ver || '—') + '</div>' +
-    '<div><b>库位</b><span style="font-size:17px;font-weight:bold;color:#16233a">' + esc(mn.loc || '—') + '</span>' + (loc && loc.desc ? ' <span class="hint">' + esc(loc.desc) + '</span>' : '') + '</div>' +
-    '</div>';
+  box.innerHTML = renderScanCard({
+    kind: 'ok', statusText: '手册 · 只读查询（不改库存）',
+    prefix: 'MAN:', prefixCls: 'man', title: mn.name || '（未命名）', code: 'MAN:' + mn.code,
+    readings: [
+      { label: '库位', value: mn.loc || '—', primary: true },
+      { label: '版本', value: mn.ver || '—' }
+    ],
+    detailHtml: (loc && loc.desc) ? '<div class="kv"><b>库位说明</b>' + esc(loc.desc) + '</div>' : ''
+  });
   addScan('manual', 'MAN:', code, true, mn);
   log('查询手册 ' + code + '（版本 ' + (mn.ver || '—') + '，库位 ' + (mn.loc || '—') + '）');
 }
 function scanWip(code, box) {
   const w = state.workorders.find(x => x.code === code);
-  if (!w) { box.className = 'scan-result panel flash-bad'; box.innerHTML = scanStatus('bad', '未找到该工单') + '未找到工单：' + esc(code) + '（请先在「建档与编码」创建，或到「库存工单」页新建）'; log('未命中工单 ' + code); return; }
+  if (!w) {
+    box.className = 'scan-result panel flash-bad';
+    box.innerHTML = renderScanCard({
+      kind: 'bad', statusText: '未找到该工单',
+      prefix: 'WIP:', prefixCls: 'wip', title: '未找到工单', code: 'WIP:' + code,
+      detailHtml: '<p class="hint">请先在「库存工单」页新建，或确认工单号是否正确。</p>'
+    });
+    log('未命中工单 ' + code);
+    return;
+  }
   const closed = CORE.isOrderExecuted(w);
   const sign = CORE.signOf(w.type);
   const verb = sign < 0 ? '扣减库存' : '增加库存';
@@ -3654,24 +3766,33 @@ function scanWip(code, box) {
     ? ['info', w.reverseInfo ? '已冲销 · 不可再执行' : w.cancelInfo ? '已取消 · 不可再执行' : '已闭环 · 不可再执行']
     : (partial ? ['warn', '部分执行 · 可继续执行剩余'] : ['ok', '待执行 · 确认后才' + verb]);
   box.className = 'scan-result panel ' + (closed ? '' : 'flash-ok');
-  box.innerHTML = scanStatus(st[0], st[1]) +
-    '<div class="kv"><b>工单号</b>' + esc(w.code) + '　' + wipStatusBadge(w) +
-    '<br><b>类型</b>' + esc(WIP_NAMES[w.type] || w.type) + '（' + verb + '）　<b>日期</b>' + esc(w.date) + '</div>' +
-    '<div class="kv" style="margin-top:6px"><b>计划</b>' + prog.plannedTotal + '　<b>已执行</b>' + prog.executedTotal + '　<b>剩余</b>' + prog.remainingTotal + '　<b>进度</b>' + prog.percent + '%</div>' +
-    (mergedHint ? '<p class="hint" style="margin:6px 0 0">ℹ️ 本工单存在同一物料多行，已合并为一行按<b>合计数量</b>校验与执行。</p>' : '') +
-    (partial ? '<p class="hint" style="margin:6px 0 0">ℹ️ 本工单已部分执行，下方数量预填<b>剩余数量</b>；改为 0 可跳过该物料。</p>' : '') +
-    '<table class="grid grid-dense" style="margin-top:8px"><thead><tr><th>物料码</th><th>名称</th><th style="width:70px">计划</th><th style="width:70px">已执行</th><th style="width:90px">本次执行</th><th>执行后库存</th></tr></thead><tbody>' +
-    lines.map(it => {
-      const m = findMat(it.matCode);
-      const disabled = closed || it.remaining <= 0;
-      return '<tr' + (it.remaining <= 0 && !closed ? ' style="opacity:.55"' : '') + '><td data-th="物料码">' + esc(it.matCode) + '</td><td data-th="名称">' + esc(m ? m.name : '⚠未建档') + '</td>' +
-      '<td data-th="计划">' + it.planned + '</td><td data-th="已执行">' + it.executed + '</td>' +
-      '<td data-th="本次执行"><input type="number" class="execQty" data-code="' + esc(it.matCode) + '" value="' + it.remaining + '" min="0"' + (disabled ? ' disabled' : '') + '></td>' +
-      '<td data-th="执行后库存" class="exec-after" data-code="' + esc(it.matCode) + '">—</td></tr>'; }).join('') + '</tbody></table>' +
-    (closed
-      ? '<p class="hint" style="margin-top:8px">' + (w.reverseInfo ? '已冲销（' + esc(w.reverseInfo.at) + '）' : w.cancelInfo ? '已取消（' + esc(w.cancelInfo.at) + '）' : '执行时间：' + esc(w.execTime || '—')) + '。工单已闭环，不可再执行。</p>'
-      : '<div class="exec-summary" id="execSummary" aria-live="polite"></div>' +
-        '<div class="toolbar" style="margin-top:10px"><button class="btn" id="btnExec">确认执行（' + verb + '）</button><span class="hint">可只填一部分数量，实现分批执行</span></div>');
+  box.innerHTML = renderScanCard({
+    kind: st[0], statusText: st[1],
+    prefix: 'WIP:', prefixCls: 'wip',
+    title: (WIP_NAMES[w.type] || w.type) + ' ' + w.code, code: 'WIP:' + w.code,
+    tag: wipStatusBadge(w),
+    readings: [
+      { label: '剩余', value: prog.remainingTotal, unit: '件', primary: true },
+      { label: '执行方向', value: sign < 0 ? '扣减库存' : '增加库存' },
+      { label: '进度', value: prog.percent + '%' }
+    ],
+    detailHtml:
+      '<div class="kv"><b>计划</b>' + prog.plannedTotal + '　<b>已执行</b>' + prog.executedTotal + '　<b>剩余</b>' + prog.remainingTotal + '　<b>日期</b>' + esc(w.date) + '</div>' +
+      (mergedHint ? '<p class="hint" style="margin:6px 0 0">ℹ️ 本工单存在同一物料多行，已合并为一行按<b>合计数量</b>校验与执行。</p>' : '') +
+      (partial ? '<p class="hint" style="margin:6px 0 0">ℹ️ 本工单已部分执行，下方数量预填<b>剩余数量</b>；改为 0 可跳过该物料。</p>' : '') +
+      '<table class="grid grid-dense" style="margin-top:8px"><thead><tr><th>物料码</th><th>名称</th><th style="width:70px">计划</th><th style="width:70px">已执行</th><th style="width:90px">本次执行</th><th>执行后库存</th></tr></thead><tbody>' +
+      lines.map(it => {
+        const m = findMat(it.matCode);
+        const disabled = closed || it.remaining <= 0;
+        return '<tr' + (it.remaining <= 0 && !closed ? ' style="opacity:.55"' : '') + '><td data-th="物料码">' + esc(it.matCode) + '</td><td data-th="名称">' + esc(m ? m.name : '⚠未建档') + '</td>' +
+        '<td data-th="计划">' + it.planned + '</td><td data-th="已执行">' + it.executed + '</td>' +
+        '<td data-th="本次执行"><input type="number" class="execQty" data-code="' + esc(it.matCode) + '" value="' + it.remaining + '" min="0"' + (disabled ? ' disabled' : '') + '></td>' +
+        '<td data-th="执行后库存" class="exec-after" data-code="' + esc(it.matCode) + '">—</td></tr>'; }).join('') + '</tbody></table>' +
+      (closed
+        ? '<p class="hint" style="margin-top:8px">' + (w.reverseInfo ? '已冲销（' + esc(w.reverseInfo.at) + '）' : w.cancelInfo ? '已取消（' + esc(w.cancelInfo.at) + '）' : '执行时间：' + esc(w.execTime || '—')) + '。工单已闭环，不可再执行。</p>'
+        : '<div class="exec-summary" id="execSummary" aria-live="polite"></div>'),
+    actionsHtml: closed ? '' : '<button class="btn" id="btnExec">确认执行（' + verb + '）</button><span class="hint">可只填一部分数量，实现分批执行</span>'
+  });
 
   if (!closed) {
     const summary = document.getElementById('execSummary');
