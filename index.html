@@ -698,6 +698,11 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   #dsFrame{display:none !important;}
   #tab-design .hint::after{content:"（排版工具需要桌面浏览器；手机请用电脑打开）";color:var(--doing-fg);font-weight:600;}
 }
+/* 阶段18（§5.9）：排版工具需要桌面浏览器 —— 断点是 <900px（原实现为 <768px） */
+@media screen and (max-width:899px){
+  #dsFrame{display:none !important;}
+  #tab-design .hint::after{content:"（排版工具需要桌面浏览器；请用电脑打开）";color:var(--doing-fg);font-weight:600;}
+}
 @media screen and (max-width:560px){
   /* 密集表格 → 卡片式（阶段7：由仅覆盖 #matTable 扩展到全部 7 张表格） */
   .table-scroll{overflow-x:visible;}
@@ -844,7 +849,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   </section>
   <!-- ========== 人员台账 ========== -->
   <section class="tab" id="tab-member">
-    <p class="page-purpose"><span>社团成员名录，姓名直通「操作人」与 NEC 任务负责人</span><span class="impact impact--none">不改库存</span></p>
+    <p class="page-purpose"><span>社团成员名录，姓名直通「操作人」与 NEC 任务负责人</span><span class="impact impact--none">不改库存</span><span class="hint">姓名同步右上角「操作人」；PIN 仅用于切换校验，不进 Excel 明文</span></p>
     <div class="panel">
       <h2>成员名录（编号自动生成，姓名同步「操作人」与 NEC 任务负责人）</h2>
       <div class="toolbar">
@@ -889,7 +894,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <button class="btn" id="btnPrint">🖨 打印勾选标签</button>
       </div>
       <div class="label-layout">
-        <div class="label-list panel panel-flush"><table class="grid" id="recTable" aria-label="标签记录选择列表"><thead></thead><tbody></tbody></table></div>
+        <div class="label-list panel panel-flush"><table class="grid grid-dense" id="recTable" aria-label="标签记录选择列表"><thead></thead><tbody></tbody></table></div>
         <div class="preview">
           <p class="hint mb-6">预览（实际尺寸 60×40mm）。标签纸打印：纸张选 60×40mm 自定义、边距无、缩放 100%、取消页眉页脚；A4 整版：直接选 A4、边距默认即可，自动 3×7 密排带裁切线。</p>
           <div class="preview-inner" id="printSheet"></div>
@@ -6780,7 +6785,21 @@ load(); renderDataStoreHint(); renderLedger(); refreshMatDatalist(); refreshMemb
 (function () { const on = document.querySelector('nav.tabs button.on'); if (on) on.setAttribute('aria-current', 'page'); })();
 (function () {   // 支持门户页深链 index.html#ledger / #member / #label / #gen / #nec / #scan
   const h = location.hash.slice(1);
-  if (h) { const btn = document.querySelector('nav.tabs button[data-tab="' + h + '"]'); if (btn) btn.click(); }
+  if (h) {
+    // 阶段18（§5.10）：支持 `#ledger?code=GJ-SD-001` 这种带参深链（门户预警链接用）
+    const parts = h.split('?');
+    const btn = document.querySelector('nav.tabs button[data-tab="' + parts[0] + '"]');
+    if (btn) btn.click();
+    if (parts[1]) {
+      const deepCode = new URLSearchParams(parts[1]).get('code');
+      if (deepCode) {
+        const si = document.getElementById('matSearch');
+        if (si) { si.value = deepCode; si.dispatchEvent(new Event('input', { bubbles: true })); }
+        // 页签点击会把 hash 改写成 '#ledger'，这里把带参深链补回去，刷新后筛选仍在
+        history.replaceState(null, '', '#' + parts[0] + '?' + parts[1]);
+      }
+    }
+  }
 })();
 renderScanLog();
 /* 启动顺序很重要：**必须先等 IndexedDB 状态就位，再去飞书拉取合并**。

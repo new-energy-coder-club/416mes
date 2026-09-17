@@ -214,12 +214,12 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
         var ll = document.getElementById('lowList');
         ll.style.display = 'block';
         ll.innerHTML = '<h4>⚠️ 库存预警（' + (lows.length + negs.length) + ' 项，需补货）</h4>' +
-          lows.map(function(m){ return '<div class="item"><span>' + m.code + ' ' + (m.name || '') + '</span><span><span class="q">' + m.qty + '</span> / 安全 ' + m.minQty + '<a href="index.html#ledger">去补货 →</a></span></div>'; }).join('') +
-          negs.map(function(m){ return '<div class="item"><span>' + m.code + ' ' + (m.name || '') + '（负库存）</span><span><span class="q">' + m.qty + '</span><a href="index.html#ledger">去核查 →</a></span></div>'; }).join('');
+          lows.map(function(m){ return '<div class="item"><span>' + m.code + ' ' + (m.name || '') + '</span><span><span class="q">' + m.qty + '</span> / 安全 ' + m.minQty + '<a href="index.html#ledger?code=' + encodeURIComponent(m.code) + '">去补货 →</a></span></div>'; }).join('') +
+          negs.map(function(m){ return '<div class="item"><span>' + m.code + ' ' + (m.name || '') + '（负库存）</span><span><span class="q">' + m.qty + '</span><a href="index.html#ledger?code=' + encodeURIComponent(m.code) + '">去核查 →</a></span></div>'; }).join('');
       }
     } else {
       chipMes.className = 'chip ok';
-      chipMes.innerHTML = '<span class="dot"></span><span class="t">416MES 前端在线（本设备暂无台账数据）</span>';
+      chipMes.innerHTML = '<span class="dot"></span><span class="t">本地址 localStorage 快照（本设备暂无台账数据）· 服务在线 ≠ 业务数据已同步</span>';
     }
   } catch (e) {
     chipMes.className = 'chip ok';
