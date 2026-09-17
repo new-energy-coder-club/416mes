@@ -385,6 +385,42 @@ body.stocktake-on .stocktake-banner{display:block}
   border-radius:var(--r-md);background:var(--done-bg);font-size:12.5px}
 .next-strip[hidden]{display:none}
 .next-strip__t{color:var(--done-fg);font-weight:600}
+/* ============================================================
+   05 PAGES（阶段21）：NEC 任务状态看板（ui优化.md §5.8）
+   左 360px 创建卡 + 右四列看板（待处理/进行中/已完成/已取消）；
+   卡片只显示工单号/标题/负责人/截止，点「编辑」才展开行内编辑。
+   ============================================================ */
+.nec-grid{display:flex;gap:14px;align-items:flex-start}
+.nec-create{width:360px;flex:none}
+.nec-board-wrap{flex:1 1 0;min-width:0}
+/* 列宽自适应：固定 4 列在 1280 档只能分到 103px/列（创建卡占 360 + 侧栏 216），
+   卡片会被压得没法看。改用 auto-fit —— 放得下就是 4 列，放不下自动 3/2/1 列。 */
+.nec-board{display:grid;grid-template-columns:repeat(auto-fit,minmax(172px,1fr));
+  gap:10px;align-items:start}
+.nec-col{border:1px solid var(--line);border-radius:var(--r-lg);background:var(--surface-2);
+  padding:8px;min-width:0}
+.nec-col__h{display:flex;align-items:center;justify-content:space-between;gap:6px;
+  font-size:12px;font-weight:600;color:var(--text-sub);padding:0 2px 8px}
+.nec-col__empty{margin:0;padding:10px 2px;font-size:12px;color:var(--text-muted)}
+.nec-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);
+  padding:8px;margin-bottom:8px}
+.nec-card:last-child{margin-bottom:0}
+.nec-card__row{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.nec-card__edit{margin-left:auto;border:1px solid var(--line);background:var(--surface-2);
+  color:var(--text-sub);border-radius:var(--r-sm);font-size:11.5px;padding:2px 8px;cursor:pointer;
+  font-family:inherit;min-height:24px}
+.nec-card__edit:hover{border-color:var(--cyan-ink);color:var(--cyan-ink)}
+.nec-card__t{font-size:13px;font-weight:600;color:var(--ink-strong);word-break:break-word;line-height:1.45}
+.nec-card__m{font-family:var(--font-mono);font-size:11.5px;color:var(--text-muted);margin-top:2px;word-break:break-all}
+.nec-card__f{display:flex;justify-content:space-between;gap:6px;font-size:11.5px;
+  color:var(--text-muted);margin-top:6px}
+.nec-card__editor{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);
+  display:flex;flex-direction:column;gap:6px}
+.nec-card__editor[hidden]{display:none}
+.nec-card__editor label{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-sub)}
+.nec-card__editor label>input,.nec-card__editor label>select{flex:1 1 auto;min-width:0}
+/* 并排需要：创建卡 340 + 间距 14 + 看板 ≥4×172 + 侧栏/内边距 ≈ 1400 */
+@media screen and (max-width:1399px){ .nec-grid{flex-direction:column} .nec-create{width:auto} }
 @media screen and (max-width:899px){ .gen-grid{flex-direction:column;} }
 /* §7.2 触控目标：桌面 ≥32px、手机 ≥44px。这三颗是定位卡的主动作，不能是 23px 的默认小按钮 */
 .locate-actions .btn{min-height:32px;padding-left:12px;padding-right:12px;display:inline-flex;align-items:center}
@@ -1128,7 +1164,9 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   </section>
   <!-- ========== NEC 小工单 ========== -->
   <section class="tab" id="tab-nec">
-    <p class="page-purpose"><span>社团轻量任务：RW 任务 / CG 采购 / WX 维修 / HD 活动 / QT 其他</span><span class="impact impact--none">纯记录，不改库存</span></p>
+    <p class="page-purpose"><span>协作 · 社团轻量任务：RW 任务 / CG 采购 / WX 维修 / HD 活动 / QT 其他（纯记录）</span><span class="impact impact--none">不改库存</span></p>
+    <div class="nec-grid">
+    <div class="nec-create">
     <div class="panel">
       <h2>新建 NEC 任务（New Energy Coder 实验室 · 纯记录，不改库存）</h2>
       <div class="form-row"><label>标题</label><input type="text" id="necTitle" placeholder="要做什么事" style="width:280px">
@@ -1146,26 +1184,23 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       </div>
       <p class="hint">⚠️ NEC 任务是<b>纯记录，不改库存</b>；需要出库/入库请到「库存工单」页建 WIP 工单并扫码执行。</p>
       <p class="hint">编码自动生成：类型+日期+3位流水（例 RW20260909003），二维码机读串 <b>NEC:编码</b>。创建后可在「标签打印」页打印紫色工单标签。</p>
+      <div class="next-strip" id="nextNec" hidden></div>
     </div>
+    </div>
+    <div class="nec-board-wrap">
     <div class="panel">
-      <h2>NEC 任务列表</h2>
+      <h2>状态看板（待处理 / 进行中 / 已完成 / 已取消）</h2>
       <div class="toolbar">
         状态筛选 <select id="necFilter"><option value="">全部</option><option>待处理</option><option>进行中</option><option>已完成</option><option>已取消</option></select>
+        <label class="hint-line"><input type="checkbox" id="necCheckAll"> 全选</label>
         <button class="btn small ghost" id="btnNecExport">导出同步文件（JSON）</button>
         <span class="spacer"></span>
         <button class="btn small danger" id="btnNecDel">删除勾选</button>
       </div>
-      <div class="table-scroll">
-      <table class="grid grid-dense" id="necTable" aria-label="NEC 任务列表：工单号/标题/类型/负责人/优先级/截止/状态/关联物料">
-        <thead><tr>
-          <th style="width:28px"><input type="checkbox" id="necCheckAll"></th>
-          <th>工单号</th><th>标题</th><th>类型</th><th>负责人</th><th>优先级</th><th>截止</th>
-          <th>状态</th><th>关联物料</th><th>备注</th><th>创建时间</th>
-        </tr></thead>
-        <tbody></tbody>
-      </table>
-      </div>
+      <div class="nec-board" id="necBoard" role="group" aria-label="NEC 任务状态看板"></div>
       <p class="hint mt-8">同步到飞书：① 点「导出同步文件」得到 nec-wip-export.json → ② 终端运行 <b>node nec-sync.mjs push</b>（首次先 node nec-sync.mjs init 建表选群）。状态改为「已完成/已取消」会写入完成时间并触发群通知。</p>
+    </div>
+    </div>
     </div>
   </section>
   <!-- ========== 排版工具 ========== -->
@@ -3784,21 +3819,51 @@ function showWipDetail(code) {
 document.getElementById('btnWipRefresh').addEventListener('click', () => { renderWip(); if (wipDetailCode) showWipDetail(wipDetailCode); });
 
 /* ================= NEC 小工单 ================= */
+/** 阶段21（§5.8）：NEC 状态看板。卡片只显示工单号/标题/负责人/截止，
+ *  点「编辑」才展开行内编辑 —— 原先 11 列全部可编辑，扫一眼根本看不出进度。 */
+function necEditorHtml(o, i) {
+  const selOf = (k, opts) => '<select class="field field--sm" data-i="' + i + '" data-k="' + k + '">' +
+    opts.map(v => '<option' + (v === o[k] ? ' selected' : '') + '>' + esc(v) + '</option>').join('') + '</select>';
+  return '<label>负责人<input type="text" class="field field--sm" data-i="' + i + '" data-k="owner" value="' + esc(o.owner) + '"></label>' +
+    '<label>优先级' + selOf('priority', ['高', '中', '低']) + '</label>' +
+    '<label>截止<input type="date" class="field field--sm" data-i="' + i + '" data-k="due" value="' + esc(o.due) + '"></label>' +
+    '<label>状态' + selOf('status', NEC_STATUS) + '</label>' +
+    '<label>关联物料<input type="text" class="field field--sm" data-i="' + i + '" data-k="materials" value="' + esc(o.materials) + '"></label>' +
+    '<label>备注<input type="text" class="field field--sm" data-i="' + i + '" data-k="note" value="' + esc(o.note) + '"></label>';
+}
+function necCardHtml(o, i) {
+  return '<article class="nec-card" data-i="' + i + '">' +
+    '<div class="nec-card__row">' +
+      '<input type="checkbox" class="necSel" data-i="' + i + '">' +
+      '<span class="badge st-' + esc(o.status) + '">' + esc(o.status) + '</span>' +
+      '<button type="button" class="nec-card__edit" data-edit="' + i + '">编辑</button>' +
+    '</div>' +
+    '<div class="nec-card__t">' + esc(o.title || '（无标题）') + '</div>' +
+    '<div class="nec-card__m">' + esc(o.code) + '</div>' +
+    '<div class="nec-card__f"><span>' + esc(o.owner || '未指派') + '</span><span>截止 ' + esc(o.due || '—') + '</span></div>' +
+    '<div class="nec-card__editor" hidden>' + necEditorHtml(o, i) + '</div>' +
+  '</article>';
+}
 function renderNec() {
+  const board = document.getElementById('necBoard');
+  if (!board) return;
   const filter = document.getElementById('necFilter').value;
-  const tb = document.querySelector('#necTable tbody');
-  tb.innerHTML = state.necOrders.map((o, i) => ({ o, i })).filter(x => !filter || x.o.status === filter).map(({ o, i }) =>
-    '<tr><td><input type="checkbox" class="necSel" data-i="' + i + '"></td>' +
-    '<td data-th="工单号">' + esc(o.code) + '</td><td data-th="标题">' + esc(o.title) + '</td><td data-th="类型">' + esc(NEC_TYPE_NAMES[o.type] || o.type) + '</td>' +
-    '<td data-th="负责人"><input type="text" data-i="' + i + '" data-k="owner" value="' + esc(o.owner) + '"></td>' +
-    '<td data-th="优先级"><select data-i="' + i + '" data-k="priority">' + ['高', '中', '低'].map(p => '<option' + (p === o.priority ? ' selected' : '') + '>' + p + '</option>').join('') + '</select></td>' +
-    '<td data-th="截止"><input type="date" data-i="' + i + '" data-k="due" value="' + esc(o.due) + '"></td>' +
-    '<td data-th="状态"><span class="badge st-' + o.status + '">' + o.status + '</span><br><select data-i="' + i + '" data-k="status" class="status-select">' +
-      NEC_STATUS.map(s => '<option' + (s === o.status ? ' selected' : '') + '>' + s + '</option>').join('') + '</select></td>' +
-    '<td data-th="关联物料"><input type="text" data-i="' + i + '" data-k="materials" value="' + esc(o.materials) + '"></td>' +
-    '<td data-th="备注"><input type="text" data-i="' + i + '" data-k="note" value="' + esc(o.note) + '"></td>' +
-    '<td data-th="创建时间" class="hint">' + esc(o.createdAt) + '</td></tr>').join('');
-  tb.querySelectorAll('[data-k]').forEach(el => el.addEventListener('change', () => {
+  board.innerHTML = NEC_STATUS.map(st => {
+    const list = state.necOrders.map((o, i) => ({ o, i }))
+      .filter(x => x.o.status === st && (!filter || x.o.status === filter));
+    return '<div class="nec-col" data-status="' + esc(st) + '">' +
+      '<div class="nec-col__h"><span>' + esc(st) + '</span><b>' + list.length + '</b></div>' +
+      (list.length ? list.map(({ o, i }) => necCardHtml(o, i)).join('') : '<p class="nec-col__empty">（空）</p>') +
+    '</div>';
+  }).join('');
+  /* 点开才进入行内编辑 */
+  board.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => {
+    const ed = b.closest('.nec-card').querySelector('.nec-card__editor');
+    ed.hidden = !ed.hidden;
+    b.textContent = ed.hidden ? '编辑' : '收起';
+  }));
+  /* 字段与规则与原先完全一致（含「已完成/已取消」写 doneAt） */
+  board.querySelectorAll('[data-k]').forEach(el => el.addEventListener('change', () => {
     const o = state.necOrders[+el.dataset.i], k = el.dataset.k;
     o[k] = el.value;
     if (k === 'status') o.doneAt = (o.status === '已完成' || o.status === '已取消') ? new Date().toLocaleString() : '';
@@ -3826,6 +3891,9 @@ document.getElementById('btnNecCreate').addEventListener('click', () => {
   });
   ['necTitle', 'necOwner', 'necMaterials', 'necNote', 'necDue'].forEach(id => document.getElementById(id).value = '');
   save(); renderNec();
+  // 阶段21（§5.8）：建单后出「打印紫色 NEC 标签」的下一程条（放在 save(); renderNec(); 之后，
+  //            以保住 p6 测试对「建单代码 → save(); renderNec();」的切片断言）
+  nextStrip('nextNec', 'nec', [state.necOrders[state.necOrders.length - 1].code], 1);
 });
 document.getElementById('necFilter').addEventListener('change', renderNec);
 document.getElementById('necCheckAll').addEventListener('change', e =>
