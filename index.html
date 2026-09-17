@@ -492,6 +492,25 @@ body.stocktake-on .stocktake-banner{display:block}
 .scan-reading--danger .scan-reading__value{color:var(--danger-fg)}
 .scan-reading__unit{font-size:12px;font-style:normal;color:var(--text-muted);margin-left:2px}
 .scan-card__detail{font-size:13px}
+/* 阶段25（§5.1）：结果卡「更多详情」可折叠。
+   **默认展开** —— 位置路径是 §5.3「30 秒定位」的核心交付，默认折叠会把它藏起来；
+   折叠只作为用户主动收起的入口。 */
+.scan-more>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;
+  font-size:12px;color:var(--text-muted);padding:4px 0;}
+.scan-more>summary::-webkit-details-marker{display:none;}
+.scan-more>summary::before{content:"\25b8";font-size:11px;display:inline-block;transition:transform .15s;}
+.scan-more[open]>summary::before{transform:rotate(90deg);}
+.scan-more[open]>summary{margin-bottom:4px;}
+/* 阶段25（§5.1）：操作日志可折叠。摘要里保留**最新一行**，折叠也不丢当前状态。 */
+.log-wrap>summary{cursor:pointer;list-style:none;display:flex;align-items:baseline;gap:8px;}
+.log-wrap>summary::-webkit-details-marker{display:none;}
+.log-wrap>summary::before{content:"\25b8";font-size:11px;color:var(--text-muted);flex:none;}
+.log-wrap[open]>summary::before{transform:rotate(90deg);display:inline-block;}
+.log-wrap__h{font-size:16px;font-weight:600;color:var(--ink-strong);flex:none;}
+.log-wrap__last{font-family:var(--font-mono);font-size:12px;color:var(--text-muted);
+  flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.log-wrap[open] .log-wrap__last{display:none;}
+.log-wrap .log{margin-top:8px;}
 .scan-card__actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
 /* ============================================================
    04 COMPONENTS（阶段11 批次B/C）：表单控件 .field / 提示面板 .alert / 工具类
@@ -1378,8 +1397,11 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <div class="scan-result" id="scanResult"></div>
     </div>
     <div class="panel">
-      <h2>操作日志</h2>
-      <div class="log" id="scanLog">（暂无记录）</div>
+      <!-- 阶段25（§5.1）：日志可折叠；摘要里保留最新一行，折叠也不丢当前状态 -->
+      <details class="log-wrap" id="scanLogWrap" open>
+        <summary><span class="log-wrap__h">操作日志</span><span class="log-wrap__last" id="scanLogLast">（暂无记录）</span></summary>
+        <div class="log" id="scanLog">（暂无记录）</div>
+      </details>
     </div>
   </section>
   <!-- ========== 状态区（阶段10）：结果计数 / 数据空间 / 同步模式 / 待上传 ========== -->
@@ -4124,6 +4146,9 @@ function renderScanLog() {
   if (!el) return;
   const lines = state.scanLog || [];
   el.textContent = lines.length ? lines.slice(0, SCAN_LOG_VIEW).join('\n') : '（暂无记录）';
+  // 阶段25（§5.1）：折叠时摘要显示最新一行
+  const last = document.getElementById('scanLogLast');
+  if (last) last.textContent = lines.length ? String(lines[0]).replace(/\s+/g, ' ') : '（暂无记录）';
 }
 /**
  * 追加一行界面日志。
@@ -4177,7 +4202,7 @@ function renderScanCard(o) {
       (o.tag || '') +
     '</header>' +
     (readings ? '<div class="scan-readings">' + readings + '</div>' : '') +
-    (o.detailHtml ? '<div class="scan-card__detail">' + o.detailHtml + '</div>' : '') +
+    (o.detailHtml ? '<details class="scan-more" open><summary>更多详情</summary><div class="scan-card__detail">' + o.detailHtml + '</div></details>' : '') +
     (o.actionsHtml ? '<div class="scan-card__actions">' + o.actionsHtml + '</div>' : '');
 }
 function locationCard(code, { withTimes = true } = {}) {
