@@ -102,10 +102,16 @@ const CASES = {
     patch: { status: '已执行' },
     check: r => r.type === 'LL' && r.date === '2026-09-15' && r.items.length === 1 && r.items[0].qty === 2 && r.status === '未执行'
   },
+  /* ⚠️ 流水的 seq 必须紧贴真实最大 seq，**绝不能用 900001 这种「安全大数」**。
+     原因（真实事故）：任何浏览器只要在哨兵存在的窗口里同步过一次，就会把
+     state.txnSeq 顶到 900001；哨兵随后被删掉，账本覆盖度就**永久**报
+     「缺 #24~#900000」——90 万条不存在的流水。高水位没有回退路径，
+     用户端只能靠「重置高水位」手工收场。所以这里改成 realMaxSeq + 1，
+     由 resolveTxnSeq() 在运行时读一次真实最大值填进来。 */
   transactions: {
-    create: { seq: 900001, ts: '2026-09-15T02:00:00Z', operator: '哨兵', type: '测试', matCode: PREFIX + '-MAT', delta: 0, balance: 0, ref: '', reason: '哨兵' },
+    create: { seq: 0, ts: '2026-09-15T02:00:00Z', operator: '哨兵', type: '测试', matCode: PREFIX + '-MAT', delta: 0, balance: 0, ref: '', reason: '哨兵' },
     patch: { reason: '哨兵-改' },
-    check: r => r.seq === 900001 && r.operator === '哨兵' && r.matCode === PREFIX + '-MAT'
+    check: r => r.operator === '哨兵' && r.matCode === PREFIX + '-MAT'
   }
 };
 
@@ -165,6 +171,13 @@ async function main() {
 
   const before = await pull();
   const baseCount = Object.fromEntries(ALL.map(t => [t, (before[t] || []).length]));
+
+  /* 流水哨兵的 seq 紧贴真实最大值（见 CASES.transactions 的注释）：
+     用「安全大数」会把所有同步过的浏览器的 txnSeq 高水位顶上去，
+     哨兵删掉后账本永久报几十万条假缺口。 */
+  const realMaxSeq = (before.transactions || []).reduce((m, t) => Math.max(m, Number(t.seq) || 0), 0);
+  CASES.transactions.create.seq = realMaxSeq + 1;
+  process.stdout.write(`  ℹ 流水哨兵 seq=${realMaxSeq + 1}（紧贴真实最大 seq，避免污染高水位）\n`);
 
   try {
     /* ---- 1) 增 ---- */
