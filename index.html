@@ -380,6 +380,9 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
    目标顺序是 RESPONSIVE 在 PRINT 之前，由批次 F 连同三档断点
    （900 / 768 / 560）一起迁移，届时必须过打印回归。
    ============================================================ */
+/* 阶段8：手机「全部」入口。默认隐藏（桌面/平板用不到），只在 ≤767px 显示。 */
+.nav-all{display:none}
+
 /* ============================================================
    06 RESPONSIVE（阶段7 重写）—— 手机适配：扫码的主战场
    手机是扫码的主要设备，优先保证：底部可达的导航、大号扫码输入与摄像头按钮、
@@ -387,10 +390,28 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
    ⚠ 全部置于 @media screen 内：打印域由 07 PRINT 的 display:none 接管，不受影响。
    ============================================================ */
 @media screen and (max-width:767px){
-  /* 导航固定到底部 —— 扫码入口始终在拇指可达范围 */
+  /* 导航固定到底部 —— 扫码入口始终在拇指可达范围。
+     默认只显示 4 个主入口，其余收进「☰ 全部」抽屉（阶段8）。 */
   nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:var(--z-nav);
-    border-top:1px solid var(--line);border-bottom:none;padding:0 4px;
+    border-top:1px solid var(--line);border-bottom:none;padding:0 72px 0 4px;
     padding-bottom:env(safe-area-inset-bottom,0);overflow-x:auto;}
+  nav.tabs button:not([data-primary]){display:none;}
+  /* 展开态：底部弹出竖排全列表（分组标签一并显示） */
+  body.nav-all-open nav.tabs{flex-direction:column;align-items:stretch;max-height:70vh;
+    overflow-x:visible;overflow-y:auto;
+    padding:8px 8px calc(56px + env(safe-area-inset-bottom,0));}
+  body.nav-all-open nav.tabs button:not([data-primary]){display:flex;}
+  body.nav-all-open nav.tabs button{text-align:left;font-size:14px;}
+  body.nav-all-open nav.tabs .nav-group{display:block;color:var(--text-muted);padding:10px 8px 4px;}
+  body.nav-all-open nav.tabs a.tab-link{display:block;text-align:left;}
+  /* 「全部」开关固定在右下角，始终可点 */
+  .nav-all{display:flex;align-items:center;justify-content:center;
+    position:fixed;right:4px;bottom:0;z-index:calc(var(--z-nav) + 1);
+    min-width:64px;min-height:45px;font-size:13px;cursor:pointer;
+    background:var(--surface);color:var(--primary);border:1px solid var(--line);
+    border-radius:var(--r-md) var(--r-md) 0 0;
+    margin-bottom:env(safe-area-inset-bottom,0);}
+  .nav-all[aria-expanded="true"]{background:var(--primary);color:#fff;border-color:var(--primary);}
   nav.tabs button{padding:10px 12px;font-size:13px;min-height:44px;}
   nav.tabs a.tab-link{padding:10px 12px;min-height:44px;display:inline-flex;align-items:center;}
   body{padding-bottom:58px;}
@@ -447,16 +468,16 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
 </head>
 <body>
 <header><img class="nec-logo" id="hdrLogo" alt="NEC"><div><div class="slogan">BUILT TO DAWN · KEEP BUILDING&#9608;</div><h1>416MES 仓储管理系统</h1></div><span class="sub">七类标签 · Excel 台账 · 扫码工作台（查询只读 / 执行需确认）（单机离线版）</span><span id="fsQueueChip" title="离线期间的库存变动，联网后自动冲刷到飞书" style="display:none;margin-left:10px;font-size:12px;background:#fff4e0;color:#a4600a;border:1px solid #f0c884;border-radius:10px;padding:2px 10px;"></span><span style="margin-left:auto;font-size:13px">操作人 <select id="selOperator" style="font-size:13px;padding:2px 8px;border-radius:4px;border:none;"></select></span></header>
-<nav class="tabs">
+<nav class="tabs" id="mainTabs">
   <div class="nav-group">现场作业</div>
-  <button data-tab="scan">扫码工作台</button>
-  <button data-tab="wip">库存工单</button>
+  <button data-tab="scan" data-primary="1">扫码工作台</button>
+  <button data-tab="wip" data-primary="1">库存工单</button>
   <div class="nav-group">台账与建档</div>
-  <button data-tab="ledger" class="on">物料台账</button>
+  <button data-tab="ledger" class="on" data-primary="1">物料台账</button>
   <button data-tab="gen">建档与编码</button>
   <button data-tab="member">成员名录</button>
   <div class="nav-group">标签与制作</div>
-  <button data-tab="label">标签打印</button>
+  <button data-tab="label" data-primary="1">标签打印</button>
   <button data-tab="design">排版工具</button>
   <div class="nav-group">实验室协作</div>
   <button data-tab="nec">NEC 任务</button>
@@ -464,6 +485,9 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   <a class="tab-link tab-link--push" href="home.html">🏠 首页</a>
   <a class="tab-link" href="flyer-a4.html" target="_blank" rel="noopener">📄 宣传页</a>
 </nav>
+<!-- 阶段8：手机端「全部」入口。刻意放在 nav 之外 —— 页签接线用的是
+     document.querySelectorAll('nav.tabs button')，混入无 data-tab 的按钮会误参与切页。 -->
+<button type="button" id="btnNavAll" class="nav-all" aria-expanded="false" aria-controls="mainTabs">☰ 全部</button>
 <main>
   <!-- ========== 业务关系条（阶段4）：可折叠，回答「模块之间怎么连、哪一步会改库存」 ========== -->
   <details class="flow-map" id="flowMap">
@@ -3752,6 +3776,23 @@ function handleScan(raw) {
   chk.addEventListener('change', sync);
   if (off) off.addEventListener('click', () => { chk.checked = false; sync(); });
   sync();
+})();
+/* 阶段8：手机「全部」抽屉。纯呈现（只切 body class），不参与切页逻辑。 */
+(function initNavAll() {
+  const btn = document.getElementById('btnNavAll');
+  const nav = document.getElementById('mainTabs');
+  if (!btn || !nav) return;
+  const sync = open => {
+    document.body.classList.toggle('nav-all-open', open);
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.textContent = open ? '✕ 收起' : '☰ 全部';
+  };
+  btn.addEventListener('click', () => sync(!document.body.classList.contains('nav-all-open')));
+  // 选中任一页签后自动收起，避免挡住内容
+  nav.addEventListener('click', e => { if (e.target.closest('button, a')) sync(false); });
+  // 视口变宽（转横屏/平板）时复位，避免残留展开态
+  window.addEventListener('resize', () => { if (innerWidth > 767) sync(false); });
+  sync(false);
 })();
 document.getElementById('scanInput').addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
