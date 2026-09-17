@@ -81,10 +81,48 @@ header h1{font-size:20px;letter-spacing:1px;}
 header .sub{font-size:12px;color:#9fb2cf;}
 header .slogan{font-size:11px;color:#00B0F0;letter-spacing:2px;font-weight:bold;}
 nav.tabs{display:flex;background:#fff;border-bottom:1px solid var(--line);padding:0 12px;overflow-x:auto;scrollbar-width:thin;}
-nav.tabs button{border:none;background:none;padding:12px 18px;font-size:14px;cursor:pointer;border-bottom:3px solid transparent;color:#555;white-space:nowrap;}
+nav.tabs button{border:none;background:none;padding:12px 18px;font-size:14px;cursor:pointer;border-bottom:3px solid transparent;color:#555;white-space:nowrap;flex:none;}
 nav.tabs button.on{border-bottom-color:var(--blue);color:var(--blue);font-weight:bold;}
-nav.tabs a.tab-link{display:inline-block;padding:12px 18px;font-size:14px;border-bottom:3px solid transparent;color:#555;text-decoration:none;}
+/* 阶段4 修既有隐患：横向模式下整行溢出时，原先只有 .tab-link 是 white-space:normal，
+   会被 flex 压缩到几十像素并把文字折成多行，从而把整行撑高（900px 档实测 114px），
+   再经 align-items:stretch 传导给所有按钮。改为不换行 + flex:none，
+   把溢出交给 nav 的 overflow-x:auto 处理。 */
+nav.tabs a.tab-link{display:inline-block;padding:12px 18px;font-size:14px;border-bottom:3px solid transparent;color:#555;text-decoration:none;white-space:nowrap;flex:none;}
 nav.tabs a.tab-link:hover{color:var(--blue);border-bottom-color:#bcd4f6;}
+/* 阶段4：导航分组标签。默认（横向条 / 平板 / 手机）隐藏，仅桌面侧栏模式显示。 */
+.nav-group{display:none}
+.tab-link--push{margin-left:auto}
+/* 阶段4：桌面 ≥1024px 改为「深色分组侧栏」。
+   纯 CSS grid 实现，**不改 nav 容器结构与任何 data-tab**，因此
+   history.replaceState 的 hash 路由、启动深链解析、以及全部
+   document.querySelector('nav.tabs button[data-tab=…]').click() 继续有效。
+   ⚠ 全部置于 @media screen 内：@media print 已 display:none 掉 nav.tabs，
+     打印域不受影响。 */
+@media screen and (min-width:1024px){
+  body{display:grid;grid-template-columns:216px minmax(0,1fr);grid-template-rows:auto 1fr auto;
+       grid-template-areas:"hdr hdr" "nav main" "nav ftr";min-height:100vh;}
+  header{grid-area:hdr;}
+  /* 用 body > main 提升优先级：基础规则 main{…;margin:0 auto} 在本媒体查询
+     【之后】（第 126 行）定义，同优先级下会覆盖这里的 margin:0。
+     min-width:0 同样必需：grid item 默认 min-width:auto，会让 main 拒绝被 1fr 压缩。
+     两者缺一不可 —— 否则 main 被撑到 908px，1024px 档整页横向溢出 115px。 */
+  body > main{grid-area:main;min-width:0;margin:0;}
+  #appFooter{grid-area:ftr;}
+  nav.tabs{grid-area:nav;display:flex;flex-direction:column;align-items:stretch;gap:2px;
+    background:var(--sidebar-bg);border-bottom:none;padding:8px 0 14px;
+    overflow-x:visible;overflow-y:auto;}
+  nav.tabs .nav-group{display:block;color:var(--sidebar-fg);opacity:.7;font-size:11px;
+    letter-spacing:1px;padding:12px 16px 4px;white-space:nowrap;}
+  nav.tabs button{text-align:left;color:var(--sidebar-fg);border-bottom:none;
+    border-left:3px solid transparent;padding:9px 16px;font-size:13.5px;white-space:normal;}
+  nav.tabs button:hover{color:var(--sidebar-fg-active);background:rgba(255,255,255,.06);}
+  nav.tabs button.on{color:var(--sidebar-fg-active);border-left-color:var(--sidebar-active-bar);
+    background:rgba(255,255,255,.10);font-weight:bold;}
+  nav.tabs a.tab-link{display:block;padding:8px 16px;color:var(--sidebar-fg);
+    border-bottom:none;font-size:13px;}
+  nav.tabs a.tab-link:hover{color:var(--sidebar-fg-active);background:rgba(255,255,255,.06);border-bottom-color:transparent;}
+  nav.tabs a.tab-link--push{margin-left:0;}
+}
 main{padding:16px 20px;max-width:1280px;margin:0 auto;}
 section.tab{display:none;}
 section.tab.on{display:block;}
@@ -119,7 +157,7 @@ table.grid tr:hover td{background:#f7fafd;}
 .wip-reversed{display:inline-block;margin-left:4px;font-size:11px;color:var(--cancelled-fg)}
 /* 密集表格横向滚动容器：只提供滚动，不改表格自身尺寸。
    打印域（.label / .zonecard / #printSheet）不在其内，且 @media print 已隐藏 .label-list。 */
-.table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
+.table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%;min-width:0}
 /* 人员 PIN 脱敏：表格内不回显明文 */
 .pin-state{display:inline-block;min-width:60px;font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums}
 .pin-state.is-set{color:var(--done-fg);font-weight:600}
@@ -132,6 +170,26 @@ table.grid tr:hover td{background:#f7fafd;}
 .progress__bar--active{background:var(--color-primary)}
 .progress__bar--done{background:var(--done-fg)}
 .progress__bar--cancelled{background:var(--line-strong)}
+/* 页面用途行 + 库存影响徽标（阶段4）：让「这个页面会不会改库存」一眼可见 */
+.page-purpose{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  font-size:12.5px;color:var(--text-sub);margin:-4px 0 10px;}
+.impact{display:inline-block;padding:1px 8px;border-radius:var(--r-sm);
+  font-size:11px;font-weight:600;white-space:nowrap}
+.impact--none{background:var(--surface-2);color:var(--text-sub)}
+.impact--confirm{background:var(--doing-bg);color:var(--doing-fg)}
+/* 业务关系条（阶段4）：可折叠，展示模块之间怎么连。默认收起，不干扰日常作业。
+   打印时被 @media print 的 body *{visibility:hidden} 一并隐藏。 */
+.flow-map{margin:0 0 14px;border:1px solid var(--line);border-radius:var(--r-lg);
+  background:var(--surface);overflow:hidden}
+.flow-map>summary{cursor:pointer;padding:9px 14px;font-size:13px;color:var(--text-sub);background:var(--surface-2)}
+.flow-map__body{padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.flow-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12.5px}
+.flow-row--aside{padding-top:6px;border-top:1px dashed var(--line)}
+.flow-node{display:inline-block;padding:2px 9px;border:1px solid var(--line);
+  border-radius:var(--r-sm);background:var(--surface);color:var(--ink-strong)}
+.flow-node--confirm{border-color:var(--doing-fg);background:var(--doing-bg);color:var(--doing-fg);font-weight:600}
+.flow-arrow{color:var(--text-muted)}
+.flow-label{color:var(--text-muted);font-size:12px}
 /* 标签打印页 */
 .typebar{display:flex;gap:8px;margin-bottom:10px;}
 .typebar button{border:1px solid var(--line);background:#fff;border-radius:5px;padding:6px 14px;cursor:pointer;}
@@ -270,20 +328,60 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
 <body>
 <header><img class="nec-logo" id="hdrLogo" alt="NEC"><div><div class="slogan">BUILT TO DAWN · KEEP BUILDING&#9608;</div><h1>416MES 仓储管理系统</h1></div><span class="sub">七类标签 · Excel 台账 · 扫码工作台（查询只读 / 执行需确认）（单机离线版）</span><span id="fsQueueChip" title="离线期间的库存变动，联网后自动冲刷到飞书" style="display:none;margin-left:10px;font-size:12px;background:#fff4e0;color:#a4600a;border:1px solid #f0c884;border-radius:10px;padding:2px 10px;"></span><span style="margin-left:auto;font-size:13px">操作人 <select id="selOperator" style="font-size:13px;padding:2px 8px;border-radius:4px;border:none;"></select></span></header>
 <nav class="tabs">
-  <button data-tab="ledger" class="on">物料台账</button>
-  <button data-tab="member">成员名录</button>
-  <button data-tab="label">标签打印</button>
-  <button data-tab="gen">建档与编码</button>
-  <button data-tab="wip">库存工单</button>
-  <button data-tab="nec">NEC 任务</button>
-  <button data-tab="design">排版工具</button>
+  <div class="nav-group">现场作业</div>
   <button data-tab="scan">扫码工作台</button>
-  <a class="tab-link" style="margin-left:auto" href="home.html">🏠 首页</a>
+  <button data-tab="wip">库存工单</button>
+  <div class="nav-group">台账与建档</div>
+  <button data-tab="ledger" class="on">物料台账</button>
+  <button data-tab="gen">建档与编码</button>
+  <button data-tab="member">成员名录</button>
+  <div class="nav-group">标签与制作</div>
+  <button data-tab="label">标签打印</button>
+  <button data-tab="design">排版工具</button>
+  <div class="nav-group">实验室协作</div>
+  <button data-tab="nec">NEC 任务</button>
+  <div class="nav-group">其他</div>
+  <a class="tab-link tab-link--push" href="home.html">🏠 首页</a>
   <a class="tab-link" href="flyer-a4.html" target="_blank" rel="noopener">📄 宣传页</a>
 </nav>
 <main>
+  <!-- ========== 业务关系条（阶段4）：可折叠，回答「模块之间怎么连、哪一步会改库存」 ========== -->
+  <details class="flow-map" id="flowMap">
+    <summary>业务关系：模块之间怎么连、哪一步会改库存（点开查看）</summary>
+    <div class="flow-map__body">
+      <div class="flow-row">
+        <span class="flow-label">主链 A（建档贴码）：</span>
+        <span class="flow-node">物料台账建档</span><span class="flow-arrow">→</span>
+        <span class="flow-node">建档与编码</span><span class="flow-arrow">→</span>
+        <span class="flow-node">标签打印 / 现场贴码</span><span class="flow-arrow">→</span>
+        <span class="flow-node">扫码查询（只读）</span>
+      </div>
+      <div class="flow-row">
+        <span class="flow-label">主链 B（库存作业）：</span>
+        <span class="flow-node">新建库存工单</span><span class="flow-arrow">→</span>
+        <span class="flow-node">打印工单随货走</span><span class="flow-arrow">→</span>
+        <span class="flow-node flow-node--confirm">扫码确认执行</span><span class="flow-arrow">→</span>
+        <span class="flow-node">库存流水</span><span class="flow-arrow">→</span>
+        <span class="flow-node">追溯定位（30 秒）</span>
+      </div>
+      <div class="flow-row flow-row--aside">
+        <span class="flow-label">其他合法改数入口：</span>
+        <span class="flow-node">盘点</span>
+        <span class="flow-node">手工调整</span>
+        <span class="flow-node">冲销</span>
+        <span class="flow-arrow">→</span><span class="flow-node">库存流水</span>
+      </div>
+      <div class="flow-row flow-row--aside">
+        <span class="flow-label">旁支（不改库存）：</span>
+        <span class="flow-node">NEC 任务</span><span class="flow-arrow">→</span>
+        <span class="flow-node">打印 / 查询</span>
+        <span class="flow-label">｜ 建档与编码页的工单生成只登记计划</span>
+      </div>
+    </div>
+  </details>
   <!-- ========== 台账 ========== -->
   <section class="tab on" id="tab-ledger">
+    <p class="page-purpose"><span>主数据维护：编码不变、属性可变</span><span class="impact impact--confirm">手工改库存会写流水</span></p>
     <div class="panel">
       <h2>物料台账（主数据：编码不变，属性可变）</h2>
       <div class="toolbar">
@@ -340,6 +438,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   </section>
   <!-- ========== 人员台账 ========== -->
   <section class="tab" id="tab-member">
+    <p class="page-purpose"><span>社团成员名录，姓名直通「操作人」与 NEC 任务负责人</span><span class="impact impact--none">不改库存</span></p>
     <div class="panel">
       <h2>成员名录（编号自动生成，姓名同步「操作人」与 NEC 任务负责人）</h2>
       <div class="toolbar">
@@ -363,6 +462,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   </section>
   <!-- ========== 标签打印 ========== -->
   <section class="tab" id="tab-label">
+    <p class="page-purpose"><span>选记录 → 预览 → 打印（60×40 热敏 / A4 整版 / 模块区大卡）</span><span class="impact impact--none">不改库存</span></p>
     <div class="panel">
       <h2>标签打印（60×40mm 三防热敏纸，汉印 N41 / A4 整版）</h2>
       <div class="typebar" id="typeBar"></div>
@@ -395,6 +495,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   </section>
   <!-- ========== 编码生成 ========== -->
   <section class="tab" id="tab-gen">
+    <p class="page-purpose"><span>批量生成库位 / 容器 / 物品 / 手册编码；其中「③ 工单生成」只登记计划</span><span class="impact impact--none">本页不改库存</span></p>
     <div class="panel">
       <h2>① 库位码批量生成（空位提前全打，贴上即启用）</h2>
       <div class="form-row"><label>货架库位</label>
@@ -497,6 +598,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   </section>
   <!-- ========== 库存工单（Phase 3 管理页） ========== -->
   <section class="tab" id="tab-wip">
+    <p class="page-purpose"><span>建单 → 打印 → 扫码确认执行；支持部分执行、取消、冲销</span><span class="impact impact--confirm">确认执行后改库存</span></p>
     <div class="panel">
       <h2>库存工单管理（WIP · 建单只登记计划，扫码确认执行才改库存）</h2>
       <div class="toolbar">
@@ -533,6 +635,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   </section>
   <!-- ========== NEC 小工单 ========== -->
   <section class="tab" id="tab-nec">
+    <p class="page-purpose"><span>社团轻量任务：RW 任务 / CG 采购 / WX 维修 / HD 活动 / QT 其他</span><span class="impact impact--none">纯记录，不改库存</span></p>
     <div class="panel">
       <h2>新建 NEC 任务（New Energy Coder 实验室 · 纯记录，不改库存）</h2>
       <div class="form-row"><label>标题</label><input type="text" id="necTitle" placeholder="要做什么事" style="width:280px">
@@ -574,6 +677,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   </section>
   <!-- ========== 排版工具 ========== -->
   <section class="tab" id="tab-design">
+    <p class="page-purpose"><span>把台账数据变成排版素材（内嵌 Zonlin 排版工具 + NEC 图库）</span><span class="impact impact--none">不改库存</span></p>
     <div class="panel">
       <h2>台账数据 → 排版素材（Zonlin 自动排版工具已内嵌）</h2>
       <div class="toolbar">
@@ -607,6 +711,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   </section>
   <!-- ========== 扫码出入库 ========== -->
   <section class="tab" id="tab-scan">
+    <p class="page-purpose"><span>七种机读串：MAT / LOC / CTN / WIP / NEC / ITM / MAN</span><span class="impact impact--none">查询只读</span><span class="impact impact--confirm">WIP 确认后改库存</span></p>
     <div class="panel">
       <h2>扫码 / 手输机读串</h2>
       <p class="hint" style="margin:0 0 8px">支持 7 种前缀：
