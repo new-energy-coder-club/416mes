@@ -534,6 +534,29 @@ body.stocktake-on .stocktake-banner{display:block}
 .cell-qty-risk{position:relative;background:rgba(232,160,32,.055)}
 .cell-qty-risk::after{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--doing-fg)}
 .cell-qty-risk input{font-weight:700;font-variant-numeric:tabular-nums}
+/* 阶段22（§5.4）：改库存是高风险动作，聚焦时给整格琥珀描边（与普通输入框的青色焦点环区分） */
+.cell-qty-risk:focus-within{box-shadow:inset 0 0 0 2px var(--accent-warn)}
+/* 阶段22（§5.4）：保存后行内闪一下 —— 表格整块重渲染，用户容易不确定「刚才生效没有」 */
+@keyframes qtyFlash{0%{background:var(--doing-bg)}70%{background:var(--doing-bg)}100%{background:transparent}}
+.qty-changed{animation:qtyFlash 1.2s ease-out}
+@media (prefers-reduced-motion:reduce){ .qty-changed{animation:none;background:var(--doing-bg)} }
+/* 阶段22（§5.4）：工具栏拆两行 —— 低频数据维护动作与高频业务动作分开 */
+.toolbar--main{margin-bottom:6px}
+.toolbar--data{margin-bottom:10px;padding-top:8px;border-top:1px dashed var(--line)}
+.toolbar--data .toolbar__label{font-size:12px;font-weight:600;color:var(--text-muted);flex:none}
+/* 阶段22（§5.4）：左侧粘性列（勾选 + 物料码 = 身份组的前两列）。
+   ⚠ 横向 sticky 在 overflow-x:auto 的滚动容器里**是有效的** —— 与纵向 sticky 不同：
+   后者因为该容器同时成了纵向滚动容器而失效；横向 sticky 的滚动口正是这个容器。
+   两列宽度写死，left 偏移才是确定的（否则 sticky 列会重叠或露缝）。 */
+@media screen and (min-width:561px){
+  #matTable th:nth-child(1),#matTable td:nth-child(1){position:sticky;left:0;z-index:2;width:28px;min-width:28px;max-width:28px;}
+  #matTable th:nth-child(2),#matTable td:nth-child(2){position:sticky;left:28px;z-index:2;width:112px;min-width:112px;max-width:112px;}
+  #matTable thead th:nth-child(1),#matTable thead th:nth-child(2){z-index:4;background:var(--surface-2);}
+  #matTable tbody td:nth-child(1),#matTable tbody td:nth-child(2){background:var(--surface);}
+  #matTable tbody tr.row-neg td:nth-child(1),#matTable tbody tr.row-neg td:nth-child(2){background:#fdecea;}
+  #matTable tbody tr.row-low td:nth-child(1),#matTable tbody tr.row-low td:nth-child(2){background:#fff8e1;}
+  #matTable tbody tr:hover td:nth-child(1),#matTable tbody tr:hover td:nth-child(2){background:var(--surface-hover);}
+}
 /* 阶段5：次要列默认折叠（规格 / 闲鱼XY编号 / 成本 / 图片链接），由「显示全部列」切换 */
 body.cols-compact .col-secondary{display:none}
 /* 阶段5：粘性表头 —— 本轮【未实现，有意留空】。
@@ -885,9 +908,17 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
     <p class="page-purpose"><span>主数据维护：编码不变、属性可变</span><span class="impact impact--confirm">手工改库存会写流水</span></p>
     <div class="panel">
       <h2>物料台账（主数据：编码不变，属性可变）</h2>
-      <div class="toolbar">
+      <!-- 阶段22（§5.4）：工具栏拆两行 —— 高频业务操作与低频数据维护不再同权 -->
+      <div class="toolbar toolbar--main">
         <input class="field field--md field--w240" type="text" id="matSearch" placeholder="🔍 搜索：编码/名称/规格/库位/容器">
         <button class="btn" id="btnAddMat">+ 新增物料</button>
+        <button class="btn ghost" id="btnAutoCode">⚡ 空白编码自动编号</button>
+        <button class="btn small ghost" id="btnColsMore" title="规格 / 闲鱼XY编号 / 成本 / 图片链接">👁 显示全部列</button>
+        <span class="spacer"></span>
+        <button class="btn danger small" id="btnDelMat">删除勾选行</button>
+      </div>
+      <div class="toolbar toolbar--data">
+        <span class="toolbar__label">数据</span>
         <button class="btn ghost" id="btnExport">导出 Excel 台账</button>
         <button class="btn ghost" id="btnImport">导入 Excel 台账</button>
         <button class="btn ghost" id="btnTemplate">下载 Excel 模板</button>
@@ -896,10 +927,6 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <button class="btn ghost" id="btnMergeJson">导入合并</button>
         <input class="visually-hidden" type="file" id="fileMerge" accept=".json">
         <button class="btn ghost" id="btnCloudSync">☁️ 云端同步</button>
-        <button class="btn ghost" id="btnAutoCode">⚡ 空白编码自动编号</button>
-        <button class="btn small ghost" id="btnColsMore" title="规格 / 闲鱼XY编号 / 成本 / 图片链接">👁 显示全部列</button>
-        <span class="spacer"></span>
-        <button class="btn warn small" id="btnDelMat">删除勾选行</button>
       </div>
       <div class="table-scroll">
       <table class="grid grid-dense" id="matTable" aria-label="物料台账：物料码/分类/名称/规格/库位/容器/模块区/库存数量/安全库存/成本/图片链接">
@@ -2262,6 +2289,21 @@ const SECONDARY_MAT_COLS = ['spec', 'xy', 'cost', 'img'];
 /* 分类码：JG机构件 DJ电机驱动 DZ电子件 GZ贵重件 TS调试设备 GJ工具 HC耗材 QT其他 */
 const MAT_CATS = { JG: '机构件', DJ: '电机驱动', DZ: '电子件', GZ: '贵重件', TS: '调试设备', GJ: '工具', HC: '耗材', QT: '其他' };
 let ledgerFilter = '';
+/** 阶段22（§5.4）：库存改完后让那一格闪一下。
+ *  表格是整块重渲染的，用户很难确认「刚才那一下到底生效没有」。 */
+function flashQty(code) {
+  const tb = document.querySelector('#matTable tbody');
+  if (!tb) return;
+  const hit = [...tb.querySelectorAll('td[data-th="库存数量"]')].find(td => {
+    const i = td.querySelector('input');
+    const m = i && state.materials[+i.dataset.i];
+    return m && m.code === code;
+  });
+  if (!hit) return;
+  hit.classList.add('qty-changed');
+  setTimeout(() => hit.classList.remove('qty-changed'), 1400);
+}
+
 function renderLedger() {
   const tb = document.querySelector('#matTable tbody');
   const kw = ledgerFilter.trim().toLowerCase();
@@ -2304,6 +2346,7 @@ function renderLedger() {
       const r = CORE.applyManualAdjust(state, m.code, v, { reason: reason || '（未填）' });
       if (!r.ok) { alert('调整失败：' + r.error); inp.value = m.qty; return; }
       save(); renderLedger(); renderTxns();
+      flashQty(m.code);
       log('手工调整 ' + m.code + ' ' + (r.delta > 0 ? '+' : '') + r.delta + '（' + (reason || '未填原因') + '）｜操作人 ' + state.operator);
       invPush(m.code, r.balance);   // InvenTree 实时同步
       // 物料必须先在飞书台账里存在，否则写库存会以「物料码 xx 不在飞书台账」失败并进队列。
