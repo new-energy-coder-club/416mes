@@ -1692,3 +1692,88 @@ test('B10 闸门不能误伤：无 code 的旧用法与不同 code 都要照常�
   assert.equal(Core.createOrder(st, { type: 'LL', code: 'A-1', items: [{ matCode: 'MAT-A', qty: 1 }] }).ok, true);
   assert.equal(Core.createOrder(st, { type: 'LL', code: 'A-2', items: [{ matCode: 'MAT-A', qty: 1 }] }).ok, true);
 });
+
+/* ---------- 阶段0：本地同号工单安全诊断与收敛 ---------- */
+function dupOrder(code, qty = 2, patch = {}) {
+  return Object.assign({
+    code, type: 'LL', date: '2026-09-17', status: '未执行',
+    items: [{ matCode: 'MAT-A', qty }], execTime: '', execQty: [], execBatches: []
+  }, patch);
+}
+
+test('阶段0：三条同号同内容工单 → 识别为可安全收敛，保留首条', () => {
+  const a = dupOrder('LL-X');
+  const st = { workorders: [a, JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(a))] };
+  const scan = Core.workorderDuplicateGroups(st);
+  assert.equal(scan.groups.length, 1);
+  assert.equal(scan.groups[0].count, 3);
+  assert.equal(scan.groups[0].identical, true);
+  const r = Core.collapseIdenticalWorkorderDuplicates(st, 'LL-X');
+  assert.equal(r.ok, true);
+  assert.equal(r.removed, 2);
+  assert.equal(st.workorders.length, 1);
+  assert.strictEqual(st.workorders[0], a, '必须保留原数组第一行，而不是新造一行');
+  assert.equal(r.beforeRows.length, 3);
+  assert.equal(typeof r.afterHash, 'string');
+});
+
+test('阶段0：同号但明细/状态/批次不同 → 禁止自动收敛并列差异字段', () => {
+  const st = { workorders: [
+    dupOrder('LL-X', 2),
+    dupOrder('LL-X', 3, { status: '部分执行', execQty: [{ matCode: 'MAT-A', qty: 1 }], execBatches: [{ at: 't', items: [] }] })
+  ] };
+  const g = Core.workorderDuplicateGroups(st).groups[0];
+  assert.equal(g.identical, false);
+  assert.ok(g.diffFields.includes('items'));
+  assert.ok(g.diffFields.includes('status'));
+  assert.ok(g.diffFields.includes('execQty'));
+  const r = Core.collapseIdenticalWorkorderDuplicates(st, 'LL-X');
+  assert.equal(r.ok, false);
+  assert.match(r.error, /内容不同/);
+  assert.equal(st.workorders.length, 2, '内容不同绝不能静默删记录');
+});
+
+test('阶段0：明细/执行数量顺序不同但语义相同 → 可收敛', () => {
+  const a = dupOrder('LL-X', 2, { items: [{ matCode: 'B', qty: 1 }, { matCode: 'A', qty: 2 }], execQty: [{ matCode: 'B', qty: 1 }, { matCode: 'A', qty: 1 }] });
+  const b = dupOrder('LL-X', 2, { items: [{ matCode: 'A', qty: 2 }, { matCode: 'B', qty: 1 }], execQty: [{ matCode: 'A', qty: 1 }, { matCode: 'B', qty: 1 }] });
+  const st = { workorders: [a, b] };
+  assert.equal(Core.workorderDuplicateGroups(st).groups[0].identical, true);
+  assert.equal(Core.collapseIdenticalWorkorderDuplicates(st, 'LL-X').ok, true);
+});
+
+test('阶段0：空工单号只报告、不自动分组；重复执行收敛幂等', () => {
+  const a = dupOrder('LL-X');
+  const st = { workorders: [{ code: '' }, a, JSON.parse(JSON.stringify(a))] };
+  const scan = Core.workorderDuplicateGroups(st);
+  assert.equal(scan.blank.length, 1);
+  assert.equal(scan.groups.length, 1);
+  assert.equal(Core.collapseIdenticalWorkorderDuplicates(st, 'LL-X').ok, true);
+  assert.equal(Core.workorderDuplicateGroups(st).groups.length, 0);
+  assert.equal(Core.collapseIdenticalWorkorderDuplicates(st, 'LL-X').ok, false, '第二次不能再删任何东西');
+});
+
+test('阶段0：有完整回退凭据时可恢复；后续编辑后拒绝回退', () => {
+  const a = dupOrder('LL-X');
+  const st = { workorders: [dupOrder('OTHER'), a, JSON.parse(JSON.stringify(a))] };
+  const r = Core.collapseIdenticalWorkorderDuplicates(st, 'LL-X');
+  const journal = { beforeAll: r.beforeAll, afterHash: r.afterHash };
+  const back = Core.restoreWorkorderDuplicateCollapse(st, journal);
+  assert.equal(back.ok, true);
+  assert.equal(st.workorders.length, 3);
+
+  const r2 = Core.collapseIdenticalWorkorderDuplicates(st, 'LL-X');
+  st.workorders.push(dupOrder('NEW'));
+  const refused = Core.restoreWorkorderDuplicateCollapse(st, { beforeAll: r2.beforeAll, afterHash: r2.afterHash });
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /已经发生变化/);
+});
+
+test('阶段0：去重回退在后续工单变化后拒绝，避免覆盖新操作', () => {
+  const a = dupOrder('LL-X');
+  const st = { workorders: [a, JSON.parse(JSON.stringify(a))] };
+  const r = Core.collapseIdenticalWorkorderDuplicates(st, 'LL-X');
+  st.workorders[0].status = '部分执行';
+  const back = Core.restoreWorkorderDuplicateCollapse(st, { beforeAll: r.beforeAll, afterHash: r.afterHash });
+  assert.equal(back.ok, false);
+  assert.match(back.error, /已经发生变化/);
+});

@@ -153,3 +153,47 @@ test('B10 新建工单必须有重入闸门，且取号占号要在 await 之后
   assert.ok(catchIdx > 0 && /state\.serials\[key\]/.test(s.slice(catchIdx)),
     'await/catch 之后必须重新读 state.serials[key] —— 原实现只在 await 之前读一次快照，这正是 6 连击同号的成因');
 });
+
+test('阶段0：本地重复工单收敛入口不得调用飞书删除，且处理后必须重新核对', () => {
+  const core = fnSrc('fsPruneStaleConflicts'); // 先确认 fnSrc 仍能抓函数，避免测试框架本身失效
+  assert.ok(core.length > 20);
+  const i = HTML.indexOf("data-collapse-wip");
+  assert.ok(i > 0, '对齐面板缺少本地重复工单收敛入口');
+  const end = HTML.indexOf("  const dj = document.getElementById('btnDelJournal');", i);
+  const body = HTML.slice(i, end > i ? end : i + 3500);
+  assert.ok(/collapseIdenticalWorkorderDuplicates/.test(body), '必须调用纯本地收敛函数');
+  assert.ok(/__localDupJournal/.test(body), '必须写本地回退凭据');
+  assert.ok(/await runReconcile\(\)/.test(body), '处理后必须立即重新核对，否则数字看起来没变');
+  assert.ok(!/\bfsPushDelete\s*\(/.test(body), '本地去重绝不能调用 fsPushDelete，否则会删除飞书唯一正确记录');
+});
+
+test('阶段0：同号重复未收敛前，详情/扫码执行/普通删除都必须阻断', () => {
+  const detail = fnSrc('showWipDetail');
+  const scan = fnSrc('scanWip');
+  assert.ok(/workorderLocalDuplicate\(code\)/.test(detail), '详情必须阻断同号重复');
+  assert.ok(/workorderLocalDuplicate\(code\)/.test(scan), '扫码执行必须阻断同号重复，避免取第一行计划扣错库存');
+  const i = HTML.indexOf("getElementById('btnWipDelete')");
+  const body = HTML.slice(i, i + 1500);
+  assert.ok(/workorderLocalDuplicate\(w\.code\)/.test(body), '普通删除必须阻断重复组，避免按业务键删飞书唯一行');
+});
+
+test('阶段0：本地重复去重提供安全撤销入口，且撤销后重新核对', () => {
+  assert.ok(/id="btnUndoLocalDup"/.test(HTML), '缺少本地去重撤销入口');
+  const i = HTML.indexOf("id=\"btnUndoLocalDup\"");
+  const body = HTML.slice(i, i + 5000);
+  assert.ok(/restoreWorkorderDuplicateCollapse/.test(body), '撤销必须走带哈希保护的纯函数');
+  assert.ok(/state\.__localDupJournal\.shift/.test(body), '成功撤销后必须消费凭据');
+  assert.ok(/await runReconcile\(\)/.test(body), '撤销后必须重新核对');
+});
+
+test('B10 本地校验失败时只回收尚未被后续使用的占号', () => {
+  const rel = fnSrc('fsReleaseWorkorderSerial');
+  assert.ok(/state\.serials\[seqInfo\.key\].*!== seqInfo\.next/.test(rel),
+    '回收前必须确认计数器仍等于本次占号，否则会把并发建单的新号倒退');
+  assert.ok(/Math\.max\(Number\(seqInfo\.local\).*Number\(seqInfo\.remote\)/s.test(rel),
+    '回收最多退到本次 local/remote 的最大值，不能低于飞书已有号');
+  const i = HTML.indexOf('const r = CORE.createOrder');
+  const body = HTML.slice(i, i + 500);
+  assert.ok(/if \(!r\.ok\)[\s\S]*fsReleaseWorkorderSerial\(seqInfo\)/.test(body),
+    'createOrder 本地校验失败时应回收本次占号，避免无谓跳号');
+});

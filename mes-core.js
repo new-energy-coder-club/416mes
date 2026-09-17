@@ -212,6 +212,105 @@
     return { ok: true, errors: [], order: order, merged: mergedCodes(norm.items), dropped: norm.dropped };
   }
 
+  /* ================= 工单同键重复：诊断与安全收敛 ================= */
+
+  /** 深拷贝 JSON 业务数据（工单对象只含可序列化字段） */
+  function cloneJson(v) { return JSON.parse(JSON.stringify(v)); }
+
+  /** 键序稳定的序列化；数组顺序保留（执行批次顺序有业务意义） */
+  function stableJson(v) {
+    if (v === null || v === undefined) return JSON.stringify(v);
+    if (Array.isArray(v)) return '[' + v.map(stableJson).join(',') + ']';
+    if (typeof v !== 'object') return JSON.stringify(v);
+    var ks = Object.keys(v).sort();
+    return '{' + ks.map(function (k) { return JSON.stringify(k) + ':' + stableJson(v[k]); }).join(',') + '}';
+  }
+
+  /**
+   * 规范化一张工单供「同号是否同内容」比较。
+   * items/execQty 按 matCode 合并并排序；execBatches 保序（先后次序有审计意义）。
+   * UI 临时字段不参与；缺省值统一，避免「undefined vs 空数组」制造假差异。
+   */
+  function canonicalOrder(order) {
+    order = order || {};
+    var items = normalizeItems(order.items).items.map(function (e) {
+      return { matCode: e.matCode, qty: e.qty };
+    }).sort(function (a, b) { return a.matCode.localeCompare(b.matCode); });
+    var execQty = normalizeItems(order.execQty).items.map(function (e) {
+      return { matCode: e.matCode, qty: e.qty };
+    }).sort(function (a, b) { return a.matCode.localeCompare(b.matCode); });
+    return {
+      code: String(order.code || '').trim(),
+      type: order.type || '', date: order.date || '', status: order.status || '未执行',
+      items: items, execTime: order.execTime || '', execQty: execQty,
+      execBatches: cloneJson(order.execBatches || []),
+      reverseInfo: order.reverseInfo ? cloneJson(order.reverseInfo) : null,
+      cancelInfo: order.cancelInfo ? cloneJson(order.cancelInfo) : null
+    };
+  }
+
+  /** 扫描本地同工单号重复；不修改 state */
+  function workorderDuplicateGroups(state) {
+    var map = Object.create(null), blank = [];
+    ((state && state.workorders) || []).forEach(function (w, index) {
+      var code = String((w && w.code) || '').trim();
+      if (!code) { blank.push({ index: index, order: w }); return; }
+      (map[code] = map[code] || []).push({ index: index, order: w });
+    });
+    var groups = [];
+    Object.keys(map).forEach(function (code) {
+      var rows = map[code];
+      if (rows.length < 2) return;
+      rows.forEach(function (r) {
+        r.canonical = canonicalOrder(r.order);
+        r.fingerprint = stableJson(r.canonical);
+      });
+      var same = rows.every(function (r) { return r.fingerprint === rows[0].fingerprint; });
+      var fields = ['type', 'date', 'status', 'items', 'execTime', 'execQty', 'execBatches', 'reverseInfo', 'cancelInfo'];
+      var diffFields = fields.filter(function (f) {
+        return rows.some(function (r) { return stableJson(r.canonical[f]) !== stableJson(rows[0].canonical[f]); });
+      });
+      groups.push({ code: code, count: rows.length, identical: same, diffFields: diffFields, rows: rows });
+    });
+    return { groups: groups, blank: blank };
+  }
+
+  /**
+   * 只收敛「同号且业务内容完全相同」的一组：保留原数组第一行，删除其余本地副本。
+   * 纯本地数组变换，绝不触发飞书 delete；返回 beforeRows 供 UI 写回退凭据。
+   */
+  function collapseIdenticalWorkorderDuplicates(state, code) {
+    if (!state || !Array.isArray(state.workorders)) return { ok: false, error: 'state.workorders 不可用' };
+    code = String(code || '').trim();
+    if (!code) return { ok: false, error: '工单号为空，禁止自动收敛' };
+    var report = workorderDuplicateGroups(state);
+    var group = report.groups.find(function (g) { return g.code === code; });
+    if (!group) return { ok: false, error: '没有找到同号重复工单：' + code };
+    if (!group.identical) return { ok: false, error: '同号工单内容不同，禁止自动收敛', diffFields: group.diffFields };
+    var beforeRows = cloneJson(group.rows.map(function (r) { return r.order; }));
+    var beforeAll = cloneJson(state.workorders);
+    var keepIndex = group.rows[0].index;
+    state.workorders = state.workorders.filter(function (w, index) {
+      return String((w && w.code) || '').trim() !== code || index === keepIndex;
+    });
+    return {
+      ok: true, code: code, removed: group.count - 1, keptIndex: keepIndex,
+      beforeRows: beforeRows, beforeAll: beforeAll,
+      afterHash: stableJson(state.workorders), fingerprint: group.rows[0].fingerprint
+    };
+  }
+
+  /** 仅在去重后整份工单列表没有再变化时允许回退，避免覆盖后续新建/执行/编辑 */
+  function restoreWorkorderDuplicateCollapse(state, journal) {
+    if (!state || !Array.isArray(state.workorders)) return { ok: false, error: 'state.workorders 不可用' };
+    if (!journal || !Array.isArray(journal.beforeAll) || !journal.afterHash) return { ok: false, error: '回退凭据不完整' };
+    if (stableJson(state.workorders) !== journal.afterHash) {
+      return { ok: false, error: '去重后工单数据已经发生变化，为避免覆盖后续操作，拒绝回退' };
+    }
+    state.workorders = cloneJson(journal.beforeAll);
+    return { ok: true, restored: state.workorders.length };
+  }
+
   /* ================= 统一流水写入（唯一入口） ================= */
 
   /**
@@ -1474,6 +1573,10 @@
     normalizeItems: normalizeItems,
     mergedCodes: mergedCodes,
     createOrder: createOrder,
+    canonicalOrder: canonicalOrder,
+    workorderDuplicateGroups: workorderDuplicateGroups,
+    collapseIdenticalWorkorderDuplicates: collapseIdenticalWorkorderDuplicates,
+    restoreWorkorderDuplicateCollapse: restoreWorkorderDuplicateCollapse,
     recordTransaction: recordTransaction,
     reconcileTxnSeq: reconcileTxnSeq,
     applyStockChange: applyStockChange,
