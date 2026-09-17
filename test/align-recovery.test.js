@@ -80,3 +80,42 @@ test('阶段1：记录级推回/删除动作完成后必须重新核对', () => 
   const delPos = ui.indexOf("[data-reconcile-del]");
   assert.ok(delPos > 0 && /await runReconcile\(\)/.test(ui.slice(delPos)), '删除本地动作后必须重新核对');
 });
+
+/* ================= 阶段2：全站状态坞 ================= */
+
+test('阶段2：四块全站面板与日志必须在 #statusDock 内，且 id 全部保留', () => {
+  const dockStart = HTML.indexOf('id="statusDock"');
+  const dockEnd = dockStart >= 0 ? HTML.indexOf('</details>', dockStart) : -1;
+  assert.ok(dockStart > 0, '缺少全站状态坞 #statusDock');
+  const dock = HTML.slice(dockStart, dockEnd);
+  ['cloudGapBox', 'queueBox', 'conflictBox', 'healthBox', 'scanLogWrap', 'scanLog', 'scanLogLast']
+    .forEach(id => assert.ok(dock.includes('id="' + id + '"'), '状态坞必须包含 #' + id + '（测试断言其存在）'));
+  /* 老位置（#tab-ledger 内）不得再残留这些 id —— 留两份会导致 getElementById 命中错误那份 */
+  const ledgerStart = HTML.indexOf('id="tab-ledger"');
+  const ledgerEnd = HTML.indexOf('</section>', ledgerStart);
+  const ledger = HTML.slice(ledgerStart, ledgerEnd);
+  ['cloudGapBox', 'queueBox', 'conflictBox', 'healthBox'].forEach(id =>
+    assert.ok(!ledger.includes('id="' + id + '"'), '#tab-ledger 不得再包含 #' + id));
+  const scanSecStart = HTML.indexOf('id="tab-scan"');
+  const scanSec = HTML.slice(scanSecStart, HTML.indexOf('</section>', scanSecStart));
+  assert.ok(!scanSec.includes('id="scanLogWrap"'), '扫码页不得再包含 #scanLogWrap（日志已归状态坞）');
+});
+
+test('阶段2：顶栏角标必须在任何页签都能展开状态坞', () => {
+  const s = fnSrc('fsOpenQueuePanel');
+  assert.match(s, /statusDock/, 'fsOpenQueuePanel 必须展开 #statusDock，否则非台账页点击角标无效');
+});
+
+test('阶段2：状态坞摘要必须覆盖队列/冲突/待人工/不一致/重复，且异常自动展开', () => {
+  const s = fnSrc('renderStatusDockSum');
+  assert.match(s, /_conflicts\.length/);
+  assert.match(s, /_censusPending/);
+  assert.match(s, /localOnlyCount/);
+  assert.match(s, /workorderDuplicateGroups/);
+  assert.match(s, /dock\.open = true/, '出现异常时必须自动展开，不能等人自己去翻');
+});
+
+test('阶段2：切页签必须刷新状态坞摘要（任何页签都可见的前提）', () => {
+  const nav = HTML.slice(HTML.indexOf("document.querySelectorAll('nav.tabs button')"), HTML.indexOf('/* ================= 排版工具'));
+  assert.match(nav, /renderStatusDockSum\(\)/);
+});
