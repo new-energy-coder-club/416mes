@@ -1489,3 +1489,69 @@ test('clearFields：默认不写空值，但显式申报的列必须真被清空
   await lib.upsertRecords('containers', [{ code: 'CT-1', type: '盒', spec: 'S2', loc: 'B-02-02-02' }], { clearFields: ['loc'] });
   assert.equal(mock.tables.tblCTN.rows[0]['规格'], 'S2');
 });
+
+/* ================= 内容差异（同一业务键、两边值不同） ================= */
+
+test('reconcile 内容差异：两边都有但字段值不同时必须报出「哪个字段、各是什么」', async (t) => {
+  const mock = await startMock({
+    tables: { tblCTN: { fields: ['容器码', '容器类型', '规格', '当前库位码'], rows: [
+      { '容器码': 'CT-1', '容器类型': '盒', '规格': 'S1', '当前库位码': 'B-01-01-01' },
+      { '容器码': 'CT-2', '容器类型': '盒', '规格': 'S2', '当前库位码': '' }
+    ] } },
+    fieldTypes: { tblCTN: [{ name: '容器码', type: 1 }, { name: '容器类型', type: 1 }, { name: '规格', type: 1 }, { name: '当前库位码', type: 1 }] }
+  });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: JSON.stringify({ containers: 'tblCTN' }) });
+  const rep = await lib.reconcile({
+    containers: [
+      { code: 'CT-1', type: '盒', spec: 'S1-改过了', loc: 'B-01-01-01' },   // 规格不同
+      { code: 'CT-2', type: '盒', spec: 'S2', loc: 'B-09-09-09' }           // 库位本地有、飞书空
+    ]
+  });
+  const tb = rep.tables.containers;
+  assert.equal(tb.diffCount, 2, JSON.stringify(tb.diffs));
+  const d1 = tb.diffs.find(d => d.key === 'CT-1');
+  assert.equal(d1.field, 'spec');
+  assert.equal(d1.local, 'S1-改过了');
+  assert.equal(d1.feishu, 'S1');
+  const d2 = tb.diffs.find(d => d.key === 'CT-2');
+  assert.equal(d2.field, 'loc');
+  assert.equal(d2.feishu, '', '空值也要报出来（本地有值/飞书空 是最常见的漏推）');
+  assert.equal(rep.summary.contentDiff, 2);
+});
+
+test('reconcile 内容差异：两边一致、或只在一侧的，不得误报为内容差异', async (t) => {
+  const mock = await startMock({
+    tables: { tblCTN: { fields: ['容器码', '容器类型', '规格', '当前库位码'], rows: [
+      { '容器码': 'CT-1', '容器类型': '盒', '规格': 'S1', '当前库位码': 'B-01-01-01' },
+      { '容器码': 'CT-ONLY-REMOTE', '容器类型': '盒', '规格': 'S9', '当前库位码': '' }
+    ] } },
+    fieldTypes: { tblCTN: [{ name: '容器码', type: 1 }, { name: '容器类型', type: 1 }, { name: '规格', type: 1 }, { name: '当前库位码', type: 1 }] }
+  });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: JSON.stringify({ containers: 'tblCTN' }) });
+  const rep = await lib.reconcile({
+    containers: [
+      { code: 'CT-1', type: '盒', spec: 'S1', loc: 'B-01-01-01' },        // 完全一致
+      { code: 'CT-ONLY-LOCAL', type: '盒', spec: 'S3', loc: '' }          // 只在一侧
+    ]
+  });
+  const tb = rep.tables.containers;
+  assert.equal(tb.diffCount, 0, '一致的不该报差异；只在一侧的由 localOnly/remoteOnly 负责：' + JSON.stringify(tb.diffs));
+  assert.deepEqual(tb.diffs, []);
+  assert.equal(tb.localOnlyCount, 1);
+  assert.equal(tb.remoteOnlyCount, 1);
+});
+
+test('reconcile 内容差异：飞书缺的列不重复报「内容差异」（由 missingColumns 负责）', async (t) => {
+  const mock = await startMock({
+    tables: { tblCTN: { fields: ['容器码'], rows: [{ '容器码': 'CT-1' }] } },
+    fieldTypes: { tblCTN: [{ name: '容器码', type: 1 }] }
+  });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: JSON.stringify({ containers: 'tblCTN' }) });
+  const rep = await lib.reconcile({ containers: [{ code: 'CT-1', type: '盒', spec: 'S1', loc: 'B-01' }] });
+  const tb = rep.tables.containers;
+  assert.equal(tb.diffCount, 0, '列都不存在时报「内容差异」是噪音，应该只报缺列');
+  assert.ok(tb.missingColumns.length > 0, '缺列必须报出来');
+});

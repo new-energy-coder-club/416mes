@@ -508,3 +508,56 @@ test('阶段6：条码机读串前缀必须与扫码识别一致（对象来源�
   ['MAT:', 'LOC:', 'CTN:', 'WIP:', 'NEC:', 'ITM:', 'MAN:'].forEach(p =>
     assert.ok(legend.includes(p), '扫码图例未列出 ' + p + '：用户拿到标签不知道扫出来是什么'));
 });
+
+/* ================= 阶段7：工具条分组 + 同步动作归位 ================= */
+
+test('阶段7：台账页不得再放「云端同步」动作，只留指路牌', () => {
+  const ledger = HTML.slice(HTML.indexOf('id="tab-ledger"'), HTML.indexOf('</section>', HTML.indexOf('id="tab-ledger"')));
+  assert.ok(!/id="btnCloudSync"/.test(ledger),
+    '「云端同步」做的是拉取+合并+补推离线队列（会写飞书），权重和「导出 Excel」不是一个量级，不能并排放在数据堆里');
+  assert.match(ledger, /id="lnkSyncFromLedger"/, '移走后必须留指路牌，否则用户在台账页找不到同步入口');
+  /* 指路牌必须是纯跳转，不能顺手也做一次同步（那就又成两个入口了） */
+  const wire = HTML.slice(HTML.indexOf("document.getElementById('lnkSyncFromLedger')"));
+  assert.match(wire.slice(0, 140), /goTab\('sync'\)/);
+  assert.ok(!/cloudSync\(/.test(wire.slice(0, 140)), '指路牌不得自己发起同步');
+});
+
+test('阶段7：同步动作必须在同步页，且与「重新核对」的区别写在页面上', () => {
+  const sync = HTML.slice(HTML.indexOf('id="tab-sync"'), HTML.indexOf('</section>', HTML.indexOf('id="tab-sync"')));
+  assert.match(sync, /id="btnCloudSync"/, '真正的同步动作要归位到同步页');
+  assert.match(sync, /id="btnSyncRefresh"/, '只读比对也要在同一页，两者才可对比');
+  /* 两个动作的区别必须上屏：一个会写飞书、一个不会 —— 这是最容易点错的地方 */
+  assert.match(sync, /会写飞书/, '必须写明「立即同步」会写飞书');
+  assert.match(sync, /只读比对/, '必须写明「重新核对」是只读的');
+});
+
+test('阶段7：工具条必须按「这件事是什么」分组，而不是一长串平铺', () => {
+  const ledger = HTML.slice(HTML.indexOf('id="tab-ledger"'), HTML.indexOf('</section>', HTML.indexOf('id="tab-ledger"')));
+  const groups = (ledger.match(/class="toolbar__group"/g) || []).length;
+  assert.ok(groups >= 4, '台账工具条至少要分成 4 组（查找新增 / 维护动作 / Excel / 备份），实际 ' + groups);
+  /* Excel 与备份必须分开标注，不能共用一个「数据」 */
+  assert.match(ledger, /Excel 台账</, 'Excel 那一组要有自己的标签');
+  assert.match(ledger, /备份 \/ 合并</, '备份那一组要有自己的标签');
+  const css = HTML.slice(0, HTML.indexOf('</style>'));
+  assert.match(css, /\.toolbar__group \+ \.toolbar__group\{[^}]*border-left/, '组之间要有可见分隔，否则分组等于没分');
+});
+
+test('阶段7：内容差异必须显示「字段 + 本地值 + 飞书值」，并给出可执行动作', () => {
+  const s = fnSrc('dataConsistencyHtml');
+  assert.match(s, /t\.diffCount/, '必须展示内容差异条数');
+  assert.match(s, /d\.local/, '必须显示本地值');
+  assert.match(s, /d\.feishu/, '必须显示飞书值');
+  assert.match(s, /data-diff-keep-local/, '必须给出「推本地值→飞书」动作，否则看到了也没法收场');
+  assert.match(s, /RES_TABLES_FIELDS/, '字段名要翻成人看得懂的中文，不能只显示 loc/spec');
+  /* 推之前必须确认，且文案要说明会覆盖整行（不只那一列） */
+  const wire = HTML.slice(HTML.indexOf("box.querySelectorAll('[data-diff-keep-local]')"));
+  assert.match(wire.slice(0, 700), /confirm\(/, '覆盖飞书前必须二次确认');
+  assert.match(wire.slice(0, 700), /整条记录/, '必须说清是覆盖整行，不是只改那一列');
+});
+
+test('阶段7：核对必须发完整字段，否则比不出内容差异', () => {
+  const s = fnSrc('runReconcile');
+  assert.ok(!/RECONCILE_FIELDS/.test(s), '只发 1~3 个字段时，服务端根本没法比内容差异');
+  assert.match(s, /Object\.keys\(r \|\| \{\}\)/, '要发记录的完整字段（含空值保护的写法）');
+  assert.match(s, /RECONCILE_SKIP/, '体积大又不比对的列（图片链接）要能排除');
+});
