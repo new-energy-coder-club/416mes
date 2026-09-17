@@ -320,6 +320,35 @@ body.stocktake-on .stocktake-banner{display:block}
 .locate-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .locate-after{margin-top:8px;font-size:12px;color:var(--text-muted)}
 /* ============================================================
+   05 PAGES（阶段17）：摄像头浮层（ui优化.md §5.1）
+   视频 92vw / 最大 480px / 4:3；青色四角取景框 + 轻扫描线；
+   **打开失败在浮层内常驻显示**（不再只弹 alert）；识别成功先提示再关闭。
+   ============================================================ */
+.cam-overlay{display:none;position:fixed;inset:0;z-index:var(--z-overlay);
+  background:rgba(10,16,28,.92);flex-direction:column;align-items:center;justify-content:center;
+  gap:12px;padding:20px;padding-bottom:calc(20px + env(safe-area-inset-bottom,0))}
+.cam-stage{position:relative;width:min(92vw,480px);aspect-ratio:4/3;border-radius:var(--r-lg);
+  overflow:hidden;background:#000}
+.cam-stage video{width:100%;height:100%;object-fit:cover;display:block}
+.cam-frame{position:absolute;inset:0;pointer-events:none}
+.cam-corner{position:absolute;width:26px;height:26px;border:3px solid var(--cyan-ink)}
+.cam-corner--tl{top:12px;left:12px;border-right:none;border-bottom:none;border-radius:4px 0 0 0}
+.cam-corner--tr{top:12px;right:12px;border-left:none;border-bottom:none;border-radius:0 4px 0 0}
+.cam-corner--bl{bottom:12px;left:12px;border-right:none;border-top:none;border-radius:0 0 0 4px}
+.cam-corner--br{bottom:12px;right:12px;border-left:none;border-top:none;border-radius:0 0 4px 0}
+.cam-scanline{position:absolute;left:8%;right:8%;height:2px;top:12%;
+  background:linear-gradient(90deg,transparent,var(--cyan-ink),transparent);
+  animation:camScan 2.4s ease-in-out infinite}
+@keyframes camScan{0%{top:12%}50%{top:86%}100%{top:12%}}
+@media (prefers-reduced-motion:reduce){ .cam-scanline{animation:none;top:50%} }
+.cam-hint{color:#bfe0c8;font-size:13px;text-align:center;max-width:min(92vw,480px);line-height:1.6}
+.cam-err,.cam-detected{max-width:min(92vw,480px);padding:8px 12px;border-radius:var(--r-md);
+  font-size:13px;font-weight:600;line-height:1.5}
+.cam-err{background:var(--danger-bg);border-left:3px solid var(--danger-fg);color:var(--danger-fg)}
+.cam-err[hidden]{display:none}
+.cam-detected{background:var(--done-bg);border-left:3px solid var(--done-fg);color:var(--done-fg);
+  font-family:var(--font-mono);word-break:break-all}
+/* ============================================================
    05 PAGES（阶段16）：库存工单列表（ui优化.md §5.2）
    · 顶部状态摘要卡：五个状态各带数量，点击即筛选
    · 危险动作独立成块：原因用界面内文本框（不再 prompt）
@@ -1109,10 +1138,18 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       </p>
       <input class="scan-input" id="scanInput" placeholder="扫描或输入，如 MAT:GJ-SD-001 / WIP:LL20260909007，回车确认" autofocus>
       <button class="btn ghost mt-8" id="btnCam">📷 摄像头扫码</button>
-      <div id="camOverlay" style="display:none;position:fixed;inset:0;background:rgba(10,16,28,.92);z-index:99;flex-direction:column;align-items:center;justify-content:center;gap:10px;" role="dialog" aria-modal="true" aria-label="摄像头扫码">
-        <video id="camVideo" autoplay playsinline style="width:min(92vw,480px);border-radius:10px;background:#000;"></video>
-        <div class="hint" style="color:#bfe0c8">对准二维码（MAT:/LOC:/CTN:/WIP:/NEC:/ITM:/MAN:），识别后自动填入</div>
-        <button class="btn warn" id="btnCamClose">关闭摄像头</button>
+      <div id="camOverlay" class="cam-overlay" role="dialog" aria-modal="true" aria-label="摄像头扫码">
+        <div class="cam-stage">
+          <video id="camVideo" autoplay playsinline muted></video>
+          <div class="cam-frame" aria-hidden="true">
+            <span class="cam-corner cam-corner--tl"></span><span class="cam-corner cam-corner--tr"></span>
+            <span class="cam-corner cam-corner--bl"></span><span class="cam-corner cam-corner--br"></span>
+            <span class="cam-scanline"></span>
+          </div>
+        </div>
+        <p class="cam-hint" id="camHint">对准二维码（<b>MAT:</b> / <b>LOC:</b> / <b>CTN:</b> / <b>WIP:</b> / <b>NEC:</b> / <b>ITM:</b> / <b>MAN:</b>），识别后自动填入</p>
+        <div class="cam-err" id="camErr" role="alert" hidden></div>
+        <button class="btn danger" id="btnCamClose">关闭摄像头（Esc）</button>
       </div>
       <div class="stocktake-banner" id="stocktakeBanner">📦 <b>盘点模式已开启</b> —— 扫 <b>MAT:</b> 物料码后输入实盘数，点「确认盘点」才会写入库存流水；其他码型仍按原方式处理。<button type="button" class="btn small ghost" id="btnStocktakeOff" style="margin-left:8px">退出盘点模式</button></div>
       <label style="display:inline-flex;align-items:center;gap:6px;margin-top:10px;font-size:13px;cursor:pointer;"><input type="checkbox" id="chkStocktake"> 📦 盘点模式（扫物料码 → 输实盘数 → 自动生成盘点差异流水）</label>
@@ -4439,15 +4476,34 @@ document.getElementById('scanInput').addEventListener('keydown', e => {
 (function () {
   const overlay = document.getElementById('camOverlay');
   const video = document.getElementById('camVideo');
-  let stream = null, rafId = 0;
+  const hintEl = document.getElementById('camHint');
+  const errEl = document.getElementById('camErr');
+  const HINT_DEFAULT = hintEl.innerHTML;
+  let stream = null, rafId = 0, closing = false;
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  function stop() {
+
+  /** 阶段17（§5.1）：失败在浮层内常驻显示，而不是只弹一个 alert 就没了。
+      —— 浮层一关，用户就再也看不到失败原因。 */
+  function showErr(msg) {
+    errEl.textContent = msg;
+    errEl.hidden = false;
+    // 失败时同样把焦点移入浮层：否则键盘用户会停在浮层外，读屏器也不播报 role=alert
+    requestAnimationFrame(() => { const c = document.getElementById('btnCamClose'); if (c) c.focus(); });
+  }
+  function clearErr() { errEl.hidden = true; errEl.textContent = ''; }
+
+  function stop(returnFocus) {
     cancelAnimationFrame(rafId);
     if (stream) stream.getTracks().forEach(t => t.stop());
-    stream = null; overlay.style.display = 'none';
-    requestAnimationFrame(() => { const b = document.getElementById('btnCam'); if (b) b.focus(); });
+    stream = null;
+    overlay.style.display = 'none';
+    closing = false;
+    hintEl.innerHTML = HINT_DEFAULT;
+    clearErr();
+    if (returnFocus !== false) requestAnimationFrame(() => { const b = document.getElementById('btnCam'); if (b) b.focus(); });
   }
+
   function tick() {
     if (!stream) return;
     if (video.readyState === video.HAVE_ENOUGH_DATA) {
@@ -4456,16 +4512,28 @@ document.getElementById('scanInput').addEventListener('keydown', e => {
       const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const q = window.jsQR && jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
       if (q && q.data) {
-        stop();
-        handleScan(q.data);
+        // 阶段17（§5.1）：先在浮层底部提示「已识别 …」，再关闭并把结果交给 handleScan()
+        closing = true;
+        cancelAnimationFrame(rafId);
+        if (stream) stream.getTracks().forEach(t => t.stop());
+        stream = null;
+        hintEl.innerHTML = '✓ 已识别 <b>' + esc(q.data) + '</b>，正在填入…';
+        clearErr();
+        setTimeout(() => { stop(); handleScan(q.data); }, 520);
         return;
       }
     }
     rafId = requestAnimationFrame(tick);
   }
+
   document.getElementById('btnCam').addEventListener('click', async () => {
-    if (!window.jsQR) { alert('摄像头组件未加载（jsqr.min.js 缺失）'); return; }
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { alert('当前浏览器不支持摄像头（需 HTTPS 或 localhost）'); return; }
+    clearErr();
+    if (!window.jsQR) { overlay.style.display = 'flex'; showErr('摄像头组件未加载（jsqr.min.js 缺失）。请改用扫码枪或手动输入。'); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      overlay.style.display = 'flex';
+      showErr('当前浏览器不支持摄像头（需要 HTTPS 或 localhost）。请改用扫码枪或手动输入。');
+      return;
+    }
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
       video.srcObject = stream;
@@ -4473,9 +4541,20 @@ document.getElementById('scanInput').addEventListener('keydown', e => {
       // 阶段13（§7.3）：对话框打开时把焦点移入，关闭时归还给触发按钮
       requestAnimationFrame(() => { const c = document.getElementById('btnCamClose'); if (c) c.focus(); });
       tick();
-    } catch (e) { alert('无法打开摄像头：' + e.message); }
+    } catch (e) {
+      overlay.style.display = 'flex';
+      showErr('无法打开摄像头：' + (e && e.message ? e.message : e) + '。请检查浏览器权限后重试。');
+    }
   });
-  document.getElementById('btnCamClose').addEventListener('click', stop);
+
+  document.getElementById('btnCamClose').addEventListener('click', () => stop());
+  // 阶段17（§5.1）：ESC 关闭 + 切页时停流（否则摄像头会一直在后台亮着）
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && overlay.style.display && overlay.style.display !== 'none') { e.preventDefault(); stop(); }
+  });
+  document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('click', () => {
+    if (overlay.style.display && overlay.style.display !== 'none') stop(false);   // 切页不抢焦点
+  }));
 })();
 
 document.getElementById('selOperator').addEventListener('change', e => {
