@@ -280,6 +280,29 @@ table.grid tr:hover td{background:#f7fafd;}
   font-size:12px;color:var(--text-muted)}
 .status-bar>span{white-space:nowrap}
 .status-bar .sb-warn{color:var(--doing-fg);font-weight:600}
+/* ---------- 阶段4：资源档案页 ---------- */
+.res-typebar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.res-type{appearance:none;border:1px solid var(--line);background:transparent;cursor:pointer;
+  border-radius:999px;padding:6px 16px;font:inherit;font-size:13px;color:var(--text-muted);white-space:nowrap}
+.res-type:hover{border-color:var(--brand,#1a8fb0);color:var(--brand,#1a8fb0)}
+.res-type[aria-selected="true"]{background:var(--brand,#1a8fb0);border-color:var(--brand,#1a8fb0);color:#fff;font-weight:700}
+.res-type:focus-visible{outline:2px solid var(--brand,#1a8fb0);outline-offset:2px}
+.res-type__n{opacity:.75;font-size:11.5px;margin-left:4px}
+.res-editor{border:1px solid var(--brand,#1a8fb0);border-radius:10px;padding:12px;margin-bottom:10px;
+  background:var(--bg-subtle,#f7f8fa)}
+.res-editor h3{margin:0 0 8px;font-size:14px}
+.res-editor .form-row{margin-bottom:8px}
+.res-editor .form-row label{min-width:78px}
+.res-batch>summary{cursor:pointer}
+.res-sync{font-size:11.5px;white-space:nowrap}
+.res-sync--ok{color:#2d9d4f}
+.res-sync--pending{color:#c98a00;font-weight:700}
+.res-sync--unknown{color:#8892a2}
+.res-row-actions{display:flex;gap:6px;flex-wrap:wrap}
+@media (max-width:560px){
+  .res-type{flex:1;padding:6px 8px;font-size:12px}
+  .res-row-actions .btn{flex:1}
+}
 /* ---------- 阶段2（修订）：同步与状态独立页 ---------- */
 .sync-grid{display:grid;gap:10px}
 .sync-grid>.panel{margin:0}
@@ -1015,7 +1038,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   <div class="nav-group">台账与建档</div>
   <button data-tab="ledger" class="on" data-primary="1">物料台账</button>
   <button data-tab="txn" data-label="库存流水" data-short="流水">库存流水</button>
-  <button data-tab="gen" data-label="批量建档与编码" data-short="建档编码">批量建档与编码</button>
+  <button data-tab="res" data-label="资源档案" data-short="档案">资源档案</button>
   <button data-tab="member">成员名录</button>
   <div class="nav-group">标签与制作</div>
   <button data-tab="label" data-primary="1">标签打印</button>
@@ -1217,8 +1240,44 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       </details>
     </div>
   </section>
-  <!-- ========== 编码生成 ========== -->
-  <section class="tab" id="tab-gen">
+  <!-- ========== 阶段4：资源档案页（M3） ==========
+       方案要求：库位 | 容器 | 物品 | 手册 四段，每段都有全量列表 / 搜索 / 新增 / 编辑 /
+       删除 / 业务键详情 / 当前同步状态 / 标签打印跳转；并吸收原 gen 页的建档功能，
+       避免同一对象有两个入口（原来「建档」在 gen、「删除」在 label 的危险区，两处都不完整）。
+
+       关键修复（用户视角的真实缺口）：
+         · 这四张表原本**没有任何编辑入口** —— 容器建好类型/规格就写死，库位改说明只能删了重建；
+           label 页的「记录列表」是只读文本，没有 data-k 控件。
+         · 容器创建时 loc 恒为 ''，网页端从不写「当前库位码」——
+           而容器放错位置正是最常见要改的事。
+       所以本页的核心新增是**编辑**：改名/改类型/改规格/改所在库位，
+       写本地 → outbox → 同步链，刷新后仍在。 -->
+  <section class="tab" id="tab-res">
+    <p class="page-purpose"><span>资源档案：库位 · 容器 · 物品 · 手册 的建档、改名、改位置与作废</span><span class="impact impact--none">本页不改库存</span><span class="hint">标签编码只在<b>物理载体报废</b>时作废；正常改名/换货位请用「编辑」，不要删记录</span></p>
+    <div class="res-typebar" id="resTypeBar" role="tablist" aria-label="资源类型">
+      <button type="button" class="res-type" data-restype="locations" role="tab">库位</button>
+      <button type="button" class="res-type" data-restype="containers" role="tab">容器</button>
+      <button type="button" class="res-type" data-restype="items" role="tab">物品</button>
+      <button type="button" class="res-type" data-restype="manuals" role="tab">手册</button>
+    </div>
+    <div class="panel">
+      <div class="toolbar">
+        <input type="search" id="resSearch" class="field field--md" placeholder="🔍 筛选：编码 / 名称 / 类型 / 库位">
+        <button class="btn small" id="btnResAdd">＋ 新增</button>
+        <button class="btn small ghost" id="btnResRefresh">刷新</button>
+        <span class="hint" id="resSyncHint">—</span>
+      </div>
+      <div id="resEditorBox" hidden></div>
+      <div class="table-scroll">
+        <table class="grid grid-dense" id="resTable" aria-label="资源档案列表"><thead></thead><tbody></tbody></table>
+      </div>
+      <div class="toolbar mt-8">
+        <span class="hint" id="resSummary">—</span>
+      </div>
+    </div>
+    <details class="panel res-batch">
+      <summary class="hint-line">📦 批量建档与编码（空位提前打码）</summary>
+      <p class="hint mt-6">批量生成只负责<b>产生编码</b>；生成后在上方列表里改名、改类型、改位置。</p>
     <p class="page-purpose"><span>主数据建档 / <b>空位提前打码</b>：库位 · 模块区 · 容器 · 物品 · 手册（建单已移至「库存工单」页）</span><span class="impact impact--none">本页不改库存</span></p>
     <div class="gen-grid">
       <div class="gen-col">
@@ -1314,6 +1373,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
           <button class="btn danger" id="btnWipe">清空全部数据</button>
         </div>
       </div>
+    </details>
     </details>
   </section>
   <!-- ========== 库存工单（Phase 3 管理页） ========== -->
@@ -2460,6 +2520,7 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('cl
   if (b.dataset.tab === 'design') { renderDesign(); renderGalAlbums(); }
   if (b.dataset.tab === 'member') { renderMemberTagBar(); renderMembers(); }
   if (b.dataset.tab === 'sync') renderSyncTab();   // 阶段2（修订）：进同步页时把四块面板都刷新一遍
+  if (b.dataset.tab === 'res') renderRes();   // 阶段4：资源档案，数据可能在别的页签被改过
   renderStatusBar();
   renderStatusDockSum();   // 阶段2（修订）：状态条入口跟着页签走，异常在任何页都看得见
 }));
@@ -4522,6 +4583,9 @@ function applyHash() {
   const h = location.hash.slice(1);
   if (!h) return false;
   let parts = h.split('?');
+  /* 阶段4：gen 页已并入资源档案，旧深链 #gen 自动跳 #res
+     （home.html 的建档入口卡片仍指向 #gen，静默失效等于功能消失）。 */
+  if (parts[0] === 'gen') { parts = ['res']; history.replaceState(null, '', '#res'); }
   /* 阶段3：旧深链兼容 —— 流水已独立成页，#ledger?view=transactions 自动跳到 #txn。
      home.html 的既有链接与用户收藏的书签都还在用旧形式，静默失效等于功能消失。 */
   if (parts[0] === 'ledger' && parts[1] && new URLSearchParams(parts[1]).get('view') === 'transactions') {
@@ -5232,6 +5296,7 @@ function renderStatusBar() {
   const counts = {
     ledger: '物料 ' + state.materials.length + ' · 库位 ' + state.locations.length + ' · 容器 ' + state.containers.length,
     txn: '流水 ' + state.transactions.length + ' 条（只增不改）',
+    res: '库位 ' + state.locations.length + ' · 容器 ' + state.containers.length + ' · 物品 ' + state.items.length + ' · 手册 ' + state.manuals.length,
     sync: '同步与状态：一致性 / 队列 / 冲突 / 健康 / 日志',
     member: '成员 ' + state.members.length + ' 人',
     label: '标签类型见上方按钮',
@@ -5633,6 +5698,302 @@ function seedDemoCodes() {
      本地有、飞书没有、上次同步时有   → 飞书侧删掉了 → 本地也删
      本地有、飞书没有、上次同步时没有 → 本地新建还没推上去 → 保留并待推送
    这里只负责把差异呈现出来 + 给一键入口，绝不静默批量写生产库。 */
+/* ================= 阶段4：资源档案（库位 / 容器 / 物品 / 手册）=================
+   这四张表原本**只有「生成」没有「维护」**：容器建好类型/规格就写死，
+   库位想改说明只能删了重建（而删记录会作废标签编码，代价很大）。
+   容器创建时 loc 恒为 ''，网页端从不写「当前库位码」—— 而容器放错位置正是最常见要改的事。
+   本模块补上：列表 / 筛选 / 新增 / 编辑 / 删除（带影响范围与同步状态）/ 详情 / 打印跳转。 */
+const RES_TYPES = {
+  locations: {
+    label: '库位', key: 'code', tab: 'loc',
+    cols: [['code', '库位码'], ['kind', '类型'], ['desc', '说明']],
+    fields: [
+      { k: 'kind', label: '类型', type: 'select', opts: ['货架库位', '工位收纳格', '开放区块位', '模块区'] },
+      { k: 'desc', label: '说明', type: 'text', ph: '如：A区角钢货架 第2层 第3位' }
+    ],
+    blank: () => ({ kind: '货架库位', desc: '' }),
+    search: r => [r.code, r.kind, r.desc]
+  },
+  containers: {
+    label: '容器', key: 'code', tab: 'ctn',
+    cols: [['code', '容器码'], ['type', '类型'], ['spec', '规格'], ['loc', '当前库位码']],
+    fields: [
+      { k: 'type', label: '类型', type: 'text', ph: '如：A4四抽收纳盒' },
+      { k: 'spec', label: '规格', type: 'text', ph: '如：32×25×34cm' },
+      { k: 'loc', label: '当前库位码', type: 'loc', ph: '如：B-01-02-03', hint: '容器放在哪个库位——这是最常要改的一项' }
+    ],
+    blank: () => ({ type: '', spec: '', loc: '' }),
+    search: r => [r.code, r.type, r.spec, r.loc]
+  },
+  items: {
+    label: '物品', key: 'code', tab: 'itm',
+    cols: [['code', '物品码'], ['name', '名称'], ['spec', '规格/型号'], ['loc', '库位']],
+    fields: [
+      { k: 'name', label: '名称', type: 'text', ph: '如：电烙铁' },
+      { k: 'spec', label: '规格/型号', type: 'text', ph: '如：60W 可调温' },
+      { k: 'loc', label: '库位', type: 'loc', ph: '如：W01-G01' }
+    ],
+    blank: () => ({ name: '', spec: '', loc: '' }),
+    search: r => [r.code, r.name, r.spec, r.loc]
+  },
+  manuals: {
+    label: '手册', key: 'code', tab: 'man',
+    cols: [['code', '手册码'], ['name', '名称'], ['ver', '版本'], ['loc', '库位']],
+    fields: [
+      { k: 'name', label: '名称', type: 'text', ph: '如：NEC26 活动手册' },
+      { k: 'ver', label: '版本', type: 'text', ph: '如：V1.0' },
+      { k: 'loc', label: '库位', type: 'loc', ph: '如：B-01-01-02' }
+    ],
+    blank: () => ({ name: '', ver: '', loc: '' }),
+    search: r => [r.code, r.name, r.ver, r.loc]
+  }
+};
+let resType = 'locations';
+let resEditing = null;      // 正在编辑的记录（null = 未开编辑器）
+
+/** 该记录当前的同步状态（用户视角三态：已同步 / 待推送 / 来历未知）。
+ *  注意 state.__syncedKeys[table] 与 _pendingPush[table] 都是**数组**（见写入点），
+ *  不是 Set —— 用 .has()/.delete() 会静默失效，把每条都误判成「来历未知」。 */
+function resSyncState(table, rec) {
+  const idf = TABLE_KEY_FIELD[table];
+  const key = String(rec[idf]);
+  const missing = (state.__censusMissing && state.__censusMissing[table] && state.__censusMissing[table].keys) || [];
+  if (missing.map(String).includes(key)) return { cls: 'unknown', text: '飞书侧已不存在' };
+  const synced = (state.__syncedKeys && state.__syncedKeys[table]) || [];
+  if (synced.map(String).includes(key)) return { cls: 'ok', text: '已同步' };
+  const pend = (_pendingPush && _pendingPush[table]) || [];
+  if (pend.some(r => String(r && r[idf]) === key)) return { cls: 'pending', text: '待推送' };
+  return { cls: 'unknown', text: '来历未知（未确认同步）' };
+}
+
+/** 删除影响范围：这四张表被谁引用（库位/容器被物料引用，删了会让物料指向空位） */
+function resImpact(table, rec) {
+  const key = String(rec[TABLE_KEY_FIELD[table]]);
+  const out = [];
+  if (table === 'locations') {
+    const ms = state.materials.filter(m => String(m.loc || '') === key);
+    if (ms.length) out.push(ms.length + ' 个物料的「当前库位码」指向它：' + ms.slice(0, 5).map(m => m.code).join('、') + (ms.length > 5 ? ' 等' : ''));
+    const cs = state.containers.filter(c => String(c.loc || '') === key);
+    if (cs.length) out.push(cs.length + ' 个容器放在这里：' + cs.slice(0, 5).map(c => c.code).join('、') + (cs.length > 5 ? ' 等' : ''));
+  } else if (table === 'containers') {
+    const ms = state.materials.filter(m => String(m.container || '') === key);
+    if (ms.length) out.push(ms.length + ' 个物料装在这个容器里：' + ms.slice(0, 5).map(m => m.code).join('、') + (ms.length > 5 ? ' 等' : ''));
+  }
+  return out;
+}
+
+function renderRes() {
+  const cfg = RES_TYPES[resType];
+  if (!cfg) return;
+  /* 类型条 */
+  document.querySelectorAll('#resTypeBar .res-type').forEach(b => {
+    const t = b.dataset.restype;
+    const n = (state[t] || []).length;
+    b.setAttribute('aria-selected', t === resType ? 'true' : 'false');
+    b.innerHTML = RES_TYPES[t].label + '<span class="res-type__n">' + n + '</span>';
+  });
+  /* 列表 */
+  const q = (document.getElementById('resSearch') || {}).value || '';
+  const k = q.trim().toLowerCase();
+  const all = state[resType] || [];
+  const rows = all.filter(r => !k || cfg.search(r).some(v => String(v || '').toLowerCase().includes(k)));
+  const thead = document.querySelector('#resTable thead');
+  const tbody = document.querySelector('#resTable tbody');
+  thead.innerHTML = '<tr>' + cfg.cols.map(c => '<th>' + esc(c[1]) + '</th>').join('') +
+    '<th style="width:150px">同步状态</th><th style="width:230px">操作</th></tr>';
+  tbody.innerHTML = rows.map(r => {
+    const key = String(r[cfg.key]);
+    const sy = resSyncState(resType, r);
+    return '<tr>' + cfg.cols.map((c, i) => {
+      const v = r[c[0]];
+      return '<td data-th="' + esc(c[1]) + '">' +
+        (i === 0 ? '<code>' + esc(v) + '</code>' : (esc(v) || '<span class="hint">—</span>')) + '</td>';
+    }).join('') +
+      '<td data-th="同步状态"><span class="res-sync res-sync--' + sy.cls + '">' + sy.text + '</span></td>' +
+      '<td data-th="操作"><span class="res-row-actions">' +
+      '<button class="btn tiny ghost" data-res-detail="' + esc(key) + '">详情</button>' +
+      '<button class="btn tiny ghost" data-res-edit="' + esc(key) + '">编辑</button>' +
+      '<button class="btn tiny ghost" data-res-print="' + esc(key) + '">打印</button>' +
+      '<button class="btn tiny ghost" data-res-del="' + esc(key) + '">作废删除</button>' +
+      '</span></td></tr>';
+  }).join('') || '<tr><td colspan="' + (cfg.cols.length + 2) + '" class="empty-row">（没有符合条件的' + cfg.label + '）</td></tr>';
+  const sum = document.getElementById('resSummary');
+  if (sum) sum.textContent = '共 ' + all.length + ' 条' + (k ? ' · 筛选出 ' + rows.length + ' 条' : '') +
+    ' · 来源：飞书「' + cfg.label + '」表' + (k && !rows.length ? ' · 换个关键词试试，或点「＋ 新增」' : '');
+  const hint = document.getElementById('resSyncHint');
+  if (hint) {
+    const pend = rows.filter(r => resSyncState(resType, r).cls !== 'ok').length;
+    hint.textContent = pend ? ('⚠ 其中 ' + pend + ' 条未确认同步（待推送/来历未知）') : '本页记录均已同步到飞书';
+    hint.className = pend ? 'hint text-danger' : 'hint';
+  }
+}
+
+function resOpenEditor(key) {
+  const cfg = RES_TYPES[resType];
+  const table = resType;
+  const rec = key == null ? null : (state[table] || []).find(r => String(r[cfg.key]) === String(key));
+  if (key != null && !rec) { alert('记录已不存在，请刷新。'); renderRes(); return; }
+  resEditing = rec ? { mode: 'edit', table: table, key: String(rec[cfg.key]) } : { mode: 'add', table: table };
+  const box = document.getElementById('resEditorBox');
+  box.hidden = false;
+  box.innerHTML = '<div class="res-editor"><h3>' + (rec ? '编辑' + cfg.label + ' <code>' + esc(rec[cfg.key]) + '</code>'
+    : '新增' + cfg.label) + '</h3>' +
+    cfg.fields.map(f => {
+      const v = rec ? (rec[f.k] == null ? '' : rec[f.k]) : (cfg.blank()[f.k] || '');
+      const input = f.type === 'select'
+        ? '<select id="resF_' + f.k + '">' + f.opts.map(o => '<option' + (String(v) === o ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select>'
+        : '<input type="text" id="resF_' + f.k + '" value="' + esc(v) + '"' + (f.ph ? ' placeholder="' + esc(f.ph) + '"' : '') + ' list="resLocList">';
+      return '<div class="form-row"><label>' + esc(f.label) + '</label>' + input +
+        (f.hint ? '<span class="hint">' + esc(f.hint) + '</span>' : '') + '</div>';
+    }).join('') +
+    '<datalist id="resLocList">' + (state.locations || []).map(l => '<option value="' + esc(l.code) + '">').join('') + '</datalist>' +
+    '<div class="toolbar mt-8"><button class="btn small" id="btnResSave">保存</button>' +
+    '<button class="btn small ghost" id="btnResCancel">取消</button>' +
+    '<span class="hint">保存后先写本机，再进离线队列同步到飞书；刷新不会丢。</span></div></div>';
+  document.getElementById('btnResCancel').addEventListener('click', () => { resEditing = null; box.hidden = true; box.innerHTML = ''; });
+  document.getElementById('btnResSave').addEventListener('click', () => resSave());
+  const first = box.querySelector('input,select');
+  if (first) first.focus();
+}
+
+function resSave() {
+  if (!resEditing) return;
+  const cfg = RES_TYPES[resType];
+  const table = resEditing.table;
+  if (table !== resType) { alert('类型已切换，请重新打开编辑。'); return; }
+  const patch = {};
+  for (const f of cfg.fields) {
+    const el = document.getElementById('resF_' + f.k);
+    patch[f.k] = el ? String(el.value).trim() : '';
+  }
+  let pushed = null, msg = '';
+  if (resEditing.mode === 'add') {
+    /* 新增：业务键自动编（与批量建档同一套规则），避免用户瞎编导致和标签编码体系冲突 */
+    const pre = table === 'locations' ? 'B' : table === 'containers' ? 'A4SH' : table === 'items' ? 'WP' : 'SC';
+    const code = nextCode(state[table] || [], pre);
+    const rec = Object.assign({ code }, patch);
+    state[table].push(rec);
+    pushed = rec; msg = '📦 资源档案新增：' + cfg.label + ' ' + code;
+  } else {
+    const rec = (state[table] || []).find(r => String(r[cfg.key]) === resEditing.key);
+    if (!rec) { alert('记录已不存在。'); return; }
+    const before = {};
+    cfg.fields.forEach(f => { before[f.k] = rec[f.k]; });
+    Object.assign(rec, patch);
+    pushed = rec;
+    msg = '📦 资源档案编辑：' + cfg.label + ' ' + resEditing.key + '（' +
+      cfg.fields.map(f => f.label + ' ' + (before[f.k] || '空') + '→' + (patch[f.k] || '空')).join('；') + '）';
+  }
+  /* 本机写入是**先**做的，也是用户看到的真相：所以先 save() + 关编辑器 + 重渲染，再 fire-and-forget 推送。
+     绝不 await 推送：fsPush 会走网络往返 + 重试（失败时还要写队列），离线时要等超时，
+     期间编辑器一直开着、列表不刷新——用户看到的就是「点了保存没反应」，而本地其实早就存好了。
+     全站其它调用点（如批量建档）也都是不 await 的。 */
+  save();
+  resEditing = null;
+  document.getElementById('resEditorBox').hidden = true;
+  document.getElementById('resEditorBox').innerHTML = '';
+  renderRes(); renderLabelTab();
+  log(msg);
+  fsPushRecord(table, [pushed]);
+}
+
+/** 作废删除：显示影响范围 + 同步状态 → 二次确认 → 写凭据 → 删本地 → 推飞书删除 */
+async function resDelete(key) {
+  const cfg = RES_TYPES[resType], table = resType;
+  const rec = (state[table] || []).find(r => String(r[cfg.key]) === String(key));
+  if (!rec) { alert('记录已不存在，请刷新。'); renderRes(); return; }
+  const impact = resImpact(table, rec);
+  const sy = resSyncState(table, rec);
+  const lines = ['作废删除' + cfg.label + '「' + key + '」？', ''];
+  lines.push('同步状态：' + sy.text);
+  if (impact.length) {
+    lines.push('', '⚠ 影响范围：');
+    impact.forEach(x => lines.push('  · ' + x));
+    lines.push('', '删除后这些引用会指向一个不存在的编码（扫描会提示无法定位）。');
+  } else {
+    lines.push('', '影响范围：没有被任何记录引用。');
+  }
+  lines.push('', '运营规则：标签编码只在物理载体报废时作废；只是改名或换货位请用「编辑」。',
+    '', '会同时删除飞书里这一条，并写删除凭据留痕。');
+  if (!confirm(lines.join('\n'))) return;
+  /* 先写凭据：写失败就零变更放弃（主数据删除都要能追溯）。
+     fsJournalDeletion 返回 {ok,count,error} 且**不抛异常** —— 必须检查返回值。 */
+  const j = await fsJournalDeletion([{ table: table, key: String(key) }], '资源档案作废删除', 'res-delete');
+  if (!j || !j.ok) { alert('删除凭据写入失败，已放弃删除（数据未改动）：' + ((j && j.error) || '未知原因')); return; }
+  state[table] = (state[table] || []).filter(r => String(r[cfg.key]) !== String(key));
+  /* __syncedKeys[table] 是**数组**，照 deleteOneLocalRecord 的既有写法过滤；
+     写成 .delete() 会因为数组没有该方法而静默跳过（守卫恒为假 = 死代码），
+     结果是删掉的记录仍留在「已确认」名单里，下次对账把它当成「飞书缺失」反复报警。 */
+  state.__syncedKeys = state.__syncedKeys || {};
+  state.__syncedKeys[table] = (state.__syncedKeys[table] || []).filter(k => String(k) !== String(key));
+  if (_pendingPush && _pendingPush[table]) {
+    _pendingPush[table] = _pendingPush[table].filter(r => String(r && r[cfg.key]) !== String(key));
+    if (!_pendingPush[table].length) delete _pendingPush[table];
+  }
+  if (_censusPending[table]) {
+    _censusPending[table].keys = (_censusPending[table].keys || []).filter(k => String(k) !== String(key));
+    if (!_censusPending[table].keys.length) delete _censusPending[table];
+  }
+  try { const ob = await fsOutboxAsync(); await ob.removeRecord(table, key); } catch (e) { }
+  save();
+  fsPushDelete(table, [String(key)]);   // 飞书侧同步删除（旧版删了飞书还在，同步又拉回来）
+  log('🗑 资源档案作废删除：' + cfg.label + ' ' + key + (impact.length ? '（影响 ' + impact.length + ' 处引用）' : ''));
+  renderRes(); renderLabelTab();
+  alert('已删除本机记录并提交飞书删除。' + (impact.length ? '\n\n注意：仍有引用指向 ' + key + '，请到物料台账把库位/容器改成新的编码。' : ''));
+}
+
+/** 跳到标签打印页并预选这条记录（资源档案 → 打印的唯一直通路径） */
+function resPrintJump(key) {
+  const cfg = RES_TYPES[resType];
+  curType = cfg.tab;
+  const list = recordsOf(curType);
+  const idx = list.findIndex(r => String(r[cfg.key]) === String(key));
+  sel[curType].clear();
+  if (idx >= 0) sel[curType].add(idx);
+  const rf = document.getElementById('recFilter');
+  if (rf) rf.value = '';
+  labelFilter = '';
+  renderLabelTab();
+  goTab('label');
+}
+
+/* 事件接线 */
+(() => {
+  const bar = document.getElementById('resTypeBar');
+  if (bar) bar.querySelectorAll('.res-type').forEach(b => b.addEventListener('click', () => {
+    resType = b.dataset.restype;
+    resEditing = null;
+    const box = document.getElementById('resEditorBox');
+    if (box) { box.hidden = true; box.innerHTML = ''; }
+    const si = document.getElementById('resSearch'); if (si) si.value = '';
+    renderRes();
+  }));
+  const si = document.getElementById('resSearch');
+  if (si) si.addEventListener('input', renderRes);
+  const add = document.getElementById('btnResAdd');
+  if (add) add.addEventListener('click', () => resOpenEditor(null));
+  const rf = document.getElementById('btnResRefresh');
+  if (rf) rf.addEventListener('click', () => { renderRes(); renderLabelTab(); });
+  const tb = document.getElementById('resTable');
+  if (tb) tb.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const d = b.dataset;
+    if (d.resEdit) resOpenEditor(d.resEdit);
+    else if (d.resDel) resDelete(d.resDel);
+    else if (d.resPrint) resPrintJump(d.resPrint);
+    else if (d.resDetail) {
+      const cfg = RES_TYPES[resType];
+      const r = (state[resType] || []).find(x => String(x[cfg.key]) === String(d.resDetail));
+      if (!r) { alert('记录已不存在。'); renderRes(); return; }
+      const sy = resSyncState(resType, r);
+      const imp = resImpact(resType, r);
+      alert(cfg.label + '详情\n\n' + Object.keys(r).map(k => k + '：' + (r[k] == null ? '' : r[k])).join('\n') +
+        '\n\n同步状态：' + sy.text + '\n来源：飞书「' + cfg.label + '」表' +
+        (imp.length ? '\n\n被引用：\n' + imp.map(x => '· ' + x).join('\n') : '\n\n没有被任何记录引用'));
+    }
+  });
+})();
+
 const TABLE_LABEL = { materials: '物料台账', locations: '库位', containers: '容器', members: '人员', items: '物品', manuals: '手册', workorders: '工单记录', transactions: '库存流水' };
 /** 每张表的业务主键字段名（必须与 outbox.js DEFAULT_TABLES / mes-core MERGE_TABLES 一致） */
 const TABLE_KEY_FIELD = { materials: 'code', locations: 'code', containers: 'code', members: 'code', items: 'code', manuals: 'code', workorders: 'code', transactions: 'seq' };
@@ -5676,8 +6037,9 @@ async function deleteOneLocalRecord(table, key) {
   if (!rec) return { ok: false, error: '记录已不存在，请重新核对' };
   if (isProtectedLocalDelete(table, rec)) return { ok: false, error: '已执行/已取消工单不能直接删除本地，请先处理业务状态' };
   /* 先写删除凭据；写失败就不动数据。 */
-  try { await fsJournalDeletion([{ table, key: String(key) }], '人工裁决：仅删除本地记录', 'reconcile-local-delete'); }
-  catch (e) { return { ok: false, error: '删除凭据写入失败：' + e.message }; }
+  /* 必须检查返回值：fsJournalDeletion 不抛异常（内部已 catch），只写 try/catch 是抓不到的。 */
+  const jr = await fsJournalDeletion([{ table, key: String(key) }], '人工裁决：仅删除本地记录', 'reconcile-local-delete');
+  if (!jr || !jr.ok) return { ok: false, error: '删除凭据写入失败：' + ((jr && jr.error) || '') };
   const before = (state[table] || []).length;
   state[table] = (state[table] || []).filter(r => String(r && r[idf]) !== String(key));
   if (state[table].length === before) return { ok: false, error: '记录已不存在，请重新核对' };
@@ -6069,10 +6431,11 @@ function renderAlignBox() {
     });
     _censusPending = {};
     persistCensusUiState();
-    await fsJournalDeletion(journal, '人工确认：飞书侧已不存在', 'census-confirm');
+    const jc = await fsJournalDeletion(journal, '人工确认：飞书侧已不存在', 'census-confirm');
     save(); renderLedger(); renderTxns(); renderMembers(); renderWip(); renderNec(); renderAlignBox();
     await runReconcile();
-    log('🗑️ 人工确认删除 ' + n + ' 条（飞书侧已不存在），已写入删除凭据');
+    log('🗑️ 人工确认删除 ' + n + ' 条（飞书侧已不存在）' +
+      (jc && jc.ok ? '，已写入删除凭据' : '，⚠️ 删除凭据写入失败，这次删除无法追溯'));
   });
   const rb = document.getElementById('btnRepushBlocked');
   if (rb) rb.addEventListener('click', async () => {
@@ -6522,7 +6885,7 @@ async function fixTxnSeqHighWater() {
   const j = await fsJournalDeletion(
     removable.map(t => ({ table: 'transactions', key: t.seq })),
     '\u6e05\u7406\u5b64\u60ac\u5927\u53f7\u6d41\u6c34\u5e76\u56de\u843d\u5e8f\u53f7\u9ad8\u6c34\u4f4d', 'txnseq-outlier-cleanup');
-  if (j && j.ok === false) { alert('\u51ed\u636e\u5199\u5165\u5931\u8d25\uff0c\u5df2\u653e\u5f03\u6e05\u7406\uff1a' + (j.error || '\u672a\u77e5\u539f\u56e0')); return; }
+  if (!j || !j.ok) { alert('\u51ed\u636e\u5199\u5165\u5931\u8d25\uff0c\u5df2\u653e\u5f03\u6e05\u7406\uff1a' + (j.error || '\u672a\u77e5\u539f\u56e0')); return; }
 
   const drop = new Set(removable.map(t => String(t.seq)));
   state.transactions = state.transactions.filter(t => !drop.has(String(t && t.seq)));
@@ -6790,8 +7153,12 @@ async function fsShowDeletionJournal() {
   log('导出删除凭据 ' + rows.length + ' 批');
 }
 async function fsJournalDeletion(entries, reason, source) {
+  /* 返回 {ok, count, error}。
+     **历史坑**：旧实现把异常吞掉并 return 0，于是调用方无论写 `if (j.ok === false)`
+     还是 `try { await ... } catch` 都永远不触发 —— 「凭据写失败就零变更」这条
+     安全保证实际上是假的（删除照做，只是没留痕）。现在如实返回 ok:false。 */
   const list = (Array.isArray(entries) ? entries : [entries]).filter(x => x && x.table && x.key != null);
-  if (!list.length) return 0;
+  if (!list.length) return { ok: true, count: 0 };
   if (!localStore) { log('ℹ️ 无 IndexedDB，本次删除未留凭据：' + list.length + ' 条'); return 0; }
   const key = String(Date.now()).padStart(16, '0') + '-' + Math.random().toString(36).slice(2, 8);
   try {
@@ -6806,10 +7173,10 @@ async function fsJournalDeletion(entries, reason, source) {
       for (const k of stale) { try { await localStore.del('deletionJournal', k); } catch (e) { } }
     }
     await fsRefreshDeletionJournalSummary();
-    return list.length;
+    return { ok: true, count: list.length };
   } catch (e) {
     log('⚠️ 删除凭据写入失败（这次删除将无法追溯）：' + e.message);
-    return 0;
+    return { ok: false, count: 0, error: e.message };
   }
 }
 
@@ -7928,7 +8295,7 @@ function renderDataStoreHint() {
   if (c) c.addEventListener('click', () => box.remove());
 }
 
-load(); restoreSyncUiState(); renderDataStoreHint(); renderLedger(); refreshMatDatalist(); refreshMemberDatalist(); renderNec(); renderOperators(); renderTxns(); renderWip(); renderCtxBar(); renderStatusBar();
+load(); restoreSyncUiState(); renderDataStoreHint(); renderLedger(); renderRes(); refreshMatDatalist(); refreshMemberDatalist(); renderNec(); renderOperators(); renderTxns(); renderWip(); renderCtxBar(); renderStatusBar();
 // 阶段13：为初始当前页签补 aria-current（深链进入时也要正确）
 (function () { const on = document.querySelector('nav.tabs button.on'); if (on) on.setAttribute('aria-current', 'page'); })();
 syncNavLabels();

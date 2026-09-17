@@ -210,7 +210,9 @@ test('清理孤悬流水必须先写凭据、只删仅本地的、并回落高�
   const jIdx = s.indexOf('fsJournalDeletion');
   const delIdx = s.indexOf('state.transactions = state.transactions.filter');
   assert.ok(jIdx > 0 && delIdx > jIdx, '凭据必须写在删除之前（写失败要能零变更放弃）');
-  assert.match(s, /j\.ok === false/, '凭据写入失败必须放弃');
+  /* 必须是 !j || !j.ok：fsJournalDeletion 返回 {ok,count,error} 而**不抛异常**，
+     只写 `j.ok === false` 或 try/catch 都会漏掉「返回 undefined / 没有 ok 字段」的情况。 */
+  assert.match(s, /if \(!j \|\| !j\.ok\)/, '凭据写入失败必须放弃（且要覆盖返回 undefined 的情况）');
   /* 断言必须盯住**过滤那一行**：只搜 'localOnly' 会命中上一行的声明，
      把过滤删掉也照样通过（实测过，是个假绿）。 */
   assert.match(s, /removable = p\.outliers\.filter\([^)]*localOnly\.has/,
@@ -234,4 +236,105 @@ test('线上核查脚本不得用「安全大数」当流水哨兵 seq（会永�
   assert.match(assign[0], /realMaxSeq \+ 1/, '哨兵 seq 必须紧贴真实最大 seq，不能是常量大数');
   assert.ok(!/\d{4,}/.test(assign[0]), '赋值里不得出现四位以上常量（安全大数会永久污染高水位）');
   assert.ok(!/create:\s*\{\s*seq:\s*\d{4,}/.test(src), 'CASES 里也不得写死大 seq');
+});
+
+/* ================= 删除凭据失败必须真的做到「零变更」 ================= */
+
+test('fsJournalDeletion 必须如实报告失败（不能吞掉异常只 return 0）', () => {
+  const s = fnSrc('fsJournalDeletion');
+  assert.match(s, /return \{ ok: false, count: 0, error: e\.message \}/,
+    '旧实现把异常吞掉并 return 0，调用方的 ok 判断/try-catch 全都永远不触发，「写失败零变更」是假的');
+  assert.match(s, /return \{ ok: true, count: list\.length \}/);
+  assert.ok(!/\n\s+return 0;/.test(s), '不得再有裸 return 0');
+});
+
+test('所有承诺「写失败零变更」的调用点都必须检查返回值', () => {
+  const cases = [
+    ['deleteOneLocalRecord', /const jr = await fsJournalDeletion\([\s\S]*?if \(!jr \|\| !jr\.ok\) return \{ ok: false/],
+    ['resDelete', /if \(!j \|\| !j\.ok\) \{ alert/],
+    ['fixTxnSeqHighWater', /if \(!j \|\| !j\.ok\) \{ alert/]
+  ];
+  for (const [fn, re] of cases) {
+    assert.match(fnSrc(fn), re, fn + ' 必须在凭据写失败时放弃操作');
+  }
+});
+
+test('人工确认删除的日志不得无条件声称「已写入删除凭据」', () => {
+  const html = HTML;
+  assert.ok(!/已写入删除凭据'\)/.test(html) || /jc && jc\.ok/.test(html),
+    '凭据写失败时日志仍说「已写入删除凭据」= 对用户撒谎');
+});
+
+/* ================= 阶段4：资源档案页 ================= */
+
+test('阶段4：必须有独立的资源档案页，四段齐全，且 gen 已并入', () => {
+  assert.match(HTML, /data-tab="res"/, '缺少 res 页签');
+  assert.match(HTML, /id="tab-res"/, '缺少 #tab-res');
+  assert.ok(!HTML.includes('id="tab-gen"'), 'gen 页必须并入资源档案，避免同一对象两个入口');
+  const sec = HTML.slice(HTML.indexOf('id="tab-res"'), HTML.indexOf('</section>', HTML.indexOf('id="tab-res"')));
+  ['locations', 'containers', 'items', 'manuals'].forEach(t =>
+    assert.ok(sec.includes('data-restype="' + t + '"'), '资源档案缺少 ' + t + ' 段'));
+  ['resTable', 'resSearch', 'btnResAdd', 'resEditorBox', 'resSummary', 'resTypeBar', 'resSyncHint']
+    .forEach(id => assert.ok(sec.includes('id="' + id + '"'), '#tab-res 必须包含 #' + id));
+});
+
+test('阶段4：四张表都必须有编辑能力（原来只有「生成」没有「维护」）', () => {
+  const cfg = HTML.slice(HTML.indexOf('const RES_TYPES = {'), HTML.indexOf('let resType ='));
+  /* 容器：类型/规格/当前库位码；库位：类型/说明；物品：名称/规格/库位；手册：名称/版本/库位 */
+  const need = {
+    locations: ['kind', 'desc'],
+    containers: ['type', 'spec', 'loc'],
+    items: ['name', 'spec', 'loc'],
+    manuals: ['name', 'ver', 'loc']
+  };
+  for (const [t, fields] of Object.entries(need)) {
+    const i = cfg.indexOf(t + ': {');
+    assert.ok(i > 0, '缺少 ' + t + ' 配置');
+    const block = cfg.slice(i, cfg.indexOf('\n  },', i));
+    fields.forEach(f => assert.ok(block.includes("k: '" + f + "'"), t + ' 必须可编辑 ' + f));
+  }
+  assert.match(fnSrc('renderRes'), /data-res-edit/, '列表必须有编辑入口');
+  assert.match(fnSrc('renderRes'), /data-res-del/, '列表必须有删除入口');
+  assert.match(fnSrc('renderRes'), /data-res-detail/, '列表必须有详情入口');
+  assert.match(fnSrc('renderRes'), /data-res-print/, '列表必须有打印跳转');
+});
+
+test('阶段4：删除必须先写凭据、必须显示影响范围与同步状态、绝不静默删', () => {
+  const s = fnSrc('resDelete');
+  const jIdx = s.indexOf('fsJournalDeletion');
+  const delIdx = s.indexOf('state[table] = (state[table] || []).filter');
+  assert.ok(jIdx > 0 && delIdx > jIdx, '凭据必须写在删除之前');
+  assert.match(s, /resImpact\(/, '必须显示影响范围');
+  assert.match(s, /resSyncState\(/, '必须显示同步状态');
+  assert.match(s, /confirm\(/, '必须二次确认');
+  assert.match(s, /if \(!j \|\| !j\.ok\)/, '凭据写失败必须放弃');
+  /* 删除后本地痕迹要清干净，否则残留的「已确认」名单会让对账反复报警 */
+  assert.match(s, /__syncedKeys\[table\] = \(state\.__syncedKeys\[table\] \|\| \[\]\)\.filter/, '__syncedKeys 是数组，必须过滤');
+  assert.match(s, /removeRecord\(table, key\)/, '必须从 outbox 摘除');
+});
+
+test('阶段4：编辑必须「先写本地再造同步链」，且不得 await 网络', () => {
+  const s = fnSrc('resSave');
+  const saveIdx = s.indexOf('save();');
+  const pushIdx = s.indexOf('fsPushRecord(table, [pushed])');
+  assert.ok(saveIdx > 0 && pushIdx > saveIdx, '本地保存必须在推送之前');
+  assert.ok(!/await fsPushRecord/.test(s),
+    'await 推送会让编辑器卡在网络往返上（离线时更久），用户看到「点了保存没反应」；' +
+    '本地已存好，推送必须 fire-and-forget');
+  assert.ok(s.indexOf('resEditing = null') < pushIdx, 'UI 收尾必须早于推送');
+});
+
+test('阶段4：__syncedKeys / _pendingPush 是数组，不得当 Set 用', () => {
+  /* 真实踩过：写成 .has()/.delete() 会静默失效（数组没有这些方法），
+     记录永远留在「已确认」名单里，对账反复报警。 */
+  const s = fnSrc('resSyncState');
+  assert.ok(!/\.has\(/.test(s), '__syncedKeys/_pendingPush 是数组，用 .has() 永远判不出来');
+  assert.match(s, /\.map\(String\)\.includes\(key\)/);
+  assert.ok(!/__syncedKeys\[[^\]]+\]\.delete/.test(HTML), '数组没有 .delete，写了就是死代码');
+});
+
+test('阶段4：旧深链 #gen 必须跳到资源档案', () => {
+  const s = fnSrc('applyHash');
+  assert.match(s, /parts\[0\] === 'gen'/, 'home.html 的建档入口仍指向 #gen，不兼容就静默失效');
+  assert.match(s, /parts = \['res'\]/);
 });
