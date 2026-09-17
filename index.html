@@ -191,6 +191,26 @@ table.grid tr:hover td{background:#f7fafd;}
 .flow-arrow{color:var(--text-muted)}
 .flow-label{color:var(--text-muted);font-size:12px}
 /* ============================================================
+   04 COMPONENTS（阶段10）：当前对象条 ctx-bar + 状态区 status-bar
+   ctx-bar 承载「跨页上下文」：当前物料 / 当前工单 / 返回来源。
+   上下文只存内存，**不写入 state**，因此不参与同步、不进备份。
+   ============================================================ */
+.ctx-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:44px;
+  margin:0 0 12px;padding:8px 12px;border:1px solid var(--line);
+  border-radius:var(--r-lg);background:var(--surface)}
+.ctx-bar[hidden]{display:none}
+.ctx-bar__label{font-size:12px;color:var(--text-muted);flex:none}
+.ctx-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;
+  border-radius:var(--r-md);background:var(--surface-2);border:1px solid var(--line);
+  font-size:12.5px;cursor:pointer;font-family:var(--font-mono)}
+.ctx-chip b{color:var(--text-muted);font-weight:400;font-family:var(--font-ui)}
+.ctx-chip:hover{border-color:var(--cyan-ink);color:var(--cyan-ink)}
+.status-bar{display:flex;gap:14px;flex-wrap:wrap;align-items:center;
+  margin-top:14px;padding:8px 2px 0;border-top:1px solid var(--line);
+  font-size:12px;color:var(--text-muted)}
+.status-bar>span{white-space:nowrap}
+.status-bar .sb-warn{color:var(--doing-fg);font-weight:600}
+/* ============================================================
    04 COMPONENTS（阶段5 新增）：表格语义色 / 危险单元格 / 列分组 / 粘性表头
    ============================================================ */
 /* 批次D：渲染函数里的行内颜色改为语义 class（原先写死 #d33a2c / #2d9d4f / #8892a2） */
@@ -464,6 +484,15 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   input,select,textarea{font-size:16px;}
   /* 工单执行的汇总栏在手机上纵向堆叠 */
   .exec-summary{flex-direction:column;align-items:flex-start;gap:4px;}
+  /* 当前对象条：chip 与按钮都是可点元素，手机上必须达到 44px 触控目标；
+     同时隐藏 chip 前缀与返回目标名做紧凑化 —— 否则 4 个元素会占 4 行、吃掉近 1/5 屏。 */
+  .ctx-bar{padding:8px 10px;gap:6px;}
+  .ctx-chip{min-height:44px;padding:8px 12px;font-size:13px;}
+  .ctx-chip b{display:none;}
+  .ctx-bar .btn{min-height:44px;padding:8px 14px;}
+  .ctx-back-label{display:none;}
+  /* 状态区在手机上允许换行成多行（本来就是 flex-wrap） */
+  .status-bar{gap:6px 12px;font-size:11.5px;}
   /* 标签打印页：预览与列表纵向堆叠，列表全宽 */
   .label-layout{flex-direction:column;}
   .label-list{width:auto;max-height:none;}
@@ -555,6 +584,8 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       </div>
     </div>
   </details>
+  <!-- ========== 当前对象条（阶段10）：跨页上下文与返回来源 ========== -->
+  <div class="ctx-bar" id="ctxBar" hidden></div>
   <!-- ========== 台账 ========== -->
   <section class="tab on" id="tab-ledger">
     <p class="page-purpose"><span>主数据维护：编码不变、属性可变</span><span class="impact impact--confirm">手工改库存会写流水</span></p>
@@ -930,6 +961,13 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <div class="log" id="scanLog">（暂无记录）</div>
     </div>
   </section>
+  <!-- ========== 状态区（阶段10）：结果计数 / 数据空间 / 同步模式 / 待上传 ========== -->
+  <div class="status-bar" id="statusBar" role="status" aria-live="polite">
+    <span id="sbCount">—</span>
+    <span id="sbSpace">—</span>
+    <span id="sbSync">—</span>
+    <span id="sbQueue">—</span>
+  </div>
 </main>
 <footer id="appFooter">416MES · 单机离线版 · 数据保存在本浏览器 localStorage，定期导出 Excel 备份</footer>
 <script>
@@ -1751,6 +1789,7 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('cl
   if (b.dataset.tab === 'nec') renderNec();
   if (b.dataset.tab === 'design') { renderDesign(); renderGalAlbums(); }
   if (b.dataset.tab === 'member') { renderMemberTagBar(); renderMembers(); }
+  renderStatusBar();
 }));
 
 /* ================= 排版工具（数据桥） ================= */
@@ -3262,6 +3301,7 @@ function showWipDetail(code) {
   const w = state.workorders.find(x => x.code === code);
   if (!w) return;
   wipDetailCode = code;
+  ctxSetOrder(w, (typeof CTX !== 'undefined' && CTX.from && CTX.from.tab) ? null : 'wip');
   const p = CORE.orderProgress(w);
   const txns = CORE.orderTransactions(state, code);
   const hist = CORE.orderHistory(w);
@@ -3312,6 +3352,7 @@ function showWipDetail(code) {
 
   const ev = document.getElementById('btnWipExec');
   if (ev) ev.addEventListener('click', () => {
+    ctxSetOrder(w, 'wip');   // 记住来源：扫码页顶部会出现「← 返回 库存工单」
     document.querySelector('nav.tabs button[data-tab=scan]').click();
     const si = document.getElementById('scanInput');
     if (si) { si.value = 'WIP:' + w.code; si.focus(); si.select(); }
@@ -3592,6 +3633,7 @@ function scanMat(code, box) {
         '<div class="kv"><b>规格</b>' + esc(m.spec || '—') + '　<b>成本</b>¥' + esc(m.cost) + '</div>' +
         locationCard(code)
     });
+    ctxSetMaterial(m);
     addScan('material', 'MAT:', code, true, m);
     log((low ? '查询物料（低库存）' : '查询物料 ') + code + '（库存 ' + m.qty + '）');
     return;
@@ -3845,6 +3887,8 @@ function scanWip(code, box) {
       scanWip(code, box);
     });
   }
+  ctxSetOrder(w, CTX.from ? CTX.from.tab : 'scan');
+  renderStatusBar();
   log('扫描工单 ' + code + '（' + CORE.statusLabel(w.status) + '）');
 }
 /* 统一扫码入口：手输回车 / 扫码枪 / 摄像头 共用 */
@@ -3915,6 +3959,78 @@ function handleScan(raw) {
   window.addEventListener('resize', () => { if (innerWidth > 767) sync(false); });
   sync(false);
 })();
+/* ============================================================
+   阶段10：当前对象条（跨页上下文）+ 状态区
+   上下文只存内存，不写入 state —— 因此不影响同步、不进备份、不参与任何判定。
+   ============================================================ */
+const CTX = { material: null, order: null, from: null };
+
+function tabLabelOf(t) {
+  const b = document.querySelector('nav.tabs button[data-tab="' + t + '"]');
+  return b ? b.textContent.trim() : t;
+}
+function goTab(t) { const b = document.querySelector('nav.tabs button[data-tab="' + t + '"]'); if (b) b.click(); }
+
+function ctxSetMaterial(m) {
+  CTX.material = m ? { code: m.code, name: m.name || '' } : null;
+  renderCtxBar();
+}
+function ctxSetOrder(w, fromTab) {
+  CTX.order = w ? { code: w.code, type: w.type, status: w.status } : null;
+  if (fromTab) CTX.from = { tab: fromTab, label: tabLabelOf(fromTab) };
+  renderCtxBar();
+}
+function ctxClear() { CTX.material = null; CTX.order = null; CTX.from = null; renderCtxBar(); }
+
+function renderCtxBar() {
+  const bar = document.getElementById('ctxBar');
+  if (!bar) return;
+  const chips = [];
+  if (CTX.material) chips.push('<span class="ctx-chip" data-ctx="mat" title="点击去物料台账查看"><b>物料</b>' + esc(CTX.material.code) + ' ' + esc(CTX.material.name) + '</span>');
+  if (CTX.order) chips.push('<span class="ctx-chip" data-ctx="wip" title="点击去库存工单查看详情"><b>工单</b>' + esc(CTX.order.code) + '</span>');
+  if (!chips.length) { bar.hidden = true; bar.innerHTML = ''; return; }
+  bar.hidden = false;
+  bar.innerHTML = '<span class="ctx-bar__label">当前对象</span>' + chips.join('') +
+    (CTX.from ? '<button type="button" class="btn small ghost" id="ctxBack">\u2190 返回 <span class="ctx-back-label">' + esc(CTX.from.label) + '</span></button>' : '') +
+    '<button type="button" class="btn small ghost" id="ctxClear">清除</button>';
+  bar.querySelectorAll('.ctx-chip').forEach(el => el.addEventListener('click', () => {
+    if (el.dataset.ctx === 'mat' && CTX.material) {
+      goTab('ledger');
+      const inp = document.getElementById('matSearch');
+      if (inp) { inp.value = CTX.material.code; inp.dispatchEvent(new Event('input', { bubbles: true })); }
+    } else if (el.dataset.ctx === 'wip' && CTX.order) {
+      goTab('wip');
+      showWipDetail(CTX.order.code);
+    }
+  }));
+  const back = document.getElementById('ctxBack');
+  if (back) back.addEventListener('click', () => { const f = CTX.from; CTX.from = null; if (f) goTab(f.tab); renderCtxBar(); });
+  const clr = document.getElementById('ctxClear');
+  if (clr) clr.addEventListener('click', ctxClear);
+}
+
+function renderStatusBar() {
+  const bar = document.getElementById('statusBar');
+  if (!bar) return;
+  const act = (document.querySelector('nav.tabs button.on') || { dataset: {} }).dataset.tab || 'ledger';
+  const counts = {
+    ledger: '物料 ' + state.materials.length + ' · 库位 ' + state.locations.length + ' · 容器 ' + state.containers.length,
+    member: '成员 ' + state.members.length + ' 人',
+    label: '标签类型见上方按钮',
+    gen: '主数据建档与编码',
+    wip: '库存工单 ' + state.workorders.length + ' 张',
+    nec: 'NEC 任务 ' + state.necOrders.length + ' 条',
+    design: '排版素材与图库',
+    scan: '扫码历史 ' + ((state.scanHistory || []).length) + ' 条'
+  };
+  const set = (id, txt, warn) => { const el = document.getElementById(id); if (!el) return; el.textContent = txt; el.className = warn ? 'sb-warn' : ''; };
+  set('sbCount', counts[act] || '');
+  set('sbSpace', '本机数据空间 ' + (state.deviceId || '—') + (typeof localStore !== 'undefined' && localStore ? ' · IndexedDB 已启用' : ' · 仅 localStorage'));
+  set('sbSync', (typeof fsOnline !== 'undefined' && fsOnline) ? '飞书真源已连接' : '离线模式（仅本机）', !(typeof fsOnline !== 'undefined' && fsOnline));
+  const q = (typeof fsQueue === 'function') ? (fsQueue() || []) : [];
+  set('sbQueue', q.length ? ('待上传 ' + q.length + ' 条') : '待上传 0 条', q.length > 0);
+}
+
 document.getElementById('scanInput').addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
   const raw = e.target.value; e.target.value = '';
@@ -6187,7 +6303,7 @@ function renderDataStoreHint() {
   if (c) c.addEventListener('click', () => box.remove());
 }
 
-load(); renderDataStoreHint(); renderLedger(); refreshMatDatalist(); refreshMemberDatalist(); renderNec(); renderOperators(); renderTxns(); renderWip();
+load(); renderDataStoreHint(); renderLedger(); refreshMatDatalist(); refreshMemberDatalist(); renderNec(); renderOperators(); renderTxns(); renderWip(); renderCtxBar(); renderStatusBar();
 (function () {   // 支持门户页深链 index.html#ledger / #member / #label / #gen / #nec / #scan
   const h = location.hash.slice(1);
   if (h) { const btn = document.querySelector('nav.tabs button[data-tab="' + h + '"]'); if (btn) btn.click(); }
