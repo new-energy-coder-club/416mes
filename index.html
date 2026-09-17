@@ -4205,6 +4205,43 @@ function renderScanCard(o) {
     (o.detailHtml ? '<details class="scan-more" open><summary>更多详情</summary><div class="scan-card__detail">' + o.detailHtml + '</div></details>' : '') +
     (o.actionsHtml ? '<div class="scan-card__actions">' + o.actionsHtml + '</div>' : '');
 }
+/** 阶段26（§3.7）：统一解析 hash 深链。
+ *  **只读语义硬约束**：只做「选页 / 筛选 / 预填 / 展开详情」；
+ *  绝不自动执行、自动盘点、自动建档、自动删除或触发同步。
+ *  支持：`#tab`、`#ledger?code=`、`#ledger?view=transactions`、
+ *        `#wip?code=`、`#scan?prefix=WIP&code=` */
+function applyHash() {
+  const h = location.hash.slice(1);
+  if (!h) return false;
+  const parts = h.split('?');
+  const btn = document.querySelector('nav.tabs button[data-tab="' + parts[0] + '"]');
+  if (!btn) return false;
+  btn.click();
+  if (!parts[1]) return true;
+  const q = new URLSearchParams(parts[1]);
+  const code = q.get('code');
+  if (parts[0] === 'ledger') {
+    if (code) {
+      const si = document.getElementById('matSearch');
+      if (si) { si.value = code; si.dispatchEvent(new Event('input', { bubbles: true })); }
+    }
+    if (q.get('view') === 'transactions') {
+      const ts = document.getElementById('txnSummary');
+      const det = ts && ts.closest ? ts.closest('details') : null;
+      if (det) det.open = true;          // 只展开，不触发任何数据动作
+    }
+  } else if (parts[0] === 'wip' && code) {
+    showWipDetail(code);                 // 只展开详情，不改工单状态
+  } else if (parts[0] === 'scan' && code) {
+    const si = document.getElementById('scanInput');
+    // 只预填，**不自动提交** —— 扫错标签动错库存，必须由人按回车确认
+    if (si) { si.value = (q.get('prefix') ? q.get('prefix') + ':' : '') + code; si.focus(); si.select(); }
+  }
+  // 页签点击会把 hash 改写成 '#tab'，这里把带参深链补回去，刷新/分享后参数仍在
+  history.replaceState(null, '', '#' + parts[0] + '?' + parts[1]);
+  return true;
+}
+
 function locationCard(code, { withTimes = true } = {}) {
   const L = CORE.locateMaterial(state, code);
   /* 阶段6 修正（诚实性）：位置证据必须与「它自己的时间」绑定。
@@ -7196,24 +7233,10 @@ function renderDataStoreHint() {
 load(); renderDataStoreHint(); renderLedger(); refreshMatDatalist(); refreshMemberDatalist(); renderNec(); renderOperators(); renderTxns(); renderWip(); renderCtxBar(); renderStatusBar();
 // 阶段13：为初始当前页签补 aria-current（深链进入时也要正确）
 (function () { const on = document.querySelector('nav.tabs button.on'); if (on) on.setAttribute('aria-current', 'page'); })();
-(function () {   // 支持门户页深链 index.html#ledger / #member / #label / #gen / #nec / #scan
-  const h = location.hash.slice(1);
-  if (h) {
-    // 阶段18（§5.10）：支持 `#ledger?code=GJ-SD-001` 这种带参深链（门户预警链接用）
-    const parts = h.split('?');
-    const btn = document.querySelector('nav.tabs button[data-tab="' + parts[0] + '"]');
-    if (btn) btn.click();
-    if (parts[1]) {
-      const deepCode = new URLSearchParams(parts[1]).get('code');
-      if (deepCode) {
-        const si = document.getElementById('matSearch');
-        if (si) { si.value = deepCode; si.dispatchEvent(new Event('input', { bubbles: true })); }
-        // 页签点击会把 hash 改写成 '#ledger'，这里把带参深链补回去，刷新后筛选仍在
-        history.replaceState(null, '', '#' + parts[0] + '?' + parts[1]);
-      }
-    }
-  }
-})();
+applyHash();
+/* 阶段26（§3.7）：兼容 hashchange 与浏览器前进/后退。
+   原先只在启动时读一次 hash，用户按后退键页面不动 —— 深链分享出去后体验很割裂。 */
+window.addEventListener('hashchange', () => { applyHash(); });
 renderScanLog();
 /* 启动顺序很重要：**必须先等 IndexedDB 状态就位，再去飞书拉取合并**。
    否则 fsBoot 会拿 localStorage 里那份旧状态去合并，而合并又会 save() ——
