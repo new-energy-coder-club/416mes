@@ -193,6 +193,19 @@ table.grid tr:hover td{background:#f7fafd;}
      · 长表（物料台账/流水/成员）才会内滚，此时表头粘在顶部
    手机 ≤560px 表格已卡片化（thead 隐藏），不适用本规则。
    ============================================================ */
+/* ============================================================
+   07 PRINT（阶段30 新增）：修掉一处我在阶段 4/10/16 引入的打印回归
+   打印块用的是 visibility:hidden（`body *{visibility:hidden}`），
+   **隐藏元素仍然占高度** —— 我新增的屏幕专用块把 60×40 标签从 1 页顶成了 2 页
+   （实测 body 高度：基线 0 → 当前 310px；PDF 1 页 → 2 页）。
+   这里把它们 display:none（不只是隐藏），让分页高度回到基线。
+   ⚠ 这是**新增**规则，不是改动冻结块（@page / @media print 原文）里的既有规则。
+   ============================================================ */
+@media print{
+  .flow-map,#ctxBar,#statusBar,.page-purpose,.danger-zone,
+  .notice,#toastHost,.next-strip,.wip-summary,.nec-board,.scan-fs-close{display:none !important;}
+}
+
 @media screen and (min-width:561px){
   .table-scroll{max-height:max(320px,calc(100vh - 220px));overflow:auto;}
   /* z-index 3 必须高于阶段22 的左右侧粘性列(2)，否则纵向滚动时行的粘性格会盖住表头 */
