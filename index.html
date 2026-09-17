@@ -252,6 +252,10 @@ table.grid tr:hover td{background:#f7fafd;}
 .wip-num--done{color:var(--done-fg)}
 .wip-num--muted{color:var(--text-muted)}
 .wip-num--short{color:var(--danger-fg);font-weight:600}
+/* 阶段24（§5.2）：剩余 > 0 只是「还没做完」，不是错误 —— 用琥珀，不用红（§5.2 明确要求） */
+.wip-num--pend{color:var(--doing-fg);font-weight:600}
+.link-btn{border:none;background:none;padding:0;font:inherit;color:var(--cyan-ink);
+  cursor:pointer;text-decoration:underline;text-underline-offset:2px;}
 .status-select{margin-top:2px}
 .detail-section{margin:12px 0 6px;font-size:15px}
 .col-w150{width:150px}
@@ -371,6 +375,38 @@ body.stocktake-on .stocktake-banner{display:block}
   border-radius:var(--r-md);background:var(--danger-bg)}
 .reverse-panel[hidden]{display:none}
 .reverse-panel__h{font-size:12.5px;font-weight:600;color:var(--danger-fg);margin-bottom:6px}
+/* ============================================================
+   05 PAGES（阶段24 · §5.2）：工单列表 / 详情互斥主视图 + 新建抽屉 + 详情数字卡
+   ============================================================ */
+#tab-wip.wip-detail-open #wipListPanel{display:none;}
+.wip-crumb{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;
+  font-size:12.5px;color:var(--text-muted);}
+.wip-crumb b{color:var(--ink-strong);font-family:var(--font-mono);}
+.wip-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:10px;margin-bottom:10px;}
+.wip-kpi{padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface-2);}
+.wip-kpi__l{display:block;font-size:11.5px;color:var(--text-muted);margin-bottom:2px;}
+.wip-kpi__v{font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--ink-strong);
+  font-variant-numeric:tabular-nums;}
+.wip-kpi--done .wip-kpi__v{color:var(--done-fg);}
+.wip-kpi--remain .wip-kpi__v{color:var(--doing-fg);}
+/* 新建工单抽屉：桌面 560px / 最大 92vw；手机全屏 */
+.wip-drawer[hidden]{display:none;}
+.wip-drawer__backdrop{position:fixed;inset:0;z-index:var(--z-modal);background:rgba(10,16,28,.45);}
+.wip-drawer__sheet{position:fixed;top:0;right:0;bottom:0;z-index:calc(var(--z-modal) + 1);
+  width:min(560px,92vw);background:var(--surface);border-left:1px solid var(--line);
+  display:flex;flex-direction:column;box-shadow:-6px 0 24px rgba(10,16,28,.18);}
+.wip-drawer__head{display:flex;align-items:center;gap:10px;padding:12px 14px;
+  border-bottom:1px solid var(--line);flex:none;}
+.wip-drawer__head h2{font-size:16px;font-weight:600;color:var(--ink-strong);flex:1;min-width:0;margin:0;}
+.wip-drawer__close{flex:none;min-height:36px;min-width:36px;border:1px solid var(--line);
+  border-radius:var(--r-sm);background:var(--surface);color:var(--text-sub);
+  font-size:15px;font-family:inherit;cursor:pointer;}
+.wip-drawer__close:hover{border-color:var(--cyan-ink);color:var(--cyan-ink);}
+.wip-drawer__body{padding:14px;overflow:auto;flex:1;min-height:0;}
+@media screen and (max-width:560px){
+  .wip-drawer__sheet{width:100%;border-left:none;}
+  .wip-drawer__close{min-height:44px;min-width:44px;}
+}
 /* ============================================================
    05 PAGES（阶段19）：批量建档与编码（ui优化.md §5.6）
    两栏作业台（左位置体系 / 右载体）+ 生成后的「下一程」条
@@ -1156,8 +1192,15 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   <!-- ========== 库存工单（Phase 3 管理页） ========== -->
   <section class="tab" id="tab-wip">
     <p class="page-purpose"><span>建单 → 打印 → 扫码确认执行；支持部分执行、取消、冲销</span><span class="impact impact--confirm">确认执行后改库存</span></p>
-    <div class="panel">
-      <h2>新建库存工单（建单只登记计划，库存不变）</h2>
+    <!-- 阶段24（§5.2）：建单改为覆盖右侧的抽屉（桌面 560px / 最大 92vw；手机全屏） -->
+    <div class="wip-drawer" id="wipDrawer" role="dialog" aria-modal="true" aria-label="新建库存工单" hidden>
+      <div class="wip-drawer__backdrop" id="wipDrawerBackdrop"></div>
+      <div class="wip-drawer__sheet">
+        <div class="wip-drawer__head">
+          <h2 id="wipDrawerTitle">新建库存工单（建单只登记计划，库存不变）</h2>
+          <button type="button" class="wip-drawer__close" id="btnWipDrawerClose" aria-label="关闭新建工单">✕</button>
+        </div>
+        <div class="wip-drawer__body">
       <div class="form-row"><label>工单类型</label>
         <select id="gWipType">
           <option value="LL">LL 领料出库（扣减库存）</option><option value="BH">BH 补货入库（增加库存）</option>
@@ -1174,9 +1217,16 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <div class="toolbar mt-8"><button class="btn small ghost" id="btnWipAddItem">+ 添加明细行</button></div>
       <p class="hint" id="wipMatHint">⚠️ 物料码必须先在「<a class="link-inline" href="javascript:void 0" onclick="document.querySelector('nav.tabs button[data-tab=ledger]').click()">物料台账</a>」里建档；输入后右侧会显示物料名称与当前库存，<span class="text-danger">红色 = 未建档，无法生成工单</span>。同一物料填多行会自动合并为一行。<b>创建工单只登记计划，库存不变；扫 WIP 码并确认执行才改动库存。</b></p>
       <p class="hint">生成的工单打印后随货走；发料/补货时在「扫码工作台」页扫 <b>WIP:</b> 码执行扣减/增加库存，不扫码库存不变。</p>
+      <div class="next-strip" id="nextWip" hidden></div>
+        </div>
+      </div>
     </div>
-    <div class="panel">
+    <div class="panel" id="wipListPanel">
       <h2>库存工单管理（WIP · 建单只登记计划，扫码确认执行才改库存）</h2>
+      <div class="toolbar">
+        <button class="btn" id="btnWipNew">＋ 新建库存工单</button>
+        <span class="hint">建单不动库存，扫码确认后才执行</span>
+      </div>
       <div class="wip-summary" id="wipSummary" role="group" aria-label="按状态筛选工单"></div>
       <div class="toolbar">
         <input class="field field--w250" type="search" id="wipSearch" placeholder="搜索工单号 / 物料码 / 物料名">
@@ -3571,16 +3621,10 @@ document.getElementById('btnGenWip').addEventListener('click', async () => {
     (seqInfo.remote > seqInfo.local ? '（飞书侧已有 ' + seqInfo.remote + ' 号，已自动接在其后）' : '') +
     (notes.length ? notes.join('；') : '')).trim();
   if (createDetail) alert(createMsg + '\n\n' + createDetail); else toast(createMsg);
-  // 三选：去扫码执行 / 去打印标签 / 留在本页
-  const choice = prompt('工单 ' + code + ' 已生成。下一步：\n输入 1 = 去「扫码工作台」立即执行（扣减/增加库存）\n输入 2 = 去「标签打印」打印工单标签\n其他/取消 = 留在本页', '1');
-  if (choice === '1') {
-    document.querySelector('nav.tabs button[data-tab=scan]').click();
-    const si = document.getElementById('scanInput');
-    if (si) { si.value = 'WIP:' + code; si.focus(); si.select(); }
-  } else if (choice === '2') {
-    curType = 'wip'; sel.wip.clear(); sel.wip.add(state.workorders.length - 1);
-    document.querySelector('nav.tabs button[data-tab=label]').click();
-  }
+  /* 阶段24（§5.2）：原先这里弹一个 prompt 让用户输入 1/2 三选 —— 换成页内「下一程」条，
+     两个动作各是一个按钮（与阶段19/21 的 next-strip 一致）。 */
+  nextStrip('nextWip', 'wip', [code], 1,
+    '<button type="button" class="btn small next-strip__scan" data-code="' + esc(code) + '">去扫码执行</button>');
 });
 /**
  * 重置/清空本机数据 —— 两条路径共用一个实现。
@@ -3662,7 +3706,7 @@ function wipMatchesFilter(w, kw, st, ty) {
 /** 阶段19（§5.6）：生成成功后的「下一程」条。
  *  原先要么弹 alert 就结束（用户还得自己切页、自己勾选），要么弹 confirm 打断；
  *  改为页内常驻条 + 一个按钮，复用 curType / sel.add 跳转。 */
-function nextStrip(hostId, type, newCodes, attempted) {
+function nextStrip(hostId, type, newCodes, attempted, extraHtml) {
   const el = document.getElementById(hostId);
   if (!el) return;
   const n = (newCodes || []).length;
@@ -3675,7 +3719,8 @@ function nextStrip(hostId, type, newCodes, attempted) {
   el.innerHTML = '<span class="next-strip__t">✓ 已生成 <b>' + n + '</b> 条' +
     (attempted > n ? '（重复跳过 ' + (attempted - n) + ' 条）' : '') + '</span>' +
     '<button type="button" class="btn small next-strip__go" data-type="' + esc(type) + '" data-codes="' +
-    esc(newCodes.join(',')) + '">去标签打印（预勾选 ' + n + ' 条）</button>';
+    esc(newCodes.join(',')) + '">去标签打印（预勾选 ' + n + ' 条）</button>' +
+    (extraHtml || '');
 }
 document.addEventListener('click', e => {
   const b = e.target && e.target.closest ? e.target.closest('.next-strip__go') : null;
@@ -3757,7 +3802,70 @@ function renderWip() {
     ' · 已执行 ' + count('已执行') + ' · 已取消 ' + count('已取消') + (shown.length !== all.length ? '（筛选出 ' + shown.length + ' 张）' : '');
 }
 
+/* 阶段24（§5.2）：新建工单抽屉。原生 <dialog> 在这个单文件离线应用里不如自己实现可控
+   （要 CSS 控制宽度/遮罩/动画），所以用 role=dialog + aria-modal + 自己做的实现：
+   遮罩点击关闭、Escape 关闭、Tab 焦点圈闭、关闭后焦点归还给触发按钮。 */
+let _wipDrawerReturnFocus = null;
+function wipDrawerOpen() {
+  const d = document.getElementById('wipDrawer');
+  if (!d || !d.hidden) return;
+  _wipDrawerReturnFocus = document.activeElement;
+  d.hidden = false;
+  renderWip();                                     // 展开时把明细行刷成一行空的
+  // ⚠ 必须用 querySelector：getElementById 只接受 id，传选择器永远返回 null
+  const t = document.querySelector('#wipItemTable tbody');
+  if (t && !t.querySelector('tr')) document.getElementById('btnWipAddItem').click();
+  requestAnimationFrame(() => { const el = document.getElementById('gWipType'); if (el) el.focus(); });
+}
+function wipDrawerClose() {
+  const d = document.getElementById('wipDrawer');
+  if (!d || d.hidden) return;
+  d.hidden = true;
+  const strip = document.getElementById('nextWip');
+  if (strip) { strip.hidden = true; strip.innerHTML = ''; }
+  if (_wipDrawerReturnFocus && _wipDrawerReturnFocus.focus) _wipDrawerReturnFocus.focus();
+  _wipDrawerReturnFocus = null;
+}
+document.getElementById('btnWipNew').addEventListener('click', wipDrawerOpen);
+document.getElementById('btnWipDrawerClose').addEventListener('click', wipDrawerClose);
+document.getElementById('wipDrawerBackdrop').addEventListener('click', wipDrawerClose);
+document.getElementById('wipDrawer').addEventListener('keydown', e => {
+  if (e.key === 'Escape') { e.preventDefault(); wipDrawerClose(); return; }
+  if (e.key !== 'Tab') return;
+  const f = [...e.currentTarget.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled])')]
+    .filter(el => el.offsetParent !== null);
+  if (!f.length) return;
+  const first = f[0], last = f[f.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
+
+/* 阶段24（§5.2）：列表 / 详情是**互斥主视图**。返回时保留搜索、筛选、滚动位置与行焦点。 */
+let _wipListScroll = 0, _wipListPageScroll = 0, _wipListFocusCode = '';
+function backToWipList() {
+  const sec = document.getElementById('tab-wip');
+  sec.classList.remove('wip-detail-open');
+  document.getElementById('wipDetailPanel').style.display = 'none';
+  wipDetailCode = '';
+  window.scrollTo(0, _wipListPageScroll);
+  const sc = document.querySelector('#tab-wip .table-scroll');
+  if (sc) sc.scrollTop = _wipListScroll;
+  if (_wipListFocusCode) {
+    const b = document.querySelector('#wipTable [data-detail="' + _wipListFocusCode + '"]');
+    if (b) b.focus();
+  }
+}
+
 function showWipDetail(code) {
+  const _sec = document.getElementById('tab-wip');
+  if (_sec && !_sec.classList.contains('wip-detail-open')) {
+    const sc = document.querySelector('#tab-wip .table-scroll');
+    _wipListScroll = sc ? sc.scrollTop : 0;
+    _wipListPageScroll = window.scrollY;
+    const ae = document.activeElement;
+    _wipListFocusCode = (ae && ae.dataset && ae.dataset.detail) ? ae.dataset.detail : '';
+  }
+  if (_sec) _sec.classList.add('wip-detail-open');
   const w = state.workorders.find(x => x.code === code);
   if (!w) return;
   wipDetailCode = code;
@@ -3771,7 +3879,20 @@ function showWipDetail(code) {
   const open = CORE.isOrderOpen(w);
 
   box.innerHTML =
+    '<div class="wip-crumb">' +
+      '<button type="button" class="btn small ghost" id="btnWipBack">← 返回列表</button>' +
+      '<span>库存工单 / <b>' + esc(w.code) + '</b></span>' +
+    '</div>' +
     '<h2>工单详情 ' + esc(w.code) + ' ' + wipStatusBadge(w) + '</h2>' +
+    '<div class="wip-kpis">' +
+      '<div class="wip-kpi"><span class="wip-kpi__l">计划</span><span class="wip-kpi__v">' + p.plannedTotal + '</span></div>' +
+      '<div class="wip-kpi wip-kpi--done"><span class="wip-kpi__l">已执行</span><span class="wip-kpi__v">' + p.executedTotal + '</span></div>' +
+      '<div class="wip-kpi' + (p.remainingTotal > 0 ? ' wip-kpi--remain' : '') + '"><span class="wip-kpi__l">剩余</span><span class="wip-kpi__v">' + p.remainingTotal + '</span></div>' +
+      '<div class="wip-kpi"><span class="wip-kpi__l">执行批次</span><span class="wip-kpi__v">' + ((w.execBatches || []).length || 0) + '</span></div>' +
+    '</div>' +
+    '<div class="progress" aria-label="工单进度 ' + Math.min(100, p.percent) + '%">' +
+      '<div class="progress__bar ' + (CORE.isCancelled(w) ? 'progress__bar--cancelled' : (p.percent >= 100 ? 'progress__bar--done' : (p.percent <= 0 ? 'progress__bar--todo' : 'progress__bar--active'))) +
+      '" style="width:' + Math.min(100, p.percent) + '%"></div></div>' +
     '<div class="kv"><b>类型</b>' + esc(WIP_NAMES[w.type] || w.type) + '（' + (sign < 0 ? '扣减库存' : '增加库存') + '）　' +
     '<b>日期</b>' + esc(w.date) + '　<b>计划合计</b>' + p.plannedTotal + '　<b>已执行</b>' + p.executedTotal + '　<b>剩余</b>' + p.remainingTotal + '　<b>进度</b>' + p.percent + '%</div>' +
 
@@ -3779,9 +3900,10 @@ function showWipDetail(code) {
     '<table class="grid grid-dense"><thead><tr><th>物料码</th><th>名称</th><th style="width:80px">计划</th><th style="width:80px">已执行</th><th style="width:80px">剩余</th><th style="width:80px">当前库存</th></tr></thead><tbody>' +
     p.items.map(it => {
       const m = findMat(it.matCode);
-      return '<tr><td data-th="物料码">' + esc(it.matCode) + '</td><td data-th="名称">' + esc(m ? m.name : '⚠未建档') + '</td>' +
+      return '<tr><td data-th="物料码"><button type="button" class="link-btn" data-mat="' + esc(it.matCode) + '">' + esc(it.matCode) + '</button></td>' +
+        '<td data-th="名称">' + (m ? esc(m.name) : '<span class="text-danger">⚠未建档</span>') + '</td>' +
         '<td data-th="计划">' + it.planned + '</td><td data-th="已执行" class="' + (it.executed > 0 ? 'wip-num--done' : 'wip-num--muted') + '">' + it.executed + '</td>' +
-        '<td data-th="剩余" class="' + (it.remaining > 0 ? 'wip-num--short' : 'wip-num--muted') + '">' + it.remaining + '</td>' +
+        '<td data-th="剩余" class="' + (it.remaining > 0 ? 'wip-num--pend' : 'wip-num--muted') + '">' + it.remaining + '</td>' +
         '<td data-th="当前库存">' + (m ? m.qty : '—') + '</td></tr>';
     }).join('') + '</tbody></table>' +
 
@@ -3879,7 +4001,9 @@ function showWipDetail(code) {
   });
   const rb = document.getElementById('btnWipReverse');
   if (rb) rb.addEventListener('click', showReversePreview);
-  document.getElementById('btnWipClose').addEventListener('click', () => { panel.style.display = 'none'; wipDetailCode = ''; });
+  document.getElementById('btnWipClose').addEventListener('click', backToWipList);
+  const bk = document.getElementById('btnWipBack');
+  if (bk) bk.addEventListener('click', backToWipList);
   // 删除工单：已执行过的必须先冲销，否则库存流水与结存会对不上
   const db = document.getElementById('btnWipDelete');
   if (db) db.addEventListener('click', () => {
@@ -4202,6 +4326,21 @@ function locateAction(act, kind, code) {
   }
 }
 document.addEventListener('click', e => {
+  const sb = e.target && e.target.closest ? e.target.closest('.next-strip__scan') : null;
+  if (sb) {
+    ctxSetOrder(state.workorders.find(x => x.code === sb.dataset.code), 'wip');
+    goTab('scan');
+    const si = document.getElementById('scanInput');
+    if (si) { si.value = 'WIP:' + sb.dataset.code; si.focus(); si.select(); }
+    return;
+  }
+  const mb = e.target && e.target.closest ? e.target.closest('.link-btn[data-mat]') : null;
+  if (mb) {
+    goTab('ledger');
+    const si = document.getElementById('matSearch');
+    if (si) { si.value = mb.dataset.mat; si.dispatchEvent(new Event('input', { bubbles: true })); }
+    return;
+  }
   const b = e.target && e.target.closest ? e.target.closest('.locate-act') : null;
   if (!b) return;
   locateAction(b.dataset.act, b.dataset.kind || '', b.dataset.code || '');
