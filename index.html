@@ -212,6 +212,36 @@ table.grid tr:hover td{background:#f7fafd;}
 .danger-zone{margin-top:12px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--surface)}
 .danger-zone>summary{cursor:pointer;padding:9px 14px;font-size:13px;color:var(--danger-fg);background:var(--danger-bg)}
 .danger-zone__body{padding:12px 14px;display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+/* ============================================================
+   04 COMPONENTS（阶段6 新增）：统一结果卡骨架 / WIP 实时预览 / 盘点横幅 / 定位诚实提示
+   ============================================================ */
+/* 所有扫码卡片共用同一顶部状态区 —— 让「成功 / 查询 / 警告 / 失败」在任何码型下
+   都出现在同一位置、用同一种表达（并带文字，不只靠颜色）。 */
+.scan-status{display:flex;align-items:center;gap:8px;min-height:36px;padding:8px 12px;
+  margin:-14px -14px 12px;border-radius:var(--r-lg) var(--r-lg) 0 0;font-size:14px;font-weight:600;
+  border-left:4px solid transparent}
+.scan-status__icon{flex:none;font-size:15px}
+.scan-status--ok{background:var(--done-bg);color:var(--done-fg);border-left-color:var(--done-fg)}
+.scan-status--info{background:var(--todo-bg);color:var(--todo-fg);border-left-color:var(--todo-fg)}
+.scan-status--warn{background:var(--doing-bg);color:var(--doing-fg);border-left-color:var(--doing-fg)}
+.scan-status--bad{background:var(--danger-bg);color:var(--danger-fg);border-left-color:var(--danger-fg)}
+/* WIP 实时预览：本次执行数量变化时，只读重算「执行后库存」与校验结论 */
+.exec-after--short{color:var(--danger-fg);font-weight:700}
+.exec-after--ok{color:var(--ink-strong);font-weight:600}
+.exec-summary{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:10px;
+  padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-md);
+  background:var(--surface-2);font-size:12.5px}
+.exec-summary--blocked{border-color:var(--danger-fg);background:var(--danger-bg)}
+.exec-summary__err{color:var(--danger-fg);font-weight:600}
+/* 盘点模式横幅：把「已进入盘点模式」从一个小勾选框变成常驻可见状态 */
+.stocktake-banner{display:none;margin:0 0 10px;padding:9px 12px;border-radius:var(--r-md);
+  background:#FFF4E0;border-left:5px solid var(--doing-fg);color:#7a4a00;font-size:13px;line-height:1.6}
+body.stocktake-on .stocktake-banner{display:block}
+/* 定位卡的「历史线索」诚实提示：位置来自历史扫码时必须显式声明，不能写成当前位置 */
+.locate-banner{display:block;margin:0 0 8px;padding:7px 10px;border-radius:var(--r-md);
+  background:var(--doing-bg);border-left:4px solid var(--doing-fg);color:var(--doing-fg);
+  font-size:12.5px;font-weight:600;line-height:1.6}
+.locate-evidence{font-size:12px;color:var(--text-muted)}
 /* 阶段5：物料台账的「库存数量」是唯一高风险写入口（改数必须填原因并写流水），
    用左侧琥珀条把它与普通属性输入框区分开。 */
 .cell-qty-risk{position:relative;background:rgba(232,160,32,.055)}
@@ -774,6 +804,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <div class="hint" style="color:#bfe0c8">对准二维码（MAT:/LOC:/CTN:/WIP:/NEC:/ITM:/MAN:），识别后自动填入</div>
         <button class="btn warn" id="btnCamClose">关闭摄像头</button>
       </div>
+      <div class="stocktake-banner" id="stocktakeBanner">📦 <b>盘点模式已开启</b> —— 扫 <b>MAT:</b> 物料码后输入实盘数，点「确认盘点」才会写入库存流水；其他码型仍按原方式处理。<button type="button" class="btn small ghost" id="btnStocktakeOff" style="margin-left:8px">退出盘点模式</button></div>
       <label style="display:inline-flex;align-items:center;gap:6px;margin-top:10px;font-size:13px;cursor:pointer;"><input type="checkbox" id="chkStocktake"> 📦 盘点模式（扫物料码 → 输实盘数 → 自动生成盘点差异流水）</label>
       <details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px;color:#445">☁️ InvenTree 实时同步（可选，设置一次即可）</summary>
       <div class="toolbar" style="margin-top:8px">
@@ -3312,18 +3343,33 @@ function findMat(code) { return state.materials.find(m => m.code === code); }
 
 /* ---------- 扫码结果渲染工具 ---------- */
 /** 位置线索卡片：库位 / 容器 / 模块区 + 最近扫码 / 流水 / 工单 时间 */
+/** 阶段6：统一结果卡的顶部状态区。所有扫码卡片共用同一骨架的这一段，
+ *  让「成功 / 查询 / 警告 / 失败」在任何码型下都出现在同一位置、用同一种表达，
+ *  且一律带文字（不只靠颜色）。kind: ok | info | warn | bad */
+function scanStatus(kind, text) {
+  const icon = { ok: '\u2713', info: '\u2139', warn: '\u25b3', bad: '\u2717' }[kind] || '\u2139';
+  return '<div class="scan-status scan-status--' + kind + '" role="status" aria-live="polite">' +
+    '<span class="scan-status__icon">' + icon + '</span><span>' + esc(text) + '</span></div>';
+}
 function locationCard(code, { withTimes = true } = {}) {
   const L = CORE.locateMaterial(state, code);
+  /* 阶段6 修正（诚实性）：位置证据必须与「它自己的时间」绑定。
+     CORE.locateMaterial 的 lastScan 是「最近一次任意扫码」（可能只是查询、没带位置），
+     而 L.loc 实际来自 lastScanWithLocation —— 两者不是同一条记录。
+     把 lastScan.time 直接贴在位置上，会让人误以为位置更新到了那个时刻。 */
+  const hist = CORE.scanHistoryFor(state, code, 50) || [];
+  const locEv = hist.find(h => h.loc || h.container || h.zone) || null;
+  const fromHistory = L.source === '最近扫码';
+
   const rows = [];
-  // 位置一律翻译成可读的「架-层-位 / 工位格 / 区块」；编码同时保留便于核对标签
   if (L.loc) {
     const r = CORE.resolveLocation(state, L.loc);
     rows.push('<b>库位</b><span style="font-weight:bold">' + esc(r.text) + '</span> <span class="hint">' + esc(L.loc) + '</span>' +
-      (L.source === '最近扫码' ? ' <span class="hint">（上次扫码时的位置）</span>' : ''));
+      (fromHistory ? ' <span class="hint">（当时记录，尚未现场确认）</span>' : ''));
   }
   if (L.container) {
     const c = CORE.resolveLocation(state, L.container);
-    rows.push('<b>容器</b>' + esc(L.container) + (c.containerAt ? ' <span class="hint">位于 ' + esc(c.containerAt.text) + '</span>' : ''));
+    rows.push('<b>容器</b>' + esc(L.container) + (c.containerAt ? ' <span class="hint">当前台账登记在 ' + esc(c.containerAt.text) + '</span>' : ''));
   }
   if (L.zone) {
     const z = CORE.resolveLocation(state, L.zone);
@@ -3332,14 +3378,23 @@ function locationCard(code, { withTimes = true } = {}) {
   if (!rows.length) rows.push('<span class="hint">（台账未登记库位 / 容器 / 模块区）</span>');
 
   const times = [];
-  if (L.lastScan) times.push('<b>最近扫码</b>' + esc(L.lastScan.time) + ' <span class="hint">' + CORE.timeAgo(L.lastScan.ts) + ' · ' + esc(L.lastScan.operator || '—') + '</span>');
-  if (L.lastTxn) times.push('<b>最近流水</b>' + esc(L.lastTxn.time) + ' <span class="hint">' + CORE.timeAgo(L.lastTxn.ts) + ' · ' + esc(L.lastTxn.type) + ' ' + (L.lastTxn.delta > 0 ? '+' : '') + L.lastTxn.delta + ' → ' + esc(L.lastTxn.balance) + (L.lastTxn.ref ? ' · 单 ' + esc(L.lastTxn.ref) : '') + '</span>');
+  if (fromHistory && locEv) {
+    times.push('<b>位置证据</b>' + esc(locEv.time) + ' <span class="hint">' + CORE.timeAgo(locEv.ts) + ' · ' + esc(locEv.operator || '—') +
+      ' · 这次扫码记录了上面的位置</span>');
+  }
+  if (L.lastScan) {
+    const sameAsEv = fromHistory && locEv && L.lastScan.seq === locEv.seq;
+    times.push('<b>最近一次扫码</b>' + esc(L.lastScan.time) + ' <span class="hint">' + CORE.timeAgo(L.lastScan.ts) + ' · ' + esc(L.lastScan.operator || '—') +
+      (sameAsEv ? '' : ' · 只是查询，不代表位置更新') + '</span>');
+  }
+  if (L.lastTxn) times.push('<b>最近流水</b>' + esc(L.lastTxn.time) + ' <span class="hint">' + CORE.timeAgo(L.lastTxn.ts) + ' · ' + esc(L.lastTxn.type) + ' ' + (L.lastTxn.delta > 0 ? '+' : '') + L.lastTxn.delta + ' \u2192 ' + esc(L.lastTxn.balance) + (L.lastTxn.ref ? ' · 单 ' + esc(L.lastTxn.ref) : '') + '</span>');
   if (L.lastOrder) times.push('<b>最近工单</b>' + esc(L.lastOrder.code) + ' <span class="hint">' + esc(WIP_NAMES[L.lastOrder.type] || L.lastOrder.type) + ' · ' + esc(CORE.statusLabel(L.lastOrder.status)) + (L.lastOrder.execTime ? ' · ' + esc(L.lastOrder.execTime) : '') + '</span>');
 
   const g = CORE.gradeLocation(state, L);
   const GRADE_TXT = { exact: '精确', container: '容器', zone: '模块区', clue: '历史线索', none: '无' };
   return '<div class="kv" style="margin-top:6px">' +
-    '<div><span class="hint">定位来源：' + esc(L.source) + '　定位精度：' + esc(GRADE_TXT[g.grade] || g.grade) + '</span></div>' +
+    (fromHistory ? '<span class="locate-banner">\u25b3 历史线索，不是当前位置确认 —— 到达后请扫描库位 / 容器标签并核对实物。</span>' : '') +
+    '<div><span class="hint">定位来源：' + esc(L.source) + '\u3000定位精度：' + esc(GRADE_TXT[g.grade] || g.grade) + '</span></div>' +
     rows.map(r => '<div>' + r + '</div>').join('') +
     (times.length && withTimes ? '<div style="margin-top:4px;border-top:1px dashed var(--line);padding-top:4px">' + times.map(t => '<div>' + t + '</div>').join('') + '</div>' : '') +
     '</div>';
@@ -3362,7 +3417,7 @@ function scanMat(code, box) {
   const stocktake = document.getElementById('chkStocktake').checked;
   if (m && stocktake) {
     box.className = 'scan-result panel flash-ok';
-    box.innerHTML = '<div class="kv"><b>物料码</b>' + esc(m.code) + '　<b>名称</b>' + esc(m.name) + '　<b>库位</b>' + esc(m.loc || '—') +
+    box.innerHTML = scanStatus('warn', '盘点模式 · 输入实盘数并点「确认盘点」才会写流水') + '<div class="kv"><b>物料码</b>' + esc(m.code) + '　<b>名称</b>' + esc(m.name) + '　<b>库位</b>' + esc(m.loc || '—') +
       '<br><b>账面库存</b><span style="font-size:20px;font-weight:bold;color:#16233a">' + m.qty + '</span></div>' +
       '<div class="toolbar" style="margin-top:10px"><label style="font-size:13px">实盘数量 <input type="number" id="stocktakeQty" value="' + m.qty + '" min="0" style="width:90px;border:1px solid var(--line);border-radius:4px;padding:5px 8px;font-size:14px"></label>' +
       '<button class="btn" id="btnStocktake">确认盘点</button><span class="hint">差异自动写入库存流水</span></div>';
@@ -3382,7 +3437,9 @@ function scanMat(code, box) {
   box.className = 'scan-result panel ' + (m ? 'flash-ok' : 'flash-bad');
   if (m) {
     const low = m.minQty > 0 && m.qty < m.minQty;
-    box.innerHTML = '<div class="kv" style="font-size:15px">' +
+    box.innerHTML = scanStatus((m.qty < 0 || low) ? 'warn' : 'ok',
+      (m.qty < 0 ? '负库存 · 请核查' : low ? '低于安全库存 · 请补货' : '已找到 · 只读查询（不改库存）')) +
+      '<div class="kv" style="font-size:15px">' +
       '<div><b>物料码</b>' + esc(m.code) + '　<b>名称</b><span style="font-size:17px;font-weight:bold">' + esc(m.name) + '</span></div>' +
       '<div><b>规格</b>' + esc(m.spec || '—') + '　<b>成本</b>¥' + esc(m.cost) + '</div>' +
       '<div style="margin-top:4px"><b>库存</b><span style="font-size:26px;font-weight:bold;color:' + (m.qty < 0 ? '#d33a2c' : low ? '#a4600a' : '#16233a') + '">' + m.qty + '</span>' +
@@ -3395,7 +3452,9 @@ function scanMat(code, box) {
   // ===== MAT: 未命中 → 回查最近扫码 / 流水 / 工单，给出最近位置线索 =====
   const L = CORE.locateMaterial(state, code);
   const hasClue = !!(L.lastScan || L.lastTxn || L.lastOrder);
-  box.innerHTML = '<div class="kv" style="font-size:15px">' +
+  box.innerHTML = scanStatus(hasClue ? 'warn' : 'bad',
+      hasClue ? '未找到物料 · 下面是历史线索，不是当前位置确认' : '未找到物料 · 且没有任何历史记录') +
+    '<div class="kv" style="font-size:15px">' +
     '<div><b>未找到物料</b>' + esc(code) + ' <span class="hint">（台账中无此编码）</span></div>' +
     (hasClue
       ? '<div style="margin-top:6px;padding:8px;background:#fff8e6;border:1px solid #f0d090;border-radius:6px">' +
@@ -3413,7 +3472,9 @@ function scanWhere(kind, code, box) {
   const total = list.reduce((a, m) => a + (Number(m.qty) || 0), 0);
   const lastScan = CORE.scanHistoryFor(state, code, 1)[0] || null;
   box.className = 'scan-result panel flash-ok';
-  box.innerHTML = '<div class="kv" style="font-size:15px">' +
+  box.innerHTML = scanStatus(list.length ? 'ok' : 'info',
+    (isZone ? '模块区 ' : kind === 'LOC:' ? '库位 ' : '容器 ') + code + (list.length ? ' · ' + list.length + ' 项物料' : ' · 该位置为空')) +
+    '<div class="kv" style="font-size:15px">' +
     '<div><b>' + (isZone ? '模块区' : kind === 'LOC:' ? '库位' : '容器') + '</b><span style="font-size:17px;font-weight:bold">' + esc(code) + '</span>' +
     (rec && rec.desc ? ' <span class="hint">' + esc(rec.desc) + '</span>' : '') +
     (rec && rec.kind ? ' <span class="hint">' + esc(rec.kind) + '</span>' : '') + '</div>' +
@@ -3434,14 +3495,15 @@ function scanNec(code, box) {
   const o = state.necOrders.find(x => x.code === code);
   if (!o) {
     box.className = 'scan-result panel flash-bad';
-    box.innerHTML = '<div class="kv"><b>未找到 NEC 工单</b>' + esc(code) + '<br><span class="hint">请在「NEC 任务」页确认工单号</span></div>';
+    box.innerHTML = scanStatus('bad', '未找到该 NEC 任务') + '<div class="kv"><b>未找到 NEC 工单</b>' + esc(code) + '<br><span class="hint">请在「NEC 任务」页确认工单号</span></div>';
     addScan('nec', 'NEC:', code, false, null);
     log('未命中 NEC 工单 ' + code);
     return;
   }
   const related = state.materials.filter(m => o.materials && String(o.materials).includes(m.code));
   box.className = 'scan-result panel flash-ok';
-  box.innerHTML = '<div class="kv" style="font-size:15px">' +
+  box.innerHTML = scanStatus('ok', 'NEC 任务 · 纯记录，不改库存') +
+    '<div class="kv" style="font-size:15px">' +
     '<div><b>NEC 工单</b><span style="font-size:17px;font-weight:bold">' + esc(o.code) + '</span>　<span class="badge st-' + esc(o.status) + '">' + esc(o.status) + '</span></div>' +
     '<div><b>标题</b>' + esc(o.title || '—') + '</div>' +
     '<div><b>类型</b>' + esc(NEC_TYPE_NAMES[o.type] || o.type || '—') + '　<b>负责人</b>' + esc(o.owner || '—') + '　<b>优先级</b>' + esc(o.priority || '—') + '</div>' +
@@ -3463,14 +3525,15 @@ function scanItem(code, box) {
   const it = state.items.find(x => x.code === code);
   if (!it) {
     box.className = 'scan-result panel flash-bad';
-    box.innerHTML = '<div class="kv"><b>未找到物品</b>' + esc(code) + '<br><span class="hint">请在「建档与编码 → ④ 物品标签生成」建档</span></div>';
+    box.innerHTML = scanStatus('bad', '未找到该物品') + '<div class="kv"><b>未找到物品</b>' + esc(code) + '<br><span class="hint">请在「建档与编码 → ④ 物品标签生成」建档</span></div>';
     addScan('item', 'ITM:', code, false, null);
     log('未命中物品 ' + code);
     return;
   }
   const loc = state.locations.find(l => l.code === it.loc);
   box.className = 'scan-result panel flash-ok';
-  box.innerHTML = '<div class="kv" style="font-size:15px">' +
+  box.innerHTML = scanStatus('ok', '物品 · 只读查询（不改库存）') +
+    '<div class="kv" style="font-size:15px">' +
     '<div><b>物品码</b>' + esc(it.code) + '　<b>名称</b><span style="font-size:17px;font-weight:bold">' + esc(it.name) + '</span></div>' +
     '<div><b>规格型号</b>' + esc(it.spec || '—') + '</div>' +
     '<div><b>库位</b><span style="font-size:17px;font-weight:bold;color:#16233a">' + esc(it.loc || '—') + '</span>' + (loc && loc.desc ? ' <span class="hint">' + esc(loc.desc) + '</span>' : '') + '</div>' +
@@ -3484,14 +3547,15 @@ function scanManual(code, box) {
   const mn = state.manuals.find(x => x.code === code);
   if (!mn) {
     box.className = 'scan-result panel flash-bad';
-    box.innerHTML = '<div class="kv"><b>未找到手册</b>' + esc(code) + '<br><span class="hint">请在「建档与编码 → ⑤ 手册标签生成」建档</span></div>';
+    box.innerHTML = scanStatus('bad', '未找到该手册') + '<div class="kv"><b>未找到手册</b>' + esc(code) + '<br><span class="hint">请在「建档与编码 → ⑤ 手册标签生成」建档</span></div>';
     addScan('manual', 'MAN:', code, false, null);
     log('未命中手册 ' + code);
     return;
   }
   const loc = state.locations.find(l => l.code === mn.loc);
   box.className = 'scan-result panel flash-ok';
-  box.innerHTML = '<div class="kv" style="font-size:15px">' +
+  box.innerHTML = scanStatus('ok', '手册 · 只读查询（不改库存）') +
+    '<div class="kv" style="font-size:15px">' +
     '<div><b>手册码</b>' + esc(mn.code) + '　<b>名称</b><span style="font-size:17px;font-weight:bold">' + esc(mn.name) + '</span></div>' +
     '<div><b>版本</b>' + esc(mn.ver || '—') + '</div>' +
     '<div><b>库位</b><span style="font-size:17px;font-weight:bold;color:#16233a">' + esc(mn.loc || '—') + '</span>' + (loc && loc.desc ? ' <span class="hint">' + esc(loc.desc) + '</span>' : '') + '</div>' +
@@ -3501,7 +3565,7 @@ function scanManual(code, box) {
 }
 function scanWip(code, box) {
   const w = state.workorders.find(x => x.code === code);
-  if (!w) { box.className = 'scan-result panel flash-bad'; box.innerHTML = '未找到工单：' + esc(code) + '（请先在「建档与编码」创建，或到「库存工单」页新建）'; log('未命中工单 ' + code); return; }
+  if (!w) { box.className = 'scan-result panel flash-bad'; box.innerHTML = scanStatus('bad', '未找到该工单') + '未找到工单：' + esc(code) + '（请先在「建档与编码」创建，或到「库存工单」页新建）'; log('未命中工单 ' + code); return; }
   const closed = CORE.isOrderExecuted(w);
   const sign = CORE.signOf(w.type);
   const verb = sign < 0 ? '扣减库存' : '增加库存';
@@ -3509,8 +3573,12 @@ function scanWip(code, box) {
   const lines = prog.items;
   const mergedHint = CORE.normalizeItems(w.items).items.length !== w.items.length;
   const partial = CORE.isPartiallyExecuted(w);
+  const st = closed
+    ? ['info', w.reverseInfo ? '已冲销 · 不可再执行' : w.cancelInfo ? '已取消 · 不可再执行' : '已闭环 · 不可再执行']
+    : (partial ? ['warn', '部分执行 · 可继续执行剩余'] : ['ok', '待执行 · 确认后才' + verb]);
   box.className = 'scan-result panel ' + (closed ? '' : 'flash-ok');
-  box.innerHTML = '<div class="kv"><b>工单号</b>' + esc(w.code) + '　' + wipStatusBadge(w) +
+  box.innerHTML = scanStatus(st[0], st[1]) +
+    '<div class="kv"><b>工单号</b>' + esc(w.code) + '　' + wipStatusBadge(w) +
     '<br><b>类型</b>' + esc(WIP_NAMES[w.type] || w.type) + '（' + verb + '）　<b>日期</b>' + esc(w.date) + '</div>' +
     '<div class="kv" style="margin-top:6px"><b>计划</b>' + prog.plannedTotal + '　<b>已执行</b>' + prog.executedTotal + '　<b>剩余</b>' + prog.remainingTotal + '　<b>进度</b>' + prog.percent + '%</div>' +
     (mergedHint ? '<p class="hint" style="margin:6px 0 0">ℹ️ 本工单存在同一物料多行，已合并为一行按<b>合计数量</b>校验与执行。</p>' : '') +
@@ -3518,28 +3586,67 @@ function scanWip(code, box) {
     '<table class="grid" style="margin-top:8px"><thead><tr><th>物料码</th><th>名称</th><th style="width:70px">计划</th><th style="width:70px">已执行</th><th style="width:90px">本次执行</th><th>执行后库存</th></tr></thead><tbody>' +
     lines.map(it => {
       const m = findMat(it.matCode);
-      let after = '—';
-      if (m) { const proj = sign < 0 ? m.qty - it.remaining : m.qty + it.remaining; after = proj < 0 ? '<span style="color:#d33a2c;font-weight:bold">⚠ 不足（将 -' + Math.abs(proj) + '）</span>' : proj; }
       const disabled = closed || it.remaining <= 0;
       return '<tr' + (it.remaining <= 0 && !closed ? ' style="opacity:.55"' : '') + '><td>' + esc(it.matCode) + '</td><td>' + esc(m ? m.name : '⚠未建档') + '</td>' +
       '<td>' + it.planned + '</td><td>' + it.executed + '</td>' +
       '<td><input type="number" class="execQty" data-code="' + esc(it.matCode) + '" value="' + it.remaining + '" min="0"' + (disabled ? ' disabled' : '') + '></td>' +
-      '<td>' + after + '</td></tr>'; }).join('') + '</tbody></table>' +
-    (closed ? '<p class="hint" style="margin-top:8px">' + (w.reverseInfo ? '已冲销（' + esc(w.reverseInfo.at) + '）' : w.cancelInfo ? '已取消（' + esc(w.cancelInfo.at) + '）' : '执行时间：' + esc(w.execTime || '—')) + '。工单已闭环，不可再执行。</p>'
-      : '<div class="toolbar" style="margin-top:10px"><button class="btn" id="btnExec">确认执行（' + verb + '）</button><span class="hint">可只填一部分数量，实现分批执行</span></div>');
-  if (!closed) document.getElementById('btnExec').addEventListener('click', () => {
-    // 收集执行数量（按物料）→ 交给 mes-core 汇总校验并执行；0 表示本次跳过该物料
-    const execQtyByCode = {};
-    box.querySelectorAll('.execQty').forEach(inp => { execQtyByCode[inp.dataset.code] = inp.value; });
-    const r = CORE.executeOrder(state, w, { execQtyByCode, operator: state.operator });
-    if (!r.ok) { alert('无法执行：\n' + r.errors.join('\n')); return; }
-    r.applied.forEach(a => { invPush(a.matCode, a.balance); fsPushStock(a.matCode, a.balance, a.delta, WIP_NAMES[w.type] || w.type, '', w.code, a.txn); });
-    fsPushRecord('workorders', [w]);   // 工单状态（未执行/部分执行/已执行）写回飞书
-    save(); renderLedger(); renderTxns(); renderWip();
-    log('执行工单 ' + w.code + '（' + WIP_NAMES[w.type] + '）：' + r.applied.map(a => a.matCode + (a.delta < 0 ? '' : '+') + a.delta).join('，') +
-      '｜状态 ' + CORE.statusLabel(w.status) + '｜操作人 ' + state.operator);
-    scanWip(code, box);
-  });
+      '<td class="exec-after" data-code="' + esc(it.matCode) + '">—</td></tr>'; }).join('') + '</tbody></table>' +
+    (closed
+      ? '<p class="hint" style="margin-top:8px">' + (w.reverseInfo ? '已冲销（' + esc(w.reverseInfo.at) + '）' : w.cancelInfo ? '已取消（' + esc(w.cancelInfo.at) + '）' : '执行时间：' + esc(w.execTime || '—')) + '。工单已闭环，不可再执行。</p>'
+      : '<div class="exec-summary" id="execSummary" aria-live="polite"></div>' +
+        '<div class="toolbar" style="margin-top:10px"><button class="btn" id="btnExec">确认执行（' + verb + '）</button><span class="hint">可只填一部分数量，实现分批执行</span></div>');
+
+  if (!closed) {
+    const summary = document.getElementById('execSummary');
+    const btn = document.getElementById('execBtn') || document.getElementById('btnExec');
+    const collect = () => { const o = {}; box.querySelectorAll('.execQty').forEach(i => { o[i.dataset.code] = i.value; }); return o; };
+    /* 阶段6：实时预览（**只读**）—— 每次改数量立即重算「执行后库存」与校验结论。
+       只调用 CORE.validateExecution（纯函数、不写状态），绝不调用 CORE.executeOrder。 */
+    const refresh = () => {
+      const v = CORE.validateExecution(state, w, collect());
+      const byCode = {};
+      (v.aggregated || []).forEach(a => { byCode[a.matCode] = a; });
+      box.querySelectorAll('.exec-after').forEach(cell => {
+        const a = byCode[cell.dataset.code];
+        const m = findMat(cell.dataset.code);
+        if (!a || !m) { cell.className = 'exec-after'; cell.textContent = '—'; return; }
+        const q = (a.qty == null || isNaN(a.qty)) ? 0 : a.qty;
+        const proj = sign < 0 ? m.qty - q : m.qty + q;
+        cell.className = 'exec-after ' + (proj < 0 ? 'exec-after--short' : 'exec-after--ok');
+        cell.textContent = proj < 0 ? ('⚠ ' + proj + '（不足 ' + Math.abs(proj) + '）') : String(proj);
+      });
+      const todo = (v.aggregated || []).filter(a => a.qty > 0);
+      const sum = todo.reduce((t, a) => t + a.qty, 0);
+      const remainAfter = prog.remainingTotal - sum;
+      summary.className = 'exec-summary' + (v.ok ? '' : ' exec-summary--blocked');
+      summary.innerHTML = '<span>本次 <b>' + todo.length + '</b> 项，共' + (sign < 0 ? '扣减' : '增加') + ' <b>' + sum + '</b></span>' +
+        '<span>执行后工单剩余 <b>' + (remainAfter < 0 ? 0 : remainAfter) + '</b></span>' +
+        '<span class="hint">填 0 = 跳过该物料</span>' +
+        (v.ok ? '<span class="hint">✓ 校验通过（提交时以核心再校验为准）</span>'
+              : '<span class="exec-summary__err">✗ ' + esc(v.errors.join('；')) + '</span>');
+      btn.disabled = !v.ok;
+      btn.textContent = v.ok ? ('确认执行（' + verb + '）') : '修正后执行';
+    };
+    box.querySelectorAll('.execQty').forEach(i => i.addEventListener('input', refresh));
+    refresh();
+    btn.addEventListener('click', () => {
+      const r = CORE.executeOrder(state, w, { execQtyByCode: collect(), operator: state.operator });
+      if (!r.ok) {
+        /* 阶段6 分级反馈：执行失败**留在结果卡内**（不弹窗、不自动消失） */
+        summary.className = 'exec-summary exec-summary--blocked';
+        summary.innerHTML = '<span class="exec-summary__err">✗ 无法执行：' + esc(r.errors.join('；')) + '</span>' +
+          '<span class="hint">请修正后重试；库存未发生任何变化。</span>';
+        log('执行被拒 ' + w.code + '：' + r.errors.join('；'));
+        return;
+      }
+      r.applied.forEach(a => { invPush(a.matCode, a.balance); fsPushStock(a.matCode, a.balance, a.delta, WIP_NAMES[w.type] || w.type, '', w.code, a.txn); });
+      fsPushRecord('workorders', [w]);   // 工单状态（未执行/部分执行/已执行）写回飞书
+      save(); renderLedger(); renderTxns(); renderWip();
+      log('执行工单 ' + w.code + '（' + WIP_NAMES[w.type] + '）：' + r.applied.map(a => a.matCode + (a.delta < 0 ? '' : '+') + a.delta).join('，') +
+        '｜状态 ' + CORE.statusLabel(w.status) + '｜操作人 ' + state.operator);
+      scanWip(code, box);
+    });
+  }
   log('扫描工单 ' + code + '（' + CORE.statusLabel(w.status) + '）');
 }
 /* 统一扫码入口：手输回车 / 扫码枪 / 摄像头 共用 */
@@ -3582,6 +3689,17 @@ function handleScan(raw) {
   else if (prefix === 'WIP:') scanWip(code, box);
   else scanMat(code, box);   // 兜底：未知前缀按物料查
 }
+/* 阶段6：盘点模式显性化。原先只有一个孤立的勾选框，用户容易误以为「输入即提交」。
+   现在勾选后显示常驻横幅，并在 body 上打 class 供 CSS 使用（纯呈现，不改任何写入逻辑）。 */
+(function initStocktakeBanner() {
+  const chk = document.getElementById('chkStocktake');
+  const off = document.getElementById('btnStocktakeOff');
+  if (!chk) return;
+  const sync = () => { document.body.classList.toggle('stocktake-on', !!chk.checked); };
+  chk.addEventListener('change', sync);
+  if (off) off.addEventListener('click', () => { chk.checked = false; sync(); });
+  sync();
+})();
 document.getElementById('scanInput').addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
   const raw = e.target.value; e.target.value = '';
