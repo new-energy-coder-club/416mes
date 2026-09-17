@@ -72,16 +72,19 @@ test('P6-6 页签与纸张必须一起记住并恢复（区卡只在 A4 可见�
   assert.ok(/if \(curType === 'zone'\) setPaper\('a4'\);/.test(HTML), '点击模块区页签时没有联动纸张');
 });
 
-test('P6-6 打印前要有守卫：区卡在标签纸模式下是隐藏的，不能直接打出白纸', () => {
-  const i = HTML.indexOf("document.getElementById('btnPrint')");
-  assert.ok(i > 0, '找不到打印入口');
-  const body = HTML.slice(i, HTML.indexOf('window.print()', i) + 20);
-  assert.ok(/curType === 'zone' && !document\.body\.classList\.contains\('a4paper'\)/.test(body),
-    '缺少「区卡 + 标签纸」的拦截');
-  assert.ok(/已自动切到 A4/.test(body), '拦截后要说明发生了什么');
-  // 拦截必须发生在 window.print() 之前
-  assert.ok(body.indexOf("contains('a4paper')") < body.lastIndexOf('window.print()'),
-    '守卫必须在 window.print() 之前生效');
+test('P6-6 标签输出已改为 PDF：不再走 window.print，且区卡不受标签纸模式影响', () => {
+  /* 用户决定：不接打印机，改为「导出 PDF 文件保存」。
+     于是原来那条「区卡在标签纸模式下会打出白纸」的守卫**失去前提** ——
+     现在区卡一律按 A4 单页生成，不再依赖 paper 模式。
+     仍然要守住的：① 未勾选不得导出；② 不得再调用 window.print（否则又回到接打印机）。 */
+  const i = HTML.lastIndexOf("document.getElementById('btnPrint')");
+  assert.ok(i > 0, '找不到标签输出入口');
+  const body = HTML.slice(i, i + 160);
+  assert.ok(!/window\.print\s*\(/.test(HTML), '已改为 PDF 导出，不得再直接调用打印机');
+  assert.match(body, /exportLabelsPdf/, '按钮必须接到 PDF 导出');
+  const fn = HTML.slice(HTML.indexOf('async function exportLabelsPdf'));
+  assert.match(fn, /if \(!sel\[curType\]\.size\)/, '未勾选必须拦下');
+  assert.match(fn, /curType === 'zone'[\s\S]{0,400}pdfZonePage/, '区卡必须走 A4 单页，不受标签纸模式影响');
 });
 
 

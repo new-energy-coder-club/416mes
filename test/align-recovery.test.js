@@ -488,14 +488,33 @@ test('阶段6：模块区（原本只能在 label 页删）必须仍可管理', 
   assert.match(fnSrc('resDelete'), /resImpact|resSyncState/);
 });
 
-test('阶段6：打印守卫 —— 未勾选不打印；模块区卡在标签纸模式下拦下并切 A4', () => {
-  const s = HTML.slice(HTML.indexOf("document.getElementById('btnPrint').addEventListener"), HTML.indexOf('/* ================= ③ 编码生成'));
-  assert.match(s, /if \(!sel\[curType\]\.size\)[\s\S]{0,80}return/, '未勾选必须拦下，不能打出一张白纸');
-  assert.match(s, /curType === 'zone'[\s\S]{0,120}a4paper/, '模块区卡在标签纸模式下必须被拦下');
-  assert.match(s, /setPaper\('a4'\)/, '拦下后要自动切到 A4 并说明，而不是让用户自己猜');
-  assert.match(s, /alert\(/, '必须给出文字解释（「打印机又坏了」是最容易误判的失败）');
-  /* 打印守卫必须在 window.print 之前 */
-  assert.ok(s.indexOf("curType === 'zone'") < s.indexOf('window.print()'), '守卫必须早于实际打印');
+test('阶段6/7：标签输出改为 PDF —— 未勾选拦下、不再调打印机、三种版式分明', () => {
+  const fn = fnSrc('exportLabelsPdf');
+  assert.match(fn, /if \(!sel\[curType\]\.size\)[\s\S]{0,80}return/, '未勾选必须拦下，不能生成空 PDF');
+  assert.ok(!/window\.print/.test(HTML), '已改为导出 PDF，不得再直接调用打印机');
+  assert.ok(!/已自动切到 A4/.test(HTML), '旧的「切 A4」守卫随打印一起移除（区卡现在一律 A4 单页）');
+  /* 三种版式必须分明：区卡 A4 单页 / A4 整版 3×7 / 标签纸一页一张 60×40 */
+  assert.match(fn, /pdfZonePage/, '区卡走 A4 单页');
+  assert.match(fn, /classList\.contains\('a4paper'\)[\s\S]{0,120}pdfA4SheetPage/, 'A4 整版走 3×7 密排');
+  assert.match(fn, /pdfLabelPage/, '标签纸模式一页一张');
+  /* 必须真的产出 PDF 字节并下载 */
+  assert.match(fn, /pdfFromJpegs\(/, '必须自建 PDF');
+  assert.match(fn, /application\/pdf/, '必须以 PDF 类型下载');
+  assert.match(fn, /a\.download|download\s*=/, '必须触发下载保存');
+});
+
+test('PDF 写入器结构正确（xref 偏移、DCTDecode、页数）', () => {
+  const s = fnSrc('pdfFromJpegs');
+  assert.match(s, /%PDF-1\.4/, '缺 PDF 头');
+  assert.match(s, /\/DCTDecode/, 'JPEG 必须以 DCTDecode 内嵌（这样才不用嵌中文字体）');
+  assert.match(s, /xref/, '必须有 xref 表');
+  assert.match(s, /startxref/, '必须有 startxref');
+  assert.match(s, /%\%EOF/, '缺 EOF');
+  /* 偏移必须在写入对象**之前**记录，否则 xref 全错、PDF 打不开 */
+  /* 必须要求两者**同时存在**且顺序正确：只比 indexOf 的话，某一行被删掉时
+     indexOf 返回 -1，而 -1 < N 永远成立 —— 断言会在「偏移根本没记录」时反而通过（实测踩过）。 */
+  assert.match(s, /off\[num\] = total; putStr\(num \+/, 'xref 偏移必须在写对象之前取，且两步都要在');
+  assert.match(s, /off\[imn\] = total;\n    putStr\(imn \+/, '图片对象的偏移同理');
 });
 
 test('阶段6：条码机读串前缀必须与扫码识别一致（对象来源可辨）', () => {
