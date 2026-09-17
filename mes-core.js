@@ -199,6 +199,15 @@
       execQty: [],
       execBatches: []
     };
+    /* B10 闸门：同一工单号不能建两张单。
+       实测踩过：新建按钮是 async 且无重入闸门，取号又在 await 之前读本地计数器
+       （窗口最长 8 秒）→ 连点 6 次全都算出同一个号，本地出现 6 条同号工单；
+       推送时又被飞书按业务键折叠成 1 行 → 界面报「本地多 5」，且那条差永远消不掉。
+       code 为空的历史用法（旧测试/内部构造）不受影响，判空必须保留。 */
+    if (opts.code && state.workorders.some(function (w) { return w && w.code === opts.code; })) {
+      return { ok: false, errors: ['工单号已存在：' + opts.code + '（同一工单号不能建两张单）'],
+        dropped: norm.dropped, merged: mergedCodes(norm.items) };
+    }
     state.workorders.push(order);
     return { ok: true, errors: [], order: order, merged: mergedCodes(norm.items), dropped: norm.dropped };
   }

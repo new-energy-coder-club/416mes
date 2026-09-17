@@ -1671,3 +1671,24 @@ test('B4 账本修数：每条流水都缺余量时全部报出来（不静默�
   // 第一条缺余量 → 无法定期初 → 该物料整组跳过（宁可不动，也不猜）
   assert.equal(p.qtyFixes.length, 0, '期初无法确定时不得猜');
 });
+
+/* ---------- B10：同号工单（真机反馈：连点新建产生 6 条同号） ---------- */
+
+test('B10【关键】同一工单号不得建两张单', () => {
+  const st = { materials: [{ code: 'MAT-A', qty: 0 }], workorders: [] };
+  const r1 = Core.createOrder(st, { type: 'LL', code: 'LL20260917004', items: [{ matCode: 'MAT-A', qty: 1 }] });
+  assert.equal(r1.ok, true);
+  const r2 = Core.createOrder(st, { type: 'LL', code: 'LL20260917004', items: [{ matCode: 'MAT-A', qty: 1 }] });
+  assert.equal(r2.ok, false, '同号第二次必须被拒（实测连点 6 次产生了 6 条同号工单）');
+  assert.match(r2.errors.join('|'), /工单号已存在/);
+  assert.equal(st.workorders.length, 1, '不能真的建出第二条');
+});
+
+test('B10 闸门不能误伤：无 code 的旧用法与不同 code 都要照常放行', () => {
+  const st = { materials: [{ code: 'MAT-A', qty: 0 }], workorders: [] };
+  assert.equal(Core.createOrder(st, { type: 'LL', code: '', items: [{ matCode: 'MAT-A', qty: 1 }] }).ok, true);
+  assert.equal(Core.createOrder(st, { type: 'LL', code: '', items: [{ matCode: 'MAT-A', qty: 1 }] }).ok, true,
+    'code 为空的历史用法必须继续可用（旧测试依赖它）');
+  assert.equal(Core.createOrder(st, { type: 'LL', code: 'A-1', items: [{ matCode: 'MAT-A', qty: 1 }] }).ok, true);
+  assert.equal(Core.createOrder(st, { type: 'LL', code: 'A-2', items: [{ matCode: 'MAT-A', qty: 1 }] }).ok, true);
+});

@@ -97,3 +97,54 @@ test('P6-6 补：inventree 库位树必须按「类型」选根，不能把模�
     '还是「工位 / 其它→货架」的二分法 —— 模块区和站点会被塞进货架区');
   assert.ok(/unknownKinds/.test(src) && /missingRoots/.test(src), '未知类型/缺根必须告警，不能静默');
 });
+
+/* ================= B9：工单详情白屏（阶段七之后的真机反馈） ================= */
+
+test('B9【关键】工单不存在时不得先把列表视图切走（否则整页空白，只能 F5）', () => {
+  const s = fnSrc('showWipDetail');
+  const guard = s.indexOf('if (!w)');
+  const addCls = s.indexOf("classList.add('wip-detail-open')");
+  assert.ok(guard >= 0, 'showWipDetail 里必须存在「找不到工单」的判断');
+  assert.ok(addCls > guard,
+    'classList.add(\'wip-detail-open\') 必须在存在性判断**之后** —— ' +
+    '原来先切视图再 find，找不到就 return，于是列表被隐藏、详情面板从未显示 = 整页空白');
+  assert.ok(/backToWipList\(\)/.test(s.slice(guard, guard + 260)),
+    '找不到工单时必须回退到列表（只 return 会把列表留在隐藏态）');
+  assert.ok(/ctxClear\(\)/.test(s.slice(guard, guard + 260)),
+    '「当前对象」条不能继续指向一个不存在的工单号（截图里的幽灵 LL20260912001）');
+});
+
+test('B9 renderWip 的兜底必须能恢复列表视图（只藏面板不够）', () => {
+  const r = fnSrc('renderWip');
+  assert.ok(/classList\.remove\('wip-detail-open'\)/.test(r),
+    'renderWip 的兜底只把详情面板 display:none，却没摘 .wip-detail-open —— ' +
+    '列表仍被 CSS 隐藏，结果是空白。日志/同步替换掉工单时就会走到这条路径');
+});
+
+test('B9 删除工单后不得留下白屏与幽灵「当前对象」', () => {
+  const i = HTML.indexOf("getElementById('btnWipDelete')");
+  assert.ok(i > 0, '找不到 btnWipDelete 处理器');
+  const body = HTML.slice(i, i + 1200);
+  assert.ok(/backToWipList\(\)/.test(body),
+    '删完工单没有回到列表视图（原来只写 wipDetailCode=\'\' + panel.display=\'none\'，类还留着 → 白屏）');
+  assert.ok(/ctxClear\(\)/.test(body), '「当前对象」仍会指向已删除的工单');
+});
+
+test('B10 新建工单必须有重入闸门，且取号占号要在 await 之后', () => {
+  // 重入闸门：必须在第一个 await 之前禁用按钮
+  const i = HTML.indexOf("document.getElementById('btnGenWip')");
+  assert.ok(i > 0, '找不到 btnGenWip 处理器');
+  const body = HTML.slice(i, i + 3000);
+  const dis = body.indexOf('disabled = true');
+  const aw = body.indexOf('await fsNextWorkorderSerial');
+  assert.ok(dis >= 0, 'btnGenWip 没有重入闸门 —— 连点会并发取到同一个号并建出多条同号工单');
+  assert.ok(dis < aw, '重入闸门必须在第一次 await 之前，否则并发已经发生');
+  assert.ok(/finally/.test(body), '必须 try/finally：有 alert 提前返回的分支，否则按钮会永久禁用');
+
+  // 取号占号：await 之后必须重读并同步占号
+  const s = fnSrc('fsNextWorkorderSerial');
+  assert.ok(/state\.serials\[key\] = next/.test(s), '占号必须在取号函数内部同步完成（不能只在调用处事后覆盖）');
+  const catchIdx = s.indexOf('catch');
+  assert.ok(catchIdx > 0 && /state\.serials\[key\]/.test(s.slice(catchIdx)),
+    'await/catch 之后必须重新读 state.serials[key] —— 原实现只在 await 之前读一次快照，这正是 6 连击同号的成因');
+});
