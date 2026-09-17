@@ -319,6 +319,29 @@ body.stocktake-on .stocktake-banner{display:block}
 .locate-fresh--stale{background:var(--doing-bg);color:var(--doing-fg)}
 .locate-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .locate-after{margin-top:8px;font-size:12px;color:var(--text-muted)}
+/* ============================================================
+   05 PAGES（阶段16）：库存工单列表（ui优化.md §5.2）
+   · 顶部状态摘要卡：五个状态各带数量，点击即筛选
+   · 危险动作独立成块：原因用界面内文本框（不再 prompt）
+   · 冲销先出预览面板（列出将被回退的物料/数量/预计库存），再二次确认
+   ============================================================ */
+.wip-summary{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.wip-chip{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;
+  border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface);
+  color:var(--text-sub);font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit}
+.wip-chip__i{font-size:13px}
+.wip-chip b{font-variant-numeric:tabular-nums}
+.wip-chip:hover{border-color:var(--cyan-ink);color:var(--cyan-ink)}
+.wip-chip.is-on{border-color:var(--cyan-ink);background:var(--todo-bg);color:var(--todo-fg)}
+.wip-danger{margin-top:12px;padding:10px 12px;border:1px solid var(--line);
+  border-left:4px solid var(--danger-fg);border-radius:var(--r-lg);background:var(--surface)}
+.wip-danger__h{font-size:12px;font-weight:600;color:var(--danger-fg);margin-bottom:8px}
+.danger-reason{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:12.5px}
+.danger-reason input{flex:1 1 200px;min-width:0}
+.reverse-panel{margin-top:10px;padding:10px 12px;border:1px solid var(--danger-fg);
+  border-radius:var(--r-md);background:var(--danger-bg)}
+.reverse-panel[hidden]{display:none}
+.reverse-panel__h{font-size:12.5px;font-weight:600;color:var(--danger-fg);margin-bottom:6px}
 /* §7.2 触控目标：桌面 ≥32px、手机 ≥44px。这三颗是定位卡的主动作，不能是 23px 的默认小按钮 */
 .locate-actions .btn{min-height:32px;padding-left:12px;padding-right:12px;display:inline-flex;align-items:center}
 /* 移动端覆盖见 06 RESPONSIVE 块内（需排在 .btn.small 之后才能生效） */
@@ -618,12 +641,14 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   /* 定位卡的动作按钮是主动作：必须压过上面的 .btn.small(34px)。
      同优先级下后定义者胜，这里用 .btn.small 再提一级到 (0,3,0) 以确保生效。 */
   .locate-actions .btn.small{min-height:44px;}
+  /* 工单状态摘要卡是可点元素，手机上同样要 ≥44px */
+  .wip-chip{min-height:44px;}
   input,select,textarea{font-size:16px;}
   /* .field 系列的优先级(0,1,0)高于上面的元素选择器(0,0,1)，必须显式覆盖，
      否则搜索框仍是 12–14px，iOS 聚焦时会自动放大整页。
      阶段11 之前这些字号写在各控件的 inline style 上（inline 优先级最高），
      根本没法用 CSS 覆盖 —— 迁到 class 之后这个既有问题才修得掉。 */
-  .field,.field--md,.field--sm,.field--xs,.field--inv{font-size:16px;}
+  .field,.field--md,.field--sm,.field--xs,.field--inv{font-size:16px;min-height:44px;}
   /* 工单执行的汇总栏在手机上纵向堆叠 */
   .exec-summary{flex-direction:column;align-items:flex-start;gap:4px;}
   /* 当前对象条：chip 与按钮都是可点元素，手机上必须达到 44px 触控目标；
@@ -962,6 +987,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
     </div>
     <div class="panel">
       <h2>库存工单管理（WIP · 建单只登记计划，扫码确认执行才改库存）</h2>
+      <div class="wip-summary" id="wipSummary" role="group" aria-label="按状态筛选工单"></div>
       <div class="toolbar">
         <input class="field field--w250" type="search" id="wipSearch" placeholder="搜索工单号 / 物料码 / 物料名">
         <select class="field" id="wipFilterStatus">
@@ -3407,6 +3433,29 @@ function wipMatchesFilter(w, kw, st, ty) {
   });
 }
 
+/** 阶段16（§5.2）：顶部状态摘要卡。五档各带数量，点击即筛选。 */
+function renderWipSummary() {
+  const el = document.getElementById('wipSummary');
+  if (!el) return;
+  const sel = document.getElementById('wipFilterStatus');
+  const cur = sel ? sel.value : '';
+  const all = state.workorders;
+  const cnt = v => v ? all.filter(w => w.status === v).length : all.length;
+  const items = [['', '全部', ''], ['未执行', '待执行', '\u25cb'], ['部分执行', '部分执行', '\u25d0'],
+    ['已执行', '已执行', '\u2713'], ['已取消', '已取消', '\u2014']];
+  el.innerHTML = items.map(([v, label, icon]) =>
+    '<button type="button" class="wip-chip' + (cur === v ? ' is-on' : '') + '" data-status="' + esc(v) + '"' +
+    (cur === v ? ' aria-pressed="true"' : ' aria-pressed="false"') + '>' +
+    (icon ? '<span class="wip-chip__i">' + icon + '</span>' : '') + esc(label) + ' <b>' + cnt(v) + '</b></button>').join('');
+}
+document.addEventListener('click', e => {
+  const b = e.target && e.target.closest ? e.target.closest('.wip-chip') : null;
+  if (!b) return;
+  const sel = document.getElementById('wipFilterStatus');
+  if (sel) { sel.value = b.dataset.status; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+  renderWipSummary();
+});
+
 function renderWip() {
   const tb = document.querySelector('#wipTable tbody');
   if (!tb) return;
@@ -3444,6 +3493,7 @@ function renderWip() {
 
   const all = state.workorders;
   const count = s => all.filter(w => w.status === s).length;
+  renderWipSummary();
   document.getElementById('wipStats').textContent =
     '共 ' + all.length + ' 张：待执行 ' + count('未执行') + ' · 部分执行 ' + count('部分执行') +
     ' · 已执行 ' + count('已执行') + ' · 已取消 ' + count('已取消') + (shown.length !== all.length ? '（筛选出 ' + shown.length + ' 张）' : '');
@@ -3491,14 +3541,24 @@ function showWipDetail(code) {
       '<tr><td colspan="7" class="empty-row">（该工单尚未产生流水）</td></tr>') +
     '</tbody></table>' +
 
-    '<div class="toolbar" style="margin-top:12px">' +
+    '<div class="toolbar mt-12">' +
     (open ? '<button class="btn" id="btnWipExec">去扫码执行（剩余 ' + p.remainingTotal + '）</button>' : '') +
-    (CORE.isPending(w) ? '<button class="btn danger" id="btnWipCancel">取消工单</button>' : '') +
-    (p.anyExecuted && !CORE.isCancelled(w) ? '<button class="btn danger" id="btnWipReverse">冲销工单（回退 ' + p.executedTotal + '）</button>' : '') +
-    '<button class="btn ghost" id="btnWipDelete">删除工单</button>' +
     '<button class="btn ghost" id="btnWipClose">关闭详情</button>' +
     (w.reverseInfo ? '<span class="hint">已于 ' + esc(w.reverseInfo.at) + ' 由 ' + esc(w.reverseInfo.operator || '—') + ' 冲销</span>' : '') +
     (w.cancelInfo ? '<span class="hint">已于 ' + esc(w.cancelInfo.at) + ' 由 ' + esc(w.cancelInfo.operator || '—') + ' 取消' + (w.cancelInfo.reason ? '（' + esc(w.cancelInfo.reason) + '）' : '') + '</span>' : '') +
+    '</div>' +
+    /* 阶段16（§5.2）：危险动作独立成块，与普通动作分开；原因用界面内文本框而非 prompt */
+    '<div class="wip-danger">' +
+      '<div class="wip-danger__h">⚠ 危险操作（会写库存流水与飞书）</div>' +
+      '<label class="danger-reason">原因（可留空）' +
+        '<input type="text" id="wipReason" class="field field--sm" maxlength="80" placeholder="如：客户取消 / 录错单">' +
+      '</label>' +
+      '<div class="toolbar">' +
+        (CORE.isPending(w) ? '<button class="btn danger" id="btnWipCancel">取消工单</button>' : '') +
+        (p.anyExecuted && !CORE.isCancelled(w) ? '<button class="btn danger" id="btnWipReverse">冲销工单（回退 ' + p.executedTotal + '）</button>' : '') +
+        '<button class="btn ghost" id="btnWipDelete">删除工单</button>' +
+      '</div>' +
+      '<div class="reverse-panel" id="reversePanel" hidden></div>' +
     '</div>';
   panel.style.display = 'block';
 
@@ -3509,10 +3569,50 @@ function showWipDetail(code) {
     const si = document.getElementById('scanInput');
     if (si) { si.value = 'WIP:' + w.code; si.focus(); si.select(); }
   });
+  // 阶段16（§5.2）：原因改为界面内文本框（可留空规则不变）
+  const readReason = () => { const el = document.getElementById('wipReason'); return el ? el.value.trim() : ''; };
+  const doReverse = () => {
+    const reason = readReason();
+    const r = CORE.reverseOrder(state, w, { reason, operator: state.operator });
+    if (!r.ok) { alert('冲销失败：' + r.error); return; }
+    r.applied.forEach(a => { invPush(a.matCode, a.balance); fsPushStock(a.matCode, a.balance, a.delta, '冲销', reason || ('冲销 ' + w.code), w.code, a.txn); });
+    save(); renderLedger(); renderTxns(); renderWip(); showWipDetail(code);
+    log('冲销工单 ' + w.code + '：' + r.applied.map(a => a.matCode + (a.delta > 0 ? '+' : '') + a.delta).join('，') + '｜操作人 ' + state.operator);
+    fsPushRecord('workorders', [w]);   // 冲销记录 + 已取消状态写回飞书
+  };
+  /* 阶段16（§5.2）：冲销先出预览面板 —— 明确列出将反向变更的物料、数量与预计库存，
+     再由用户点「确认冲销」。原先是一句 prompt + 一个 confirm，看不到具体会影响什么。 */
+  const showReversePreview = () => {
+    const el = document.getElementById('reversePanel');
+    if (!el) return;
+    const p2 = CORE.orderProgress(w);
+    const sign = CORE.signOf(w.type);
+    const rows = p2.items.filter(it => it.executed > 0).map(it => {
+      const m = findMat(it.matCode);
+      const cur = m ? (Number(m.qty) || 0) : null;
+      const after = cur === null ? null : Math.round((cur - sign * it.executed) * 1e6) / 1e6;
+      return '<tr><td data-th="物料码">' + esc(it.matCode) + '</td>' +
+        '<td data-th="名称">' + esc(m ? m.name : '⚠未建档') + '</td>' +
+        '<td data-th="已执行" class="num">' + it.executed + '</td>' +
+        '<td data-th="冲销方向">' + (sign < 0 ? '加回 +' : '扣回 −') + it.executed + '</td>' +
+        '<td data-th="当前库存" class="num">' + (cur === null ? '—' : cur) + '</td>' +
+        '<td data-th="冲销后" class="num">' + (after === null ? '—' : after) + '</td></tr>';
+    }).join('');
+    el.innerHTML = '<div class="reverse-panel__h">△ 冲销预览 —— 下列库存将被回退（会新增流水，不可撤销）</div>' +
+      '<table class="grid grid-dense"><thead><tr><th>物料码</th><th>名称</th><th class="num">已执行</th><th>冲销方向</th><th class="num">当前库存</th><th class="num">冲销后</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+      '<div class="toolbar mt-8">' +
+        '<button class="btn danger" id="btnWipReverseConfirm">确认冲销 ' + p2.executedTotal + ' 件</button>' +
+        '<button class="btn small ghost" id="btnWipReverseCancel">返回</button>' +
+        '<span class="hint">确认后工单置为「已取消」。</span>' +
+      '</div>';
+    el.hidden = false;
+    document.getElementById('btnWipReverseConfirm').addEventListener('click', doReverse);
+    document.getElementById('btnWipReverseCancel').addEventListener('click', () => { el.hidden = true; });
+  };
   const cb = document.getElementById('btnWipCancel');
   if (cb) cb.addEventListener('click', () => {
-    const reason = prompt('取消工单 ' + w.code + ' 的原因（可留空）：', '');
-    if (reason === null) return;
+    const reason = readReason();
+    if (!confirm('取消工单 ' + w.code + '？工单将置为「已取消」' + (reason ? '（原因：' + reason + '）' : '') + '，库存不变。')) return;
     const r = CORE.cancelOrder(state, w, { reason, operator: state.operator });
     if (!r.ok) { alert('取消失败：' + r.error); return; }
     fsPushRecord('workorders', [w]);   // 已取消状态写回飞书
@@ -3520,18 +3620,7 @@ function showWipDetail(code) {
     log('取消工单 ' + w.code + (reason ? '（' + reason + '）' : '') + '｜操作人 ' + state.operator);
   });
   const rb = document.getElementById('btnWipReverse');
-  if (rb) rb.addEventListener('click', () => {
-    const p2 = CORE.orderProgress(w);
-    const reason = prompt('冲销工单 ' + w.code + '：将把已执行的 ' + p2.executedTotal + ' 件按原方向回退到库存，然后关闭工单。\n冲销原因（可留空）：', '');
-    if (reason === null) return;
-    if (!confirm('确认冲销 ' + w.code + '？库存将回退，且写入冲销流水（不可撤销）。')) return;
-    const r = CORE.reverseOrder(state, w, { reason, operator: state.operator });
-    if (!r.ok) { alert('冲销失败：' + r.error); return; }
-    r.applied.forEach(a => { invPush(a.matCode, a.balance); fsPushStock(a.matCode, a.balance, a.delta, '冲销', reason || ('冲销 ' + w.code), w.code, a.txn); });
-    save(); renderLedger(); renderTxns(); renderWip(); showWipDetail(code);
-    log('冲销工单 ' + w.code + '：' + r.applied.map(a => a.matCode + (a.delta > 0 ? '+' : '') + a.delta).join('，') + '｜操作人 ' + state.operator);
-    fsPushRecord('workorders', [w]);   // 冲销记录 + 已取消状态写回飞书
-  });
+  if (rb) rb.addEventListener('click', showReversePreview);
   document.getElementById('btnWipClose').addEventListener('click', () => { panel.style.display = 'none'; wipDetailCode = ''; });
   // 删除工单：已执行过的必须先冲销，否则库存流水与结存会对不上
   const db = document.getElementById('btnWipDelete');
