@@ -137,6 +137,11 @@ test('B10 新建工单必须有重入闸门，且取号占号要在 await 之后
   const body = HTML.slice(i, i + 3000);
   const dis = body.indexOf('disabled = true');
   const aw = body.indexOf('await fsNextWorkorderSerial');
+  /* ⚠️ 只断言「有 disabled = true」是不够的 —— 变异测试证明：删掉前面那句
+     `if (_gb.disabled) return;`（真正防并发的那句）时，仅靠 disabled=true 的断言仍然通过。
+     必须同时断言「进入时先检查并提前返回」。 */
+  assert.ok(/\.disabled\)\s*return/.test(body),
+    'btnGenWip 缺少「已在执行中就提前返回」这句 —— 只 disable 不 return 挡不住并发（变异测试证实）');
   assert.ok(dis >= 0, 'btnGenWip 没有重入闸门 —— 连点会并发取到同一个号并建出多条同号工单');
   assert.ok(dis < aw, '重入闸门必须在第一次 await 之前，否则并发已经发生');
   assert.ok(/finally/.test(body), '必须 try/finally：有 alert 提前返回的分支，否则按钮会永久禁用');
