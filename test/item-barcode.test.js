@@ -71,3 +71,14 @@ test('EAN-13 synthetic barcode decodes (5901234123457)',()=>{
   assert.equal(r.text,'5901234123457');
   assert.equal(r.format,'EAN-13');
 });
+
+/* 鲁棒性：标签只占整帧中间一小条（模拟取景画面），整帧+中间带兜底必须解出 */
+test('small barcode inside a large mostly-blank frame decodes via band fallback',()=>{
+  const thin=code39Image('WP-001');
+  const bigW=thin.width,bigH=thin.height*4;
+  const data=new Uint8ClampedArray(bigW*bigH*4);data.fill(245);
+  const off=Math.floor(thin.height*1.5);
+  for(let y=0;y<thin.height;y++)data.set(thin.data.subarray(y*thin.width*4,(y+1)*thin.width*4),(off+y)*bigW*4);
+  const r=barcode.decode({width:bigW,height:bigH,data});
+  assert.equal(r.text,'WP-001');
+});
