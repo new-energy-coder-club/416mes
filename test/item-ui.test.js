@@ -38,3 +38,13 @@ test('guided activate: unknown container uses current row LOC as target and resu
  assert.equal(s.queued&&s.queued.kind,'activateContainer');assert.equal(s.queued&&s.queued.target.loc,'L-A');assert.equal(s.submitted,1);
  assert.deepEqual(page.scan.row().values.map(v=>v.code),['L-A','C-OLD']);
 });
+test('guided verify: unknown item on receive offers switching to verifyLegacy row',async()=>{
+ const s=setupGuided();s.state.items.push({code:'WP-OLD',name:'旧物品'});
+ s.state.containers[0].status='active';   // 先把容器置为可用，专注验证物品引导
+ await s.page.accept('LOC:L-A');await s.page.accept('CTN:C-OLD');
+ s.document.getElementById('itmCode').value='ITM:WP-OLD';s.document.getElementById('itmScanBtn').click();await tickN();
+ assert.match(s.document.getElementById('itmStatus').textContent,/尚待核实|重复入库/);
+ const action=s.document.getElementById('itmStatus').querySelector('button');assert.ok(action,'旧物品应提供切换引导');
+ action.click();await tickN();
+ assert.equal(s.page.scan.row().kind,'verifyLegacy');assert.match(s.document.getElementById('itmStep').textContent,/旧物品/);
+});
