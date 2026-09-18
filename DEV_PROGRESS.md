@@ -73,7 +73,7 @@ S3增补：未持久化失败可同opId原载荷重试，reset改变意图清旧
 
 ## S5 — 冻结候选交付（已完成项与限制详见LINE_REPORT）
 
-最终 `npm test` 无代码/测试修改复跑 **577/577通过，退出0，89747ms**：`test-logs/S5-final-npm-retest.log`。原MAT并发断言单独复跑1/1通过，保留先前失败日志，不隐瞒偶发。独立 `npm run test:browser` **1/1通过，退出0**：`test-logs/S5-browser-routes.log`；所有相关后台任务已收集，服务由测试清理。按主会话指示停止扩功能，已知功能缺口与外部门禁明确列入LINE_REPORT。S5提交后记录精确HEAD。
+最终 `npm test` 无代码/测试修改复跑 **577/577通过，退出0，89747ms**：`test-logs/S5-final-npm-retest.log`。原MAT并发断言单独复跑1/1通过，保留先前失败日志，不隐瞒偶发。独立 `npm run test:browser` **1/1通过，退出0**：`test-logs/S5-browser-routes.log`；所有相关后台任务已收集，服务由测试清理。按主会话指示停止扩功能，已知功能缺口与外部门禁明确列入LINE_REPORT。S5代码提交：`231993e054d5b1f466c5b4aeb69ecd81cc974e47`；随后仅文档登记提交号，不再修改候选代码。
 
 新增test/item-browser.test.js完整index.html Chromium启动（非仅组件mount），导航前拦截全部外网/全部API仅fixture；390px查询→扫码→真实IDB草稿→reload恢复→命令保存→禁写API→未知保留，MAT7不变，pageErrors为空。初次load等待超时，加原生dialog处理和domcontentloaded后完整通过，S5-browser-retest.log；被阻断旧默认远端origin仅记录，未放行外网。锁版playwright-core1.58.2为dev依赖，使用系统Chromium，不改全局环境。仍需完整fake仓储→另一客户端闭环及最终报告/回归。
 
