@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "locations": [
+    {"code":"L-A","kind":"货架","desc":"隔离测试库位A","status":"active"},
+    {"code":"L-B","kind":"货架","desc":"隔离测试库位B","status":"active"},
+    {"code":"L-X","kind":"货架","desc":"停用库位","status":"disabled"}
+  ],
+  "containers": [
+    {"code":"C-A","type":"箱","loc":"L-A","status":"active","version":2,"lastOpId":"fixture-ca"},
+    {"code":"C-B","type":"箱","loc":"L-B","status":"active","version":5,"lastOpId":"fixture-cb"},
+    {"code":"C-U","type":"箱","loc":"","status":"active","version":0,"lastOpId":""},
+    {"code":"C-X","type":"箱","loc":"L-A","status":"disabled","version":1,"lastOpId":"fixture-cx"}
+  ],
+  "items": [
+    {"code":"I-P","name":"同名测试物品","spec":"单件","status":"pending","container":"","version":0,"lastOpId":""},
+    {"code":"I-A","name":"同名测试物品","spec":"单件","status":"in_stock","container":"C-A","version":3,"lastOpId":"fixture-ia"},
+    {"code":"I-B","name":"其他在库物品","spec":"单件","status":"in_stock","container":"C-B","version":1,"lastOpId":"fixture-ib"},
+    {"code":"I-O","name":"已出库物品","spec":"单件","status":"out","container":"","version":4,"lastOpId":"fixture-io"},
+    {"code":"I-U","name":"旧记录","spec":"未迁移","loc":"L-A"},
+    {"code":"I-R","name":"作废物品","spec":"单件","status":"retired","container":"","version":1,"lastOpId":"fixture-ir"},
+    {"code":"001","name":"前导零","spec":"单件","status":"pending","container":"","version":0,"lastOpId":""},
+    {"code":"1","name":"无前导零","spec":"单件","status":"pending","container":"","version":0,"lastOpId":""}
+  ],
+  "materials": [{"code":"M-KEEP","name":"不应受ITM影响的旧物料","spec":"旧数量账","qty":7,"loc":"L-A","container":"C-A","cat":"QT"}],
+  "transactions": [{"seq":1,"matCode":"M-KEEP","delta":0,"balance":7,"type":"盘点","ts":"2026-01-01T00:00:00.000Z","operator":"fixture"}],
+  "workorders": [],
+  "members": [],
+  "manuals": [],
+  "itemOperations": [],
+  "txnSeq": 1
+}

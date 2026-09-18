@@ -1,0 +1,5 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict');const D=require('../../.dev-lines/glm53/lib/item-ops');
+test('GLM canonical: unsupported schema version is not silently rewritten',()=>{let r;try{r=D.canonicalRequest({schemaVersion:99,kind:'issue',itemCode:'I',expected:{itemVersion:1,containerVersion:2}});}catch{return;}assert.ok(!r||r.schemaVersion!==1,'unsupported contract normalized into supported version');});
+test('GLM canonical: transfer retains target-container concurrency version',()=>{const r=D.canonicalRequest({schemaVersion:1,kind:'transfer',itemCode:'I',source:{loc:'L-A',container:'C-A'},target:{loc:'L-B',container:'C-B'},expected:{itemVersion:1,containerVersion:2,targetContainerVersion:9}});assert.equal(r.expected.targetContainerVersion,9);});
+test('GLM canonical: fractional expected version is rejected rather than truncated',()=>{let r;try{r=D.canonicalRequest({schemaVersion:1,kind:'issue',itemCode:'I',expected:{itemVersion:1.9,containerVersion:2}});}catch{return;}assert.ok(!r||r.expected.itemVersion!==1,'1.9 silently converted to1');});
