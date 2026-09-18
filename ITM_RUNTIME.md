@@ -1,8 +1,16 @@
 # ITM 运行与协调契约
 
-## 默认状态
+## 当前默认：首版试运行
 
-`api/feishu/item-operation.js` 通过 `lib/item-runtime.js:createRuntime` 组合真实飞书仓储与操作协议。默认 enabled=false、认证返回null、无协调配置，HTTP401/503拒绝正式作业，不发飞书写。生产/Preview均无一键环境开关绕过门禁。
+用户明确要求先跑通现场验证，暂不接身份认证和持久共享协调。生产handler默认`feishu-trial`；`ITM_OPERATION_MODE=disabled`停写，`strict`恢复严格门禁。`createRuntime()`本身仍默认strict，测试和其他调用不隐式放开。
+
+飞书试运行是best-effort，不是跨实例事务。仅一名操作员、同一时间一条在途命令，等待结果后再继续；未知结果只查原opId，不新建命令重发。无认证意味着知道接口地址的人可提交管理操作，不能把姓名视为验证身份；禁止直接编辑飞书受控列。页面常驻提示此边界。
+
+保留schema检查、opId/载荷查重、PREPARED意图、写前二次核对、实体单次写/回读及异常REPAIR_REQUIRED；不能保证同时穿透检查的多实例互斥。空状态保持unknown，通过首次核实操作启用，不批量猜测在库。缺字段返回明确503；飞书操作表ID已只读核实为tblWyVuqDDBnU05t。
+
+## 严格模式（未来多人正式使用）
+
+`api/feishu/item-operation.js`通过`lib/item-runtime.js:createRuntime`组合真实飞书仓储与操作协议。strict模式无认证/协调时HTTP401/503拒绝，不发飞书写。
 
 部署可接入 `createRuntime({api,authenticate,coordinator,enabled:true})` 后交 `handlerFor(service)`。api默认是现有feishu-api；仓储实现完整schema检查、PREPARED建行、按record_id改关系并显式清空、实体回读、日志终态回读。部署工厂不是测试fake仓储。
 

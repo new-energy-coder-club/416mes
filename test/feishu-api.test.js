@@ -367,6 +367,177 @@ test('ITM real repository HTTP prepare/apply/readAfter/finish preserves clear an
   assert.throws(() => require('../lib/unique-items').plan(observed, { schemaVersion: 1, opId: 'illegal', kind: 'receive', itemCode: '001', target: { loc: 'L', container: 'C' }, expected: { itemVersion: 4, containerVersion: 2 } }, { id: 'fake', roles: ['operator'] }), e => e.code === 'UNRESOLVED_ENTITY_CONFLICT');
 });
 
+/* ================= 飞书试运行：真实 HTTP / 无应用认证或持久协调注入 ================= */
+
+async function startItemTrialHttp(t, configure = () => {}) {
+  const tableIds = { items: 'trialI', containers: 'trialC', locations: 'trialL', itemOperations: 'trialO' };
+  const tables = {}, fieldTypes = {};
+  for (const [key, columns] of Object.entries(require('../lib/item-schema').REQUIREMENTS)) {
+    tables[tableIds[key]] = { fields: Object.keys(columns), rows: [] };
+    fieldTypes[tableIds[key]] = Object.entries(columns).map(([name, [type, options]]) => ({ name, type: Array.isArray(type) ? type[0] : type, options }));
+  }
+  const options = { tables, fieldTypes };
+  configure(options, tableIds);
+  const mock = await startMock(options);
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const api = loadLib(mock.port, { FEISHU_TABLES: JSON.stringify(tableIds) });
+  const { createRuntime } = require('../lib/item-runtime');
+  const { handlerFor } = require('../api/feishu/item-operation');
+  // Deliberately no authenticate, coordinator, enabled, or deployment secrets.
+  const freshRuntime = () => createRuntime({ api, mode: 'feishu-trial' });
+  let handler = handlerFor(freshRuntime());
+  const bridge = http.createServer((req, res) => {
+    req.query = Object.fromEntries(new URL(req.url, 'http://localhost').searchParams);
+    res.status = n => { res.statusCode = n; return res; };
+    res.json = o => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(o)); };
+    handler(req, res);
+  });
+  await new Promise(resolve => bridge.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => bridge.close(resolve)));
+  async function request(method, value) {
+    const query = method === 'GET' ? '?opId=' + encodeURIComponent(value) : '';
+    const response = await fetch('http://127.0.0.1:' + bridge.address().port + '/api/feishu/item-operation' + query, {
+      method, ...(method === 'POST' ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) } : {})
+    });
+    return { status: response.status, body: await response.json() };
+  }
+  return {
+    mock, tables, tableIds, api,
+    restart() { handler = handlerFor(freshRuntime()); },
+    post: value => request('POST', value), get: opId => request('GET', opId),
+    writes: () => mock.calls.requests.filter(r => r.phase === 'write'),
+    entityWrites: () => mock.calls.requests.filter(r => r.phase === 'write' && r.tableId !== tableIds.itemOperations)
+  };
+}
+
+async function trialApplied(f, request) {
+  const response = await f.post(request);
+  assert.equal(response.status, 200, JSON.stringify(response.body));
+  assert.equal(response.body.ok, true);
+  assert.equal(response.body.operation.phase, 'APPLIED', JSON.stringify(response.body));
+  return response.body.operation;
+}
+
+async function bootstrapTrialLocationContainer(f) {
+  for (const step of [
+    { kind: 'registerLocation', entity: { code: 'L-001' } },
+    { kind: 'registerContainer', entity: { code: 'C-001' } },
+    { kind: 'activateLocation', locationCode: 'L-001', expected: { locationStatus: 'unknown' } },
+    { kind: 'activateContainer', containerCode: 'C-001', target: { loc: 'L-001' }, expected: { containerVersion: 1 } }
+  ]) await trialApplied(f, { schemaVersion: 1, opId: 'trial-' + step.kind, ...step });
+}
+
+for (const legacy of [false, true]) {
+  test('ITM feishu-trial HTTP: empty LOC/CTN bootstrap → ' + (legacy ? 'legacy verification' : 'pending receive') + ' → issue → replay → fresh runtime history', async t => {
+    const f = await startItemTrialHttp(t, ({ tables }) => {
+      if (legacy) tables.trialI.rows.push({ '物品码': '001', '容器码': '' });
+    });
+    assert.deepEqual(f.tables.trialL.rows, []);
+    assert.deepEqual(f.tables.trialC.rows, []);
+    await bootstrapTrialLocationContainer(f);
+    assert.equal(f.tables.trialL.rows[0]['状态'], 'active');
+    assert.equal(f.tables.trialC.rows[0]['状态'], 'active');
+    assert.equal(f.tables.trialC.rows[0]['当前库位码'], 'L-001');
+    if (!legacy) await trialApplied(f, { schemaVersion: 1, opId: 'trial-registerItem', kind: 'registerItem', entity: { code: '001' } });
+    const incoming = { schemaVersion: 1, opId: 'trial-incoming', kind: legacy ? 'verifyLegacy' : 'receive', itemCode: '001', target: { loc: 'L-001', container: 'C-001' }, expected: { itemVersion: legacy ? 0 : 1, containerVersion: 2 } };
+    const received = await trialApplied(f, incoming);
+    assert.equal(received.before.items[0].status, legacy ? 'unknown' : 'pending');
+    assert.equal(f.tables.trialI.rows[0]['状态'], 'in_stock');
+    assert.equal(f.tables.trialI.rows[0]['容器码'], 'C-001');
+    const outgoing = { schemaVersion: 1, opId: 'trial-outgoing', kind: 'issue', itemCode: '001', source: incoming.target, expected: { itemVersion: legacy ? 1 : 2, containerVersion: 2 } };
+    const issued = await trialApplied(f, outgoing);
+    assert.equal(f.tables.trialI.rows[0]['物品码'], '001');
+    assert.equal(f.tables.trialI.rows[0]['状态'], 'out');
+    assert.equal(f.tables.trialI.rows[0]['容器码'], '');
+    assert.equal(f.tables.trialI.rows[0]['业务版本'], legacy ? 2 : 3);
+    assert.equal(f.tables.trialI.rows[0]['最后操作ID'], outgoing.opId);
+    const writesBeforeReplay = f.writes().length;
+    const replay = await trialApplied(f, outgoing);
+    assert.deepEqual(replay.after, issued.after);
+    assert.equal(replay.requestHash, issued.requestHash);
+    f.restart();
+    for (const original of [received, issued]) {
+      const history = await f.get(original.code);
+      assert.equal(history.status, 200);
+      assert.equal(history.body.operation.phase, 'APPLIED');
+      assert.deepEqual(history.body.operation.request, original.request);
+      assert.deepEqual(history.body.operation.before, original.before);
+      assert.deepEqual(history.body.operation.after, original.after);
+      assert.equal(history.body.operation.requestHash, original.requestHash);
+    }
+    await trialApplied(f, outgoing);
+    const conflict = await f.post({ ...outgoing, reason: 'different payload' });
+    assert.equal(conflict.status, 409);
+    assert.equal(conflict.body.error, 'OP_ID_PAYLOAD_CONFLICT');
+    const unknown = await f.get('never-submitted');
+    assert.equal(unknown.status, 200);
+    assert.equal(unknown.body.operation.phase, 'UNKNOWN');
+    assert.equal(f.writes().length, writesBeforeReplay, 'retries, history and unknown GET must not write even after runtime replacement');
+    assert.equal(f.tables.trialO.rows.filter(r => r['操作ID'] === outgoing.opId).length, 1);
+    assert.ok(f.tables.trialO.rows.every(r => r['处理阶段'] === 'APPLIED'));
+  });
+}
+
+test('ITM feishu-trial HTTP: REPAIR_REQUIRED blocks apply/retry/new command across fresh runtime', async t => {
+  let rejectItemUpdate = false, f;
+  f = await startItemTrialHttp(t, options => {
+    options.delay = info => {
+      // Deny only the entity update; operation-table finish still persists the failure.
+      f.mock.calls.denyOn = rejectItemUpdate && info.tableId === 'trialI' && info.action === 'batch_update' ? 'batch_update' : null;
+      return 0;
+    };
+  });
+  await bootstrapTrialLocationContainer(f);
+  await trialApplied(f, { schemaVersion: 1, opId: 'repair-register', kind: 'registerItem', entity: { code: '001' } });
+  const command = { schemaVersion: 1, opId: 'repair-receive', kind: 'receive', itemCode: '001', target: { loc: 'L-001', container: 'C-001' }, expected: { itemVersion: 1, containerVersion: 2 } };
+  const entityAttempts = f.entityWrites().length;
+  rejectItemUpdate = true;
+  const failed = await f.post(command);
+  assert.equal(failed.status, 200);
+  assert.equal(failed.body.operation.phase, 'REPAIR_REQUIRED');
+  assert.equal(f.entityWrites().length, entityAttempts + 1, 'the real repository attempted apply exactly once');
+  const log = f.tables.trialO.rows.find(r => r['操作ID'] === command.opId);
+  assert.equal(log['处理阶段'], 'REPAIR_REQUIRED');
+  assert.equal(log['错误与恢复说明'], failed.body.operation.error);
+  assert.ok(log['错误与恢复说明']);
+  assert.equal(f.tables.trialI.rows[0]['状态'], 'pending');
+  rejectItemUpdate = false;
+  const writesAfterFailure = f.writes().length;
+  for (const fresh of [false, true]) {
+    if (fresh) f.restart();
+    const history = await f.get(command.opId);
+    assert.equal(history.status, 200);
+    assert.equal(history.body.operation.phase, 'REPAIR_REQUIRED');
+    const retry = await f.post(command);
+    assert.equal(retry.status, 200);
+    assert.equal(retry.body.operation.phase, 'REPAIR_REQUIRED');
+    const blocked = await f.post({ ...command, opId: 'new-receive-' + fresh });
+    assert.equal(blocked.status, 409);
+    assert.equal(blocked.body.error, 'UNRESOLVED_OPERATION_BARRIER');
+    assert.equal(f.writes().length, writesAfterFailure, 'removing the fault never grants permission to reapply');
+  }
+  assert.equal(f.tables.trialO.rows.filter(r => r['操作ID'] === command.opId).length, 1);
+});
+
+test('ITM feishu-trial HTTP: missing schema fails before any entity or operation write; unknown GET stays read-only', async t => {
+  const f = await startItemTrialHttp(t, ({ fieldTypes }) => {
+    fieldTypes.trialI = fieldTypes.trialI.filter(f => f.name !== '业务版本');
+  });
+  const before = JSON.stringify(f.tables);
+  const response = await f.post({ schemaVersion: 1, opId: 'missing-schema', kind: 'registerLocation', entity: { code: 'L-001' } });
+  assert.equal(response.status, 503);
+  assert.equal(response.body.ok, false);
+  assert.match(response.body.error, /ITM_SCHEMA_INVALID/);
+  assert.match(response.body.error, /业务版本/);
+  f.restart();
+  const unknown = await f.get('missing-schema');
+  assert.equal(unknown.status, 200);
+  assert.equal(unknown.body.operation.phase, 'UNKNOWN');
+  assert.equal(f.entityWrites().length, 0);
+  assert.equal(f.writes().length, 0);
+  assert.equal(JSON.stringify(f.tables), before);
+});
+
 /* ================= 读 ================= */
 
 test('飞书读：pullState 组装出正确的 state', async (t) => {

@@ -14,9 +14,9 @@ test('entire index boots in Chromium, real IDB draft survives reload, narrow UI 
  await page.evaluate(()=>goTab('item-work'));
  for(const code of ['LOC:L-A','CTN:C-A']){await page.locator('#itmCode').fill(code);await page.locator('#itmScanBtn').click();}
  await page.locator('#itmDraftSave').click();await page.waitForFunction(()=>document.getElementById('itmStatus').textContent.includes('已保存本机'));
- await page.reload({waitUntil:'domcontentloaded'});await page.evaluate(()=>localStoreReady);await page.evaluate(()=>goTab('item-work'));await page.locator('#itmDraftRestore').click();await page.waitForFunction(()=>document.getElementById('itmStep').textContent.includes('CTN:C-A'));
+ await page.reload({waitUntil:'domcontentloaded'});await page.evaluate(()=>localStoreReady);await page.evaluate(()=>goTab('item-work'));await page.locator('#itmDraftRestore').click();await page.waitForFunction(()=>document.getElementById('itmStep').textContent.includes('目标容器：C-A'));
  await page.locator('#itmCode').fill('WP-001');await page.locator('#itmScanBtn').click();await page.locator('#itmConfirm').click();await page.waitForFunction(()=>document.getElementById('itmStatus').textContent.includes('本机已保存'));
- await page.getByRole('button',{name:'提交原命令',exact:true}).click();await page.waitForFunction(()=>document.getElementById('itmStatus').textContent.includes('disabled'));
+ await page.getByRole('button',{name:'提交原命令',exact:true}).click();await page.waitForFunction(()=>document.getElementById('itmStatus').textContent.includes('disabled')||document.getElementById('itmStatus').textContent.includes('拒绝')||document.getElementById('itmStatus').textContent.includes('试运行表结构'));
  const actual=await page.evaluate(async()=>({commands:await localStore.getAll('outbox'),mat:state.materials.find(m=>m.code==='M-KEEP').qty,item:state.items.find(i=>i.code==='WP-001')}));assert.equal(actual.mat,7);assert.equal(actual.item.status,'pending');assert.equal(actual.commands.filter(c=>c.op==='itemOperation').length,1);assert.equal(actual.commands.find(c=>c.op==='itemOperation').status,'needs_attention');
  assert.deepEqual(errors,[]);console.log(JSON.stringify({blockedExternalOrigins:[...new Set(denied)],viewport:390,commands:1,pageErrors:errors}));
 });
