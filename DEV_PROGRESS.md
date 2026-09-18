@@ -62,14 +62,27 @@ DOM实际点击查询前缀/裸码跨类型歧义候选/三级下钻2/2通过，
 
 真实第九表已建的信息仅记为外部事实，tableId/schema未核验，不访问生产。真实第九表已建的信息仅记为外部事实，tableId/schema未核验，不访问生产。
 
-S3增补：未持久化失败可同opId原载荷重试，reset改变意图清旧opId，已锁定不可重扫；ITM步骤可精确识别唯一已建档WP裸码，拒绝EAN猜测。DOM真实草稿保存/恢复、双击仅一命令、IDB失败不谎报通过；查询/扫码/Code128共11/11，`test-logs/S3-ui-scan.log`。离开页签/pagehide停止相机。全量回归退出0，556/556通过，111428ms，日志S3-npm-test.log。随后修复cameraGeneration/启动行绑定、切行停止、迟到授权释放流、旧tick不重设timer；新增可控mediaDevices Promise用例，DOM5/5通过（S3-camera-lifecycle-retest.log）。测试初次注入linkedom navigator未生效，改显式mediaDevices依赖注入后验证真实异步分支。S3提交中，真实硬件仍待验证。
+S3增补：未持久化失败可同opId原载荷重试，reset改变意图清旧opId，已锁定不可重扫；ITM步骤可精确识别唯一已建档WP裸码，拒绝EAN猜测。DOM真实草稿保存/恢复、双击仅一命令、IDB失败不谎报通过；查询/扫码/Code128共11/11，`test-logs/S3-ui-scan.log`。离开页签/pagehide停止相机。全量回归退出0，556/556通过，111428ms，日志S3-npm-test.log。随后修复cameraGeneration/启动行绑定、切行停止、迟到授权释放流、旧tick不重设timer；新增可控mediaDevices Promise用例，DOM5/5通过（S3-camera-lifecycle-retest.log）。测试初次注入linkedom navigator未生效，改显式mediaDevices依赖注入后验证真实异步分支。S3已提交，真实硬件仍待验证。
 
-统一IDB保存队列、命令/state事务、LS恢复、受控字段组全量/增量和CLI封口。阶段门槛尚未完成。
 
-## S4 — 实施中
+## S4 — 已完成（227b962）
 
-新增lib/item-operation.js共享协调协议执行器与POST/GET handler、本地同路由；生产默认无认证/无协调拒绝，未提供内存生产适配器。PREPARED前持久意图、回读after、APPLIED，超时保留全局未决屏障，恢复不重做实体。独立实例共享测试fixture 7/7通过（test-logs/S4-protocol-initial.log），包含同opId异载荷、并发、日志创建未知、实体before不重试、实体成功终态失败恢复。fixture位于test/，只是协议模拟，不证明生产持久性。新增lib/item-repository.js真实飞书API仓储（映射read/prepare/apply/回读/finish、专用显式清空），lib/item-runtime.js部署组合工厂；默认handler使用真实仓储组合但无认证协调禁写。GET/重复POST可见范围为本人或admin/service，缺roles返回403；协议8/8通过（S4-auth-protocol.log）。新增item-client与页面每命令“提交原命令/查询原opId”按钮，回执经IDB成功才显示完成，未知保留命令。仓储localhost HTTP实际prepare/apply/readAfter/finish往返1/1通过，S4-http-repository-retest.log。首次PREPARED空finishedAt触发mock日期拒绝，已在专用prepare过滤未设置的可选字段；业务清空仍apply显式保留。exactRaw/operations改listRecordsEx完整性闸门，token每次走API缓存，2项仓储/默认handler通过。客户端15秒Abort+未知持久化，ACK/未知标记双失败不虚报成功，3/3通过S4-client-timeout.log。ITM_RUNTIME.md定义真实仓储部署工厂、授权范围与外部持久协调方法；S4全量回归退出0，572/572，120255ms（S4-npm-test.log）。随后补response.json挂起也在timeout竞赛内，客户端4/4通过S4-client-body-timeout.log；git diff --check通过。S4本地提交中，真实认证/协调未配置保持默认禁写。
+阶段提交：`227b962001c500e0ca920bb865253cc53d919851`。
+
+新增lib/item-operation.js共享协调协议执行器与POST/GET handler、本地同路由；生产默认无认证/无协调拒绝，未提供内存生产适配器。PREPARED前持久意图、回读after、APPLIED，超时保留全局未决屏障，恢复不重做实体。独立实例共享测试fixture 7/7通过（test-logs/S4-protocol-initial.log），包含同opId异载荷、并发、日志创建未知、实体before不重试、实体成功终态失败恢复。fixture位于test/，只是协议模拟，不证明生产持久性。新增lib/item-repository.js真实飞书API仓储（映射read/prepare/apply/回读/finish、专用显式清空），lib/item-runtime.js部署组合工厂；默认handler使用真实仓储组合但无认证协调禁写。GET/重复POST可见范围为本人或admin/service，缺roles返回403；协议8/8通过（S4-auth-protocol.log）。新增item-client与页面每命令“提交原命令/查询原opId”按钮，回执经IDB成功才显示完成，未知保留命令。仓储localhost HTTP实际prepare/apply/readAfter/finish往返1/1通过，S4-http-repository-retest.log。首次PREPARED空finishedAt触发mock日期拒绝，已在专用prepare过滤未设置的可选字段；业务清空仍apply显式保留。exactRaw/operations改listRecordsEx完整性闸门，token每次走API缓存，2项仓储/默认handler通过。客户端15秒Abort+未知持久化，ACK/未知标记双失败不虚报成功，3/3通过S4-client-timeout.log。ITM_RUNTIME.md定义真实仓储部署工厂、授权范围与外部持久协调方法；S4全量回归退出0，572/572，120255ms（S4-npm-test.log）。随后补response.json挂起也在timeout竞赛内，客户端4/4通过S4-client-body-timeout.log；git diff --check通过。S4已提交，真实认证/协调未配置保持默认禁写。
+
+## S5 — 冻结候选交付（已完成项与限制详见LINE_REPORT）
+
+最终 `npm test` 无代码/测试修改复跑 **577/577通过，退出0，89747ms**：`test-logs/S5-final-npm-retest.log`。原MAT并发断言单独复跑1/1通过，保留先前失败日志，不隐瞒偶发。独立 `npm run test:browser` **1/1通过，退出0**：`test-logs/S5-browser-routes.log`；所有相关后台任务已收集，服务由测试清理。按主会话指示停止扩功能，已知功能缺口与外部门禁明确列入LINE_REPORT。S5提交后记录精确HEAD。
+
+新增test/item-browser.test.js完整index.html Chromium启动（非仅组件mount），导航前拦截全部外网/全部API仅fixture；390px查询→扫码→真实IDB草稿→reload恢复→命令保存→禁写API→未知保留，MAT7不变，pageErrors为空。初次load等待超时，加原生dialog处理和domcontentloaded后完整通过，S5-browser-retest.log；被阻断旧默认远端origin仅记录，未放行外网。锁版playwright-core1.58.2为dev依赖，使用系统Chromium，不改全局环境。仍需完整fake仓储→另一客户端闭环及最终报告/回归。
+
+S5补管理员LOC/CTN核实UI待提交入口（服务端权限仍强制），DOM7/7通过S5-admin-ui.log。服务端LOC active也要求激活凭据，真实仓储单链复验通过。新增LINE_REPORT.md验收中报告，明确不同E2E证据范围与未完成项，未宣称最终交付。
+
+S5新增受控registerItem/registerLocation/registerContainer及管理员UI随机唯一码申请。LOC/CTN飞书状态留空normalize unknown，不增加单选unknown；ITM pending/v1。普通资源新增与物品生成器转受控入口，普通编辑剥关系。真实Repository→fake HTTP三实体建档→LOC/CTN核实→receive→issue→第二端pull完整行为通过S5-register-bootstrap-chain.log。尚需最终全量、浏览器与diff回归。
+
+S5全量Node首次576/576通过（S5-npm-test.log），同时浏览器受120秒总时限取消（S5-browser-final.log），未计通过；后续独立路由调整后需重跑。查询/作业现拆为items与item-work独立section，查询相机只填检索，不写scan；多行表格显示三码/操作/状态、按opId显示APPLIED/REJECTED、点击切行；DOM8/8通过S5-query-rows.log。尚未最终提交。
 
 ## 后续
 
-S2 持久化与全量/增量同步；S3 查询/严格扫码/真实一维fixture；S4 受控接口与持久协调适配协议；S5 页面完整链路及 LINE_REPORT。当前尚未声称这些阶段完成。
+按主会话最新指示冻结候选，已知缺口在LINE_REPORT单列不掩盖。独立浏览器串行重跑通过1/1（S5-browser-routes.log），真实IDB/390px/refresh/默认拒写，pageErrors空，所有外网阻断。git diff --check通过；最终Node回归首次577项中576通过、1失败：原MAT四段预读并发断言maxConcurrent=3未达4，S5-final-npm-test.log完整保留；该MAT实现未改，本次不削弱测试，正在单独与全量无改动复跑，暂不声明最终通过。DOM→真实fake-IDB→localhost handler→模拟仓储→另一客户端字段组闭环已通过，MAT保持7；加扫码完成后突发ITM/CTN/LOC冲突均拒绝确认，S5-e2e-conflict.log 8/8。真实HTTP仓储额外验证手改同版本关系被server snapshot隔离。端到端模拟仓储与真实HTTP仓储分别验证，尚不混称单一完整浏览器真实飞书链路。

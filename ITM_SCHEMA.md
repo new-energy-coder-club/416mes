@@ -21,6 +21,8 @@ code→操作ID（文本业务键，不是原生唯一约束）；kind→操作�
 
 request/before/after/progress 为文本JSON，时间为日期时间（type5），phase为单选 PREPARED/APPLIED/REJECTED/REPAIR_REQUIRED，其余为文本。操作类型支持 receive/issue/transfer/placeContainer/moveContainer/verifyLegacy/retire，以及用于旧档案启用的 activateLocation/activateContainer。
 
+操作类型另含registerItem/registerLocation/registerContainer：仅管理员、共享唯一认领下创建新码，已有码拒绝。ITM初值pending/v1；LOC/CTN注册时飞书状态留空，下行normalize为unknown，保持active/disabled单选不变，不要求添加unknown选项；CTN初始空库位/v1，随后核实启用。创建回读同时核对名称/规格及受控字段。
+
 ## 旧 LOC/CTN 核实入口
 
 不把全部旧记录自动改 active。管理员受控操作依次：activateLocation（仅允许 unknown→active，要求 expected.locationStatus 一致；v1不支持停用/重新启用）→ activateContainer（核对现有库位线索，不匹配则拒绝；校验业务版本）→ verifyLegacy。三个操作都须按正式接口协议写日志和共享协调，不允许 ordinaryFields 带 status 绕过。领域层 bootstrap 已有自动化测试；页面及服务端接线属于后续 S3/S4。

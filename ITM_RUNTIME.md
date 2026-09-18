@@ -6,6 +6,19 @@
 
 部署可接入 `createRuntime({api,authenticate,coordinator,enabled:true})` 后交 `handlerFor(service)`。api默认是现有feishu-api；仓储实现完整schema检查、PREPARED建行、按record_id改关系并显式清空、实体回读、日志终态回读。部署工厂不是测试fake仓储。
 
+## 部署接线示例（需外部适配验收，默认文件不自动启用）
+
+```js
+// 在部署专用入口中组合，禁止把测试fixture复制成生产适配器。
+const { createRuntime } = require('../../lib/item-runtime');
+const { handlerFor } = require('./item-operation');
+// 由部署方实现并通过持久性/跨实例/未知迟到验收：
+const { authenticate, coordinator } = require('../../deployment/verified-item-adapters');
+module.exports = handlerFor(createRuntime({ authenticate, coordinator, enabled: true }));
+```
+
+上例deployment模块当前不存在，不能直接复制后声称可上线；它是明确外部接入点。真实Repository已实现，不需替换业务协议；隔离测试通过相同工厂注入fake API地址与适配器。注册命令复用同一认领/日志/恢复协议，不走通用upsert。
+
 ## 认证
 
 authenticate(req)须验证服务端会话/签名，返回{id,roles}；不能相信请求operator或客户端姓名。operator可创建与查看本人操作；admin/service可查看跨用户操作；恢复只允许service。没有roles一律403。GET无恢复写副作用。真实身份提供者尚未配置，为外部门禁。

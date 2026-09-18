@@ -1053,7 +1053,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
 <header><img class="nec-logo" id="hdrLogo" alt="NEC"><div><div class="slogan">BUILT TO DAWN · KEEP BUILDING&#9608;</div><h1>416MES 仓储管理系统</h1></div><span class="sub">七类标签 · Excel 台账 · 扫码工作台（查询只读 / 执行需确认）（单机离线版）</span><span class="queue-chip visually-hidden" id="fsQueueChip" title="离线期间的库存变动，联网后自动冲刷到飞书"></span><span class="hdr-operator">操作人 <select class="field--xs" id="selOperator"></select></span></header>
 <nav class="tabs" id="mainTabs">
   <div class="nav-group">现场作业</div>
-  <button data-tab="items" data-primary="1">库位/容器/物品查询</button>
+  <button data-tab="items" data-primary="1">库位/容器/物品查询</button><button data-tab="item-work">ITM作业</button>
   <button data-tab="scan" data-primary="1">扫码工作台</button>
   <button data-tab="wip" data-primary="1" data-label="库存工单（WIP）" data-short="库存工单">库存工单（WIP）</button>
   <div class="nav-group">台账与建档</div>
@@ -1119,19 +1119,25 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <p class="hint">查询不改变库存。物品位置由容器归属派生；旧定位仅是历史线索。</p>
       <input id="itmSearch" placeholder="精确码或名称/规格/说明搜索" aria-label="唯一物品查询">
       <button class="btn" id="itmSearchBtn">查询</button>
+      <button class="btn" id="itmSearchCamera">查询相机扫码</button><button class="btn ghost" id="itmSearchCameraStop">关闭查询相机</button><video id="itmSearchVideo" playsinline muted style="width:100%;max-width:480px;display:none"></video>
       <div id="itmResults" aria-live="polite"></div>
     </div>
+  </section>
+  <section class="tab" id="tab-item-work">
     <div class="card">
       <h2>ITM 三码作业草稿</h2>
       <p class="hint">LOC → CTN → ITM；数量固定 1。保存草稿/命令不代表完成，请勿据此发放实物。</p>
       <select id="itmKind" aria-label="动作"><option value="receive">入库</option><option value="issue">出库</option><option value="transfer">换箱</option><option value="moveContainer">容器移库</option><option value="placeContainer">容器定位</option><option value="verifyLegacy">旧物品核实（管理员）</option></select>
       <button class="btn" id="itmNewRow">新行</button><select id="itmRows" aria-label="当前行"></select>
+      <div style="overflow-x:auto"><table><thead><tr><th>行</th><th>库位</th><th>容器</th><th>物品</th><th>操作</th><th>状态</th></tr></thead><tbody id="itmRowTable"></tbody></table></div>
       <div id="itmStep" aria-live="polite"></div>
       <input id="itmCode" placeholder="LOC:L-A / CTN:C-A / ITM:I-P" aria-label="三码输入">
       <button class="btn" id="itmScanBtn">填入扫码</button><button class="btn ghost" id="itmReset">重扫本行</button>
       <button class="btn" id="itmDraftSave">保存草稿</button><button class="btn ghost" id="itmDraftRestore">恢复最近草稿</button><button class="btn" id="itmConfirm">确认本行并保存待提交命令</button>
       <button class="btn" id="itmCamera">相机扫码</button><button class="btn ghost" id="itmCameraStop">关闭相机</button>
       <video id="itmVideo" playsinline muted style="width:100%;max-width:480px;display:none"></video>
+      <details><summary>管理员唯一实体建档</summary><select id="itmRegisterType"><option value="registerItem">物品</option><option value="registerLocation">库位</option><option value="registerContainer">容器</option></select><input id="itmRegisterName" placeholder="名称/说明"><button class="btn" id="itmRegister">生成随机唯一码并申请建档</button><p class="hint">需可靠共享协调和管理员认证；远端确认前不打印正式标签。</p></details>
+      <details><summary>管理员旧库位/容器核实启用</summary><p class="hint">须服务端管理员认证，仍受默认禁写门禁；仅生成待提交命令。</p><input id="itmAdminLoc" placeholder="LOC库位码"><input id="itmAdminContainer" placeholder="CTN容器码（启用容器时填写）"><button class="btn" id="itmActivateLoc">核实启用库位</button><button class="btn" id="itmActivateContainer">核实启用容器</button></details>
       <div id="itmStatus" role="status"></div><div id="itmPending"></div>
     </div>
   </section>
@@ -2645,8 +2651,8 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('cl
     if (x === b) x.setAttribute('aria-current', 'page'); else x.removeAttribute('aria-current');
   });
   document.querySelectorAll('section.tab').forEach(s => s.classList.toggle('on', s.id === 'tab-' + b.dataset.tab));
-  if (b.dataset.tab !== 'items' && itemPage) itemPage.stopCamera();
-  if (b.dataset.tab === 'items') mountItemPage();
+  if (!['items','item-work'].includes(b.dataset.tab) && itemPage) itemPage.stopCamera();
+  if (['items','item-work'].includes(b.dataset.tab)) mountItemPage();
   if (b.dataset.tab === 'ledger') renderLedger();   // 数据可能在别的页签被改过，切回时必须重渲染
   if (b.dataset.tab === 'txn') { _txnPage = 1; renderTxns(); }   // 阶段3：流水独立页，切回重置分页
   if (b.dataset.tab === 'label') renderLabelTab();
@@ -4230,14 +4236,8 @@ function nextCode(arr, prefix) {
   return prefix + '-' + pad(max + 1, 3);
 }
 document.getElementById('btnGenItm').addEventListener('click', () => {
-  const name = document.getElementById('gItmName').value.trim();
-  if (!name) { alert('请填写物品名称'); return; }
-  const code = nextCode(state.items, 'WP');
-  const newItem = { code, name, spec: document.getElementById('gItmSpec').value.trim(), loc: document.getElementById('gItmLoc').value.trim() };
-  state.items.push(newItem);
-  fsPushRecord('items', [newItem]);
-  save();
-  nextStrip('nextItm', 'itm', [code], 1);
+  goTab('items');
+  alert('请使用管理员受控建档申请，远端确认后再打印唯一物品标签。');
 });
 document.getElementById('btnGenMan').addEventListener('click', () => {
   const name = document.getElementById('gManName').value.trim();
@@ -6290,7 +6290,13 @@ function resSave() {
     const el = document.getElementById('resF_' + f.k);
     patch[f.k] = el ? String(el.value).trim() : '';
   }
+  if (itmReadOnlyTab) { alert('本标签只读'); return; }
+  if (window.UniqueItems.CONTROLLED[table]) {
+    const safe = window.UniqueItems.ordinaryFields(table, patch);
+    Object.keys(patch).forEach(k => delete patch[k]); Object.assign(patch, safe);
+  }
   let pushed = null, msg = '', clearFields = [];
+  if (resEditing.mode === 'add' && window.UniqueItems.CONTROLLED[table]) { alert('唯一实体请在“库位/容器/物品查询”页通过管理员受控建档；未配置协调时仅保存申请。'); goTab('items'); return; }
   if (resEditing.mode === 'add') {
     /* 新增：业务键自动编（与批量建档同一套规则），避免用户瞎编导致和标签编码体系冲突 */
     const pre = table === 'locations' ? 'B' : table === 'containers' ? 'A4SH' : table === 'items' ? 'WP' : 'SC';
@@ -6334,6 +6340,7 @@ function resSave() {
 
 /** 作废删除：显示影响范围 + 同步状态 → 二次确认 → 写凭据 → 删本地 → 推飞书删除 */
 async function resDelete(key) {
+  if (['items', 'containers', 'locations'].includes(resType)) { alert('唯一实体编码不可硬删/回收；请通过受控退役或停用流程处理。'); return; }
   const cfg = RES_TYPES[resType], table = resType;
   const rec = (state[table] || []).find(r => String(r[cfg.key]) === String(key));
   if (!rec) { alert('记录已不存在，请刷新。'); renderRes(); return; }
