@@ -261,6 +261,41 @@ function cleanupEnv() {
   Object.keys(require.cache).filter(k => k.includes('feishu-api.js')).forEach(k => delete require.cache[k]);
 }
 
+/* ================= 唯一物品：隔离 schema 与旁路封口 ================= */
+test('ITM schema 已启用：普通改名不覆盖关系，清空旁路无效，新码/硬删拒绝', async (t) => {
+  const mock = await startMock({ tables: { tblITM: { fields: ['物品码', '名称', '容器码', '状态', '业务版本', '最后操作ID'], rows: [{ '物品码': 'I-A', '名称': 'old', '容器码': 'C-A', '状态': 'in_stock', '业务版本': 3, '最后操作ID': 'prior' }] } }, fieldTypes: { tblITM: [
+    { name: '物品码', type: 1 }, { name: '名称', type: 1 }, { name: '容器码', type: 1 },
+    { name: '状态', type: 3, options: ['unknown', 'pending', 'in_stock', 'out', 'retired'] },
+    { name: '业务版本', type: 2 }, { name: '最后操作ID', type: 1 }
+  ] } });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: JSON.stringify({ items: 'tblITM' }) });
+  const r = await lib.upsertRecords('items', [{ code: 'I-A', name: 'new', container: '', status: 'out', version: 0, lastOpId: '' }], { clearFields: ['container', 'lastOpId'] });
+  assert.equal(r.updated, 1);
+  assert.deepEqual(mock.tables.tblITM.rows[0], { '物品码': 'I-A', '名称': 'new', '容器码': 'C-A', '状态': 'in_stock', '业务版本': 3, '最后操作ID': 'prior' });
+  assert.ok((await lib.upsertRecords('items', [{ code: 'I-NEW', name: 'new' }])).error);
+  assert.ok((await lib.deleteRecords('items', ['I-A'])).error);
+  assert.equal(mock.calls.created.length, 0); assert.equal(mock.calls.deleted.length, 0);
+});
+
+test('ITM 第九表全量/增量真实 localhost 读取包含 JSON 与显式空归属', async (t) => {
+  const mock = await startMock({ tables: {
+    tblITM: { fields: ['物品码', '容器码', '状态', '业务版本', '最后操作ID', '最后更新时间'], rows: [{ '物品码': '001', '容器码': '', '状态': 'out', '业务版本': 4, '最后操作ID': 'op-1', '最后更新时间': 100 }] },
+    tblOPS: { fields: ['操作ID', '请求内容', '处理阶段', '目标快照', '最后更新时间'], rows: [{ '操作ID': 'op-1', '请求内容': '{"kind":"issue"}', '处理阶段': 'APPLIED', '目标快照': '{"items":[{"code":"001","container":""}]}', '最后更新时间': 100 }] }
+  }, fieldTypes: {
+    tblITM: [{ name: '物品码', type: 1 }, { name: '容器码', type: 1 }, { name: '状态', type: 3 }, { name: '业务版本', type: 2 }, { name: '最后操作ID', type: 1 }, { name: '最后更新时间', type: 1002 }],
+    tblOPS: [{ name: '操作ID', type: 1 }, { name: '请求内容', type: 1 }, { name: '处理阶段', type: 3 }, { name: '目标快照', type: 1 }, { name: '最后更新时间', type: 1002 }]
+  } });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: JSON.stringify({ items: 'tblITM', itemOperations: 'tblOPS' }) });
+  const full = await lib.pullState();
+  assert.equal(full.items[0].container, ''); assert.equal(full.itemOperations[0].code, 'op-1');
+  assert.deepEqual(full.itemOperations[0].request, { kind: 'issue' });
+  const inc = await lib.pullChangesBySort('itemOperations', { ts: 0, seen: [] });
+  assert.equal(inc.records[0].code, 'op-1'); assert.equal(inc.records[0].after.items[0].container, '');
+  assert.equal(mock.calls.created.length + mock.calls.updated.length + mock.calls.deleted.length, 0);
+});
+
 /* ================= 读 ================= */
 
 test('飞书读：pullState 组装出正确的 state', async (t) => {

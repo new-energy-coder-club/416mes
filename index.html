@@ -1707,6 +1707,7 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 <script src="mes-core.js?v=2.34.0"></script>
 <script src="lib/outbox.js?v=2.34.0"></script>
 <script src="lib/store.js?v=2.34.0"></script>
+<script src="lib/unique-items.js?v=2.34.0"></script>
 <script src="lib/replay-checkpoint.js?v=2.34.0"></script>
 <script src="lib/incremental.js?v=2.34.0"></script>
 <script src="lib/census-status.js?v=2.34.0"></script>
@@ -2122,6 +2123,7 @@ function migrateState(st) {
     C_LAYOUT.containers.forEach(c => { if (!st.containers.find(x => x.code === c.code)) st.containers.push(Object.assign({}, c)); });
     MODULE_ZONES.forEach(z => { if (!st.locations.find(x => x.code === z.code)) st.locations.push(Object.assign({}, z)); });
   } catch (e) { log('⚠️ 内置库位补种失败（继续用现有数据）：' + e.message); }
+  window.UniqueItems.migrate(st);
   return st;
 }
 

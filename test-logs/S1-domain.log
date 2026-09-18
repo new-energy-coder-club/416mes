@@ -1,0 +1,19 @@
+✔ ITM migration is unknown, never stock; MAT and ledger untouched (277.925423ms)
+✔ ITM receive plan is immutable intent, qty absent, no MAT accounting (46.602664ms)
+✔ ITM illegal states, relationships, disabled location and stale versions fail (5.439559ms)
+✔ ITM issue explicitly clears container; wrong source denied (4.000475ms)
+✔ ITM transfer and container move preserve unique identities and derived location (4.534486ms)
+✔ ITM legacy verification and retirement require admin, retired cannot return (4.16752ms)
+✔ ITM duplicates fail instead of picking first; string codes preserve leading zero (2.439872ms)
+✔ ITM ordinary fields never include controlled stale snapshot (3.326895ms)
+✔ nine-table mapping roundtrip preserves operation JSON, clear relation, timestamps and code (34.459594ms)
+✔ nine-table permissions split: operations readable, generic write/delete rejected before network (16.108438ms)
+✔ schema contract validates required fields, types and enums, never claims write permission (115.776675ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3140.010136
