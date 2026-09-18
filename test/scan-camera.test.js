@@ -143,3 +143,19 @@ test('持续无命中给出可见提示而不是静默', async () => {
   assert.match(d.getElementById('scanCamStatus').textContent, /暂未识别/);
   cam.close('test');
 });
+test('识别后未确认就关闭：onCancel 收到未确认码供调用方提示', async () => {
+  let pending = null;
+  const { cam } = setup({ decode: async () => ({ text: 'LOC:L-A', format: '二维码' }) });
+  await cam.open({ onCancel: (reason, unconfirmed) => { pending = unconfirmed; } });
+  await tick(30);
+  cam.close('user');
+  assert.equal(pending, 'LOC:L-A');
+});
+test('确定填入后再关闭不会报未确认', async () => {
+  let pending = 'unset';
+  const { document: d, cam } = setup({ decode: async () => ({ text: 'LOC:L-A', format: '二维码' }) });
+  await cam.open({ onConfirm: () => {}, onCancel: (r, u) => { pending = u === undefined ? 'unset' : u; } });
+  await tick(30);
+  d.getElementById('scanCamYes').click();
+  assert.equal(pending, 'unset');
+});

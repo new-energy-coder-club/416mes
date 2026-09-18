@@ -48,3 +48,4 @@ test('guided verify: unknown item on receive offers switching to verifyLegacy ro
  action.click();await tickN();
  assert.equal(s.page.scan.row().kind,'verifyLegacy');assert.match(s.document.getElementById('itmStep').textContent,/旧物品/);
 });
+test('empty fill shows explicit guidance instead of silent failure',async()=>{const {document:d}=setup();d.getElementById('itmCode').value='';d.getElementById('itmScanBtn').click();await new Promise(r=>setImmediate(r));assert.match(d.getElementById('itmStatus').textContent,/相机扫码|确定填入|手动输入/);});
