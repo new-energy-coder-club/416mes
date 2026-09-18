@@ -53,23 +53,41 @@ test('识别到码 → 确认卡显示，点确定才回调 onConfirm，且不�
   assert.equal(d.getElementById('scanCamOverlay').style.display, 'none');
 });
 
-test('重扫回到识别状态；同一结果连续帧不会重复弹确认', async () => {
-  let confirmed = 0; let decodeCalls = 0;
+test('重扫回到识别状态；同码连续帧去重不重复确认', async () => {
+  let confirmed = 0;
   const { document: d, cam } = setup({
-    decode: async () => { decodeCalls++; return { text: 'CTN:C-A', format: '条形码' }; }
+    decode: async () => ({ text: 'CTN:C-A', format: '条形码' })
   });
   await cam.open({ onConfirm: () => confirmed++ });
   await tick(30);
-  const firstCalls = decodeCalls;
   assert.equal(d.getElementById('scanCamConfirm').hidden, false);
-  await tick(30);   // 等待确认期间不应继续解码
-  assert.equal(decodeCalls, firstCalls);
+  await tick(30);   // 确认卡打开期间同码继续命中只算一次，不重复弹/不累计
+  assert.equal(cam.isOpen(), true);
+  assert.equal(d.getElementById('scanCamCandidates').children.length, 0);
   d.getElementById('scanCamRetry').click();
   assert.equal(d.getElementById('scanCamConfirm').hidden, true);
   await tick(30);
   assert.equal(d.getElementById('scanCamConfirm').hidden, false);
   d.getElementById('scanCamYes').click();
   assert.equal(confirmed, 1);
+});
+
+test('画面出现多个码：候选列表逐个选择，确定只填入选中的码', async () => {
+  const confirmed = [];
+  const codes = ['LOC:L-A', 'ITM:WP-001'];
+  let calls = 0;
+  const { document: d, cam } = setup({
+    decode: async () => ({ text: codes[Math.min(calls++, codes.length - 1)], format: '二维码' })
+  });
+  await cam.open({ onConfirm: t => confirmed.push(t) });
+  await tick(60);
+  assert.equal(d.getElementById('scanCamCandidates').children.length, 1);
+  assert.match(d.getElementById('scanCamCandidatesHint').textContent, /多个码/);
+  d.getElementById('scanCamCandidates').querySelector('button').click();   // 改选第二个码
+  await tick(5);
+  assert.equal(d.getElementById('scanCamValue').textContent, 'ITM:WP-001');
+  d.getElementById('scanCamYes').click();
+  assert.deepEqual(confirmed, ['ITM:WP-001']);
 });
 
 test('关闭期间迟到的 getUserMedia 授权流立即释放，不残留摄像头', async () => {
