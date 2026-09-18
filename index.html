@@ -1162,7 +1162,6 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <label for="itmSearch">编码 / 名称 / 规格 / 说明</label>
       <div class="itm-toolbar"><input class="field itm-grow" id="itmSearch" placeholder="扫码或输入，例如 ITM:WP-…" aria-label="唯一物品查询"><button class="btn" id="itmSearchBtn">查询</button></div>
       <div class="itm-toolbar"><button class="btn ghost" id="itmSearchCamera">相机查询</button><button class="btn ghost" id="itmSearchCameraStop">关闭查询相机</button></div>
-      <video id="itmSearchVideo" playsinline muted style="width:100%;max-width:480px;display:none"></video>
       <div id="itmSearchStatus" class="itm-status" role="status">输入编码可精确定位，也可按名称查找。仅查询，不提交作业。</div>
       <div id="itmResults" class="itm-cards" aria-live="polite"></div>
     </div>
@@ -1180,7 +1179,6 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <label for="itmCode">当前步骤编码</label>
       <div class="itm-toolbar"><input class="field itm-grow" id="itmCode" placeholder="LOC:L-A / CTN:C-A / ITM:I-P" aria-label="三码输入"><button class="btn" id="itmScanBtn">填入本步骤</button></div>
       <div class="itm-toolbar"><button class="btn ghost" id="itmCamera">相机扫码</button><button class="btn ghost" id="itmCameraStop">关闭相机</button><button class="btn ghost" id="itmReset">重扫本行</button></div>
-      <video id="itmVideo" playsinline muted style="width:100%;max-width:480px;display:none"></video>
       <div class="itm-toolbar"><button class="btn itm-btn-primary" id="itmConfirm">确认本行，保存待提交</button><button class="btn ghost" id="itmDraftSave">保存草稿</button><button class="btn ghost" id="itmDraftRestore">恢复最近草稿</button></div>
       <div id="itmStatus" class="itm-status" role="status">填写步骤后先保存待提交，再到待处理区核对并提交。</div>
     </div>
@@ -1800,6 +1798,7 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 <script src="lib/item-sync.js?v=2.35.0"></script>
 <script src="vendor/zxing-0.21.3.min.js"></script>
 <script src="lib/item-barcode.js?v=2.35.0"></script>
+<script src="lib/scan-camera.js?v=2.35.0"></script>
 <script src="lib/item-scan.js?v=2.35.0"></script>
 <script src="lib/item-client.js?v=2.35.0"></script>
 <script src="lib/item-ui.js?v=2.35.0"></script>
@@ -9099,5 +9098,31 @@ renderScanLog();
 })();
 
 </script>
+
+<!-- 阶段B：统一扫码确认浮层（查询页/作业页共用；扫码工作台沿用 camOverlay 不变）。
+     结构与 camOverlay 同模式：全屏、焦点管理、ESC 关闭、错误常驻；多一个确认卡。 -->
+<div id="scanCamOverlay" class="cam-overlay" role="dialog" aria-modal="true" aria-label="摄像头扫码确认">
+  <div class="cam-stage">
+    <video id="scanCamVideo" autoplay playsinline muted></video>
+    <div class="cam-frame" aria-hidden="true">
+      <span class="cam-corner cam-corner--tl"></span><span class="cam-corner cam-corner--tr"></span>
+      <span class="cam-corner cam-corner--bl"></span><span class="cam-corner cam-corner--br"></span>
+      <span class="cam-scanline"></span>
+    </div>
+  </div>
+  <p class="cam-hint" id="scanCamHint"></p>
+  <p class="cam-hint" id="scanCamStatus" aria-live="polite"></p>
+  <div class="cam-detected" id="scanCamConfirm" hidden>
+    <div style="font-size:12px;color:var(--text-sub)">识别到</div>
+    <div id="scanCamValue" style="font-size:16px;font-weight:700"></div>
+    <div class="cam-hint" id="scanCamMeta" style="color:inherit;font-weight:400"></div>
+    <div class="itm-toolbar" style="justify-content:center;margin-bottom:0">
+      <button type="button" class="btn" id="scanCamYes">确定填入</button>
+      <button type="button" class="btn ghost" id="scanCamRetry">重新扫描</button>
+    </div>
+  </div>
+  <div class="cam-err" id="scanCamErr" role="alert" hidden></div>
+  <button type="button" class="btn danger" id="scanCamClose">关闭摄像头（Esc）</button>
+</div>
 </body>
 </html>
