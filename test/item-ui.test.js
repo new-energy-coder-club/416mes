@@ -49,3 +49,25 @@ test('guided verify: unknown item on receive offers switching to verifyLegacy ro
  assert.equal(s.page.scan.row().kind,'verifyLegacy');assert.match(s.document.getElementById('itmStep').textContent,/旧物品/);
 });
 test('empty fill shows explicit guidance instead of silent failure',async()=>{const {document:d}=setup();d.getElementById('itmCode').value='';d.getElementById('itmScanBtn').click();await new Promise(r=>setImmediate(r));assert.match(d.getElementById('itmStatus').textContent,/相机扫码|确定填入|手动输入/);});
+test('unregistered ITM code offers register guidance with prefilled code',async()=>{
+ const s=setupGuided();s.state.containers[0].status='active';
+ await s.page.accept('LOC:L-A');await s.page.accept('CTN:C-OLD');
+ s.document.getElementById('itmCode').value='ITM:WP-999';s.document.getElementById('itmScanBtn').click();await tickN();
+ assert.match(s.document.getElementById('itmStatus').textContent,/未建档/);
+ const action=s.document.getElementById('itmStatus').querySelector('button');assert.ok(action,'未建档应提供建档引导');
+ action.click();await tickN();
+ assert.equal(s.document.getElementById('itmRegisterCode').value,'WP-999');
+ assert.ok(s.document.getElementById('itmRegister').closest('details').open,'建档区应自动展开');
+});
+test('rejected legacy conflict command offers override resubmit with new opId',async()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8');const{document:d}=parseHTML(html);
+ const command={id:'old-op',status:'pending',request:{kind:'verifyLegacy',itemCode:'WP-001',target:{loc:'W02-G01',container:'C-D'},error:'LEGACY_LOCATION_CONFLICT',phase:'REJECTED'}};
+ let queued=null;const p={async enqueue(r){queued=r;}};
+ const page=UI.mount({document:d,getState:()=>({items:[],containers:[],locations:[]}),getPersistence:()=>p,getCommands:async()=>[command],getClient:()=>({submit:async()=>({phase:'APPLIED'}),query:async()=>({phase:'REJECTED'})}),id:()=>'new-op'});
+ await page.pending();
+ const btns=[...d.getElementById('itmPending').querySelectorAll('button')].map(b=>b.textContent);
+ assert.ok(btns.some(t=>t.includes('以实物为准重发')),'应有覆盖重发按钮');
+ d.getElementById('itmPending').querySelectorAll('button').forEach(b=>{if(b.textContent.includes('以实物为准'))b.click();});
+ await tickN(10);
+ assert.equal(queued.confirmLegacyLocOverride,true);assert.equal(queued.opId,'new-op');assert.equal(queued.error,undefined);
+});
