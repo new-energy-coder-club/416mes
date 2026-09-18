@@ -1077,6 +1077,11 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
 @media(max-width:600px){
   :is(#tab-items,#tab-item-work) .panel{padding:12px}
   :is(#tab-items,#tab-item-work) .itm-toolbar>.field,:is(#tab-items,#tab-item-work) .itm-control{width:100%;flex-basis:100%}
+  /* 阶段A：按钮两列等分，主操作独占一行 —— 不再让长文案各自断行变形 */
+  :is(#tab-items,#tab-item-work) .itm-toolbar>.btn{flex:1 1 calc(50% - 10px);min-height:48px}
+  :is(#tab-items,#tab-item-work) .itm-toolbar>.itm-btn-primary{flex:1 1 100%}
+  :is(#tab-items,#tab-item-work) .itm-toolbar>.field+.btn{flex:1 1 100%}
+  :is(#tab-items,#tab-item-work) .itm-toolbar>.itm-control+.btn{flex:1 1 100%}
   #tab-item-work .itm-grid,#tab-item-work .itm-grid tbody{display:block;width:100%}
   #tab-item-work .itm-grid thead{display:none}
   #tab-item-work .itm-grid tr{display:block;border:1px solid var(--line);border-radius:8px;margin:10px 0;padding:6px}
@@ -1089,7 +1094,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
 <header><img class="nec-logo" id="hdrLogo" alt="NEC"><div><div class="slogan">BUILT TO DAWN · KEEP BUILDING&#9608;</div><h1>416MES 仓储管理系统</h1></div><span class="sub">七类标签 · Excel 台账 · 扫码工作台（查询只读 / 执行需确认）（单机离线版）</span><span class="queue-chip visually-hidden" id="fsQueueChip" title="离线期间的库存变动，联网后自动冲刷到飞书"></span><span class="hdr-operator">操作人 <select class="field--xs" id="selOperator"></select></span></header>
 <nav class="tabs" id="mainTabs">
   <div class="nav-group">现场作业</div>
-  <button data-tab="items" data-primary="1">库位/容器/物品查询</button><button data-tab="item-work">ITM作业</button>
+  <button data-tab="items" data-primary="1">库位/容器/物品查询</button><button data-tab="item-work" data-primary="1" data-label="ITM作业" data-short="物品作业">ITM作业</button>
   <button data-tab="scan" data-primary="1">扫码工作台</button>
   <button data-tab="wip" data-primary="1" data-label="库存工单（WIP）" data-short="库存工单">库存工单（WIP）</button>
   <div class="nav-group">台账与建档</div>
@@ -1176,7 +1181,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <div class="itm-toolbar"><input class="field itm-grow" id="itmCode" placeholder="LOC:L-A / CTN:C-A / ITM:I-P" aria-label="三码输入"><button class="btn" id="itmScanBtn">填入本步骤</button></div>
       <div class="itm-toolbar"><button class="btn ghost" id="itmCamera">相机扫码</button><button class="btn ghost" id="itmCameraStop">关闭相机</button><button class="btn ghost" id="itmReset">重扫本行</button></div>
       <video id="itmVideo" playsinline muted style="width:100%;max-width:480px;display:none"></video>
-      <div class="itm-toolbar"><button class="btn" id="itmConfirm">确认本行，保存待提交</button><button class="btn ghost" id="itmDraftSave">保存草稿</button><button class="btn ghost" id="itmDraftRestore">恢复最近草稿</button></div>
+      <div class="itm-toolbar"><button class="btn itm-btn-primary" id="itmConfirm">确认本行，保存待提交</button><button class="btn ghost" id="itmDraftSave">保存草稿</button><button class="btn ghost" id="itmDraftRestore">恢复最近草稿</button></div>
       <div id="itmStatus" class="itm-status" role="status">填写步骤后先保存待提交，再到待处理区核对并提交。</div>
     </div>
     <div class="panel">
