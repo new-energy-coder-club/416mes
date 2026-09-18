@@ -1737,6 +1737,7 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 <script src="vendor/zxing-0.21.3.min.js"></script>
 <script src="lib/item-barcode.js?v=2.34.0"></script>
 <script src="lib/item-scan.js?v=2.34.0"></script>
+<script src="lib/item-client.js?v=2.34.0"></script>
 <script src="lib/item-ui.js?v=2.34.0"></script>
 <script src="lib/replay-checkpoint.js?v=2.34.0"></script>
 <script src="lib/incremental.js?v=2.34.0"></script>
@@ -8982,7 +8983,7 @@ function renderDataStoreHint() {
 let itemPage = null;
 function mountItemPage() {
   if (!itemPage) itemPage = window.ItemUI.mount({ document, getState: () => state, getPersistence: () => itmPersistence,
-    id: () => crypto.randomUUID(), getCommands: async () => itmPersistence ? (await itmPersistence.recover()).commands : [] });
+    id: () => crypto.randomUUID(), getClient: () => window.ItemClient.create({ persistence: itmPersistence, fetch: window.fetch.bind(window) }), getCommands: async () => itmPersistence ? (await itmPersistence.recover()).commands : [] });
   itemPage.render(); itemPage.pending().catch(e => log('ITM读取待提交失败：' + e.message));
 }
 load(); restoreSyncUiState(); renderDataStoreHint(); renderLedger(); renderRes(); refreshMatDatalist(); refreshMemberDatalist(); renderNec(); renderOperators(); renderTxns(); renderWip(); renderCtxBar(); renderStatusBar();

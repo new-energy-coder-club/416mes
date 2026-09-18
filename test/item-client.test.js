@@ -1,0 +1,8 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict');
+const Client=require('../lib/item-client');
+const command={id:'same-op',op:'itemOperation',request:{opId:'same-op',kind:'issue'}};
+test('client timeout aborts and durably marks same command unknown, never rotates ID',async()=>{let marked,signal;const c=Client.create({timeoutMs:5,persistence:{async markUnknown(id){marked=id;}},fetch:async(url,o)=>{signal=o.signal;return new Promise(()=>{});}});await assert.rejects(c.submit(command),/超时/);assert.equal(marked,'same-op');assert.equal(signal.aborted,true);assert.equal(command.request.opId,'same-op');});
+test('ACK IDB failure plus unknown-marker failure reports both and never success',async()=>{const c=Client.create({persistence:{async acknowledge(){throw Error('ACK disk failure');},async markUnknown(){throw Error('unknown disk failure');}},fetch:async()=>({ok:true,json:async()=>({ok:true,operation:{phase:'APPLIED'}})})});await assert.rejects(c.submit(command),/ACK disk failure.*unknown disk failure/);});
+test('body parsing timeout is bounded even if injected response ignores abort',async()=>{let marked;const c=Client.create({timeoutMs:5,persistence:{async markUnknown(id){marked=id;}},fetch:async()=>({ok:true,json:()=>new Promise(()=>{})})});await assert.rejects(c.submit(command),/超时/);assert.equal(marked,'same-op');});
+test('client query uses original ID and acknowledges only terminal response',async()=>{let url,ack;const c=Client.create({persistence:{async acknowledge(o){ack=o;}},fetch:async u=>{url=u;return {ok:true,json:async()=>({ok:true,operation:{code:'same-op',phase:'APPLIED'}})};}});await c.query(command);assert.match(url,/opId=same-op/);assert.equal(ack.code,'same-op');});

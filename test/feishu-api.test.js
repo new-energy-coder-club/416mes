@@ -296,6 +296,32 @@ test('ITM 第九表全量/增量真实 localhost 读取包含 JSON 与显式空�
   assert.equal(mock.calls.created.length + mock.calls.updated.length + mock.calls.deleted.length, 0);
 });
 
+test('ITM real repository HTTP prepare/apply/readAfter/finish preserves clear and code', async t => {
+  const schema = require('../lib/item-schema');
+  const tableIds = { items: 'tI', containers: 'tC', locations: 'tL', itemOperations: 'tO' };
+  const fieldTypes = {}, tables = {};
+  for (const [key, columns] of Object.entries(schema.REQUIREMENTS)) {
+    fieldTypes[tableIds[key]] = Object.entries(columns).map(([name, [type, options]]) => ({ name, type: Array.isArray(type) ? type[0] : type, options }));
+    tables[tableIds[key]] = { fields: Object.keys(columns), rows: [] };
+  }
+  tables.tI.rows.push({ '物品码': '001', '容器码': 'C', '状态': 'in_stock', '业务版本': 3, '最后操作ID': 'prior' });
+  tables.tC.rows.push({ '容器码': 'C', '当前库位码': 'L', '状态': 'active', '业务版本': 2, '最后操作ID': '' });
+  tables.tL.rows.push({ '库位码': 'L', '状态': 'active' });
+  const mock = await startMock({ tables, fieldTypes });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const api = loadLib(mock.port, { FEISHU_TABLES: JSON.stringify(tableIds) });
+  const repository = require('../lib/item-repository').create(api);
+  await repository.validateSchema();
+  const operation = require('../lib/unique-items').plan(await repository.snapshot(), { schemaVersion: 1, opId: 'http-op', kind: 'issue', itemCode: '001', source: { loc: 'L', container: 'C' }, expected: { itemVersion: 3, containerVersion: 2 } }, { id: 'fake-user', roles: ['operator'] });
+  operation.requestHash = 'fake-hash'; operation.requestedAt = new Date().toISOString();
+  const rid = await repository.prepare(operation);
+  await repository.apply(operation.after);
+  assert.deepEqual(await repository.readAfter(operation.after), operation.after);
+  await repository.finish(rid, { ...operation, phase: 'APPLIED', finishedAt: new Date().toISOString() });
+  const logs = await repository.operations('http-op'); assert.equal(logs.length, 1); assert.equal(logs[0].phase, 'APPLIED');
+  assert.equal(tables.tI.rows[0]['容器码'], ''); assert.equal(tables.tI.rows[0]['物品码'], '001');
+});
+
 /* ================= 读 ================= */
 
 test('飞书读：pullState 组装出正确的 state', async (t) => {

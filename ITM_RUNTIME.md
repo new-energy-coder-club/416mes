@@ -1,0 +1,41 @@
+# ITM 运行与协调契约
+
+## 默认状态
+
+`api/feishu/item-operation.js` 通过 `lib/item-runtime.js:createRuntime` 组合真实飞书仓储与操作协议。默认 enabled=false、认证返回null、无协调配置，HTTP401/503拒绝正式作业，不发飞书写。生产/Preview均无一键环境开关绕过门禁。
+
+部署可接入 `createRuntime({api,authenticate,coordinator,enabled:true})` 后交 `handlerFor(service)`。api默认是现有feishu-api；仓储实现完整schema检查、PREPARED建行、按record_id改关系并显式清空、实体回读、日志终态回读。部署工厂不是测试fake仓储。
+
+## 认证
+
+authenticate(req)须验证服务端会话/签名，返回{id,roles}；不能相信请求operator或客户端姓名。operator可创建与查看本人操作；admin/service可查看跨用户操作；恢复只允许service。没有roles一律403。GET无恢复写副作用。真实身份提供者尚未配置，为外部门禁。
+
+## 持久协调适配器
+
+必须提供contract=`durable-global-barrier-v1`、verified=true，并真实满足下列方法的持久、跨实例原子语义；字符串标记不是验收证明：
+
+- claim({opId,requestHash,request,operator})：原子保存不可变命令和全局认领。已有同键异摘要返回conflict；已有同键返回existing；其他未决命令返回未取得。首版全局串行，包括容器操作。
+- get(opId)：持久命令/operation/result读取。
+- prepare(opId,operation)：飞书首次写前持久保存冻结计划。函数此后崩溃同样维持屏障。
+- progress、uncertain：记录进度及未知原因，绝不释放认领。TTL不得解冻。
+- finish(opId,result)：原子保存最终结果并释放认领；仅明确无副作用REJECTED或经过回读的APPLIED。
+- claimRecovery(opId)：原子恢复认领，只能恢复当前屏障持有者，不允许恢复者并发。
+
+`test/fixtures/item-protocol.js` 是内存模拟，只证明执行协议测试，生产不导入、不宣称持久。真实KV/队列/事务设施尚未选型验证，正式写保持关闭。
+
+## 恢复与限制
+
+日志创建超时/实体写超时/终态写超时都保持屏障。readAfter为before不证明请求不会迟到，恢复不重发apply；只有after一致且唯一日志摘要吻合，服务恢复可修复终态。日志重复或截断立即隔离。仓储每次调用tenantToken，依赖API已有过期缓存，不私建永久缓存。
+
+前端fetch 15秒超时，AbortController不等于撤销远端业务，命令标未知且保留原opId；未知只提供查询。ACK本机落盘失败不能显示完成，未知标记也失败则合并报告并保留原命令。
+
+当前环境模板仅为占位说明：
+
+```
+FEISHU_APP_ID=<isolated-app-id>
+FEISHU_APP_SECRET=<isolated-secret>
+FEISHU_BASE_TOKEN=<isolated-base-token>
+FEISHU_TABLES=<nine-table-json-with-itemOperations>
+```
+
+不读取/复制真实环境。新表由用户创建不等于schema、ACL或生产协调已验证。不要把旧网页回滚当作恢复关键字段普通写权限。

@@ -1,0 +1,14 @@
+✔ DOM query typed prefix selects item and bare collision lists candidates without write (1146.125532ms)
+✔ DOM draft save/restore and double confirm persist exactly one command (702.489673ms)
+✔ DOM IDB enqueue failure does not display completion and leaves retry available (438.358424ms)
+✔ late getUserMedia after stop releases stream without opening video (258.09621ms)
+✔ video play rejection releases camera and clears srcObject (778.652923ms)
+✔ DOM location drilldown to container then item works via actual clicks (135.325887ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6783.999582
