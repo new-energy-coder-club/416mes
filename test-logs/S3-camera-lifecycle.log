@@ -1,0 +1,26 @@
+✔ DOM query typed prefix selects item and bare collision lists candidates without write (1158.546316ms)
+✔ DOM draft save/restore and double confirm persist exactly one command (980.824969ms)
+✔ DOM IDB enqueue failure does not display completion and leaves retry available (1334.662477ms)
+✖ late getUserMedia after stop releases stream without opening video (380.072121ms)
+✔ DOM location drilldown to container then item works via actual clicks (310.365201ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 4
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7264.801281
+
+✖ failing tests:
+
+test at test/item-ui.test.js:8:1
+✖ late getUserMedia after stop releases stream without opening video (380.072121ms)
+  TypeError: resolve is not a function
+      at TestContext.<anonymous> (/srv/416mes/.dev-lines/gpt6/test/item-ui.test.js:8:330)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)

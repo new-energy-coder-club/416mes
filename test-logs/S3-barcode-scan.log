@@ -1,0 +1,13 @@
+✔ actual ZXing Code128 decodes synthetic pixel fixture, not mocked text (420.836444ms)
+✔ strict LOC CTN ITM order, wrong relation, repeat frames and qty=1 (233.678739ms)
+✔ late camera token cannot fill switched row or reset generation (13.332901ms)
+✔ batch duplicate is rejected and upstream reset clears descendants (70.260996ms)
+✔ issue validates source and new receive rejects already in stock (25.981986ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16753.667081

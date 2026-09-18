@@ -1053,6 +1053,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
 <header><img class="nec-logo" id="hdrLogo" alt="NEC"><div><div class="slogan">BUILT TO DAWN · KEEP BUILDING&#9608;</div><h1>416MES 仓储管理系统</h1></div><span class="sub">七类标签 · Excel 台账 · 扫码工作台（查询只读 / 执行需确认）（单机离线版）</span><span class="queue-chip visually-hidden" id="fsQueueChip" title="离线期间的库存变动，联网后自动冲刷到飞书"></span><span class="hdr-operator">操作人 <select class="field--xs" id="selOperator"></select></span></header>
 <nav class="tabs" id="mainTabs">
   <div class="nav-group">现场作业</div>
+  <button data-tab="items" data-primary="1">库位/容器/物品查询</button><button data-tab="item-work">ITM作业</button>
   <button data-tab="scan" data-primary="1">扫码工作台</button>
   <button data-tab="wip" data-primary="1" data-label="库存工单（WIP）" data-short="库存工单">库存工单（WIP）</button>
   <div class="nav-group">台账与建档</div>
@@ -1112,6 +1113,37 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   <!-- ========== 当前对象条（阶段10）：跨页上下文与返回来源 ========== -->
   <div class="ctx-bar" id="ctxBar" hidden></div>
   <!-- ========== 台账 ========== -->
+  <section class="tab" id="tab-items">
+    <div class="card">
+      <h2>库位 / 容器 / 唯一物品</h2>
+      <p class="hint">查询不改变库存。物品位置由容器归属派生；旧定位仅是历史线索。</p>
+      <input id="itmSearch" placeholder="精确码或名称/规格/说明搜索" aria-label="唯一物品查询">
+      <button class="btn" id="itmSearchBtn">查询</button>
+      <button class="btn" id="itmSearchCamera">查询相机扫码</button><button class="btn ghost" id="itmSearchCameraStop">关闭查询相机</button><video id="itmSearchVideo" playsinline muted style="width:100%;max-width:480px;display:none"></video>
+      <div id="itmResults" aria-live="polite"></div>
+    </div>
+  </section>
+  <section class="tab" id="tab-item-work">
+    <div class="card">
+      <h2>ITM 三码作业草稿</h2>
+      <p class="hint">LOC → CTN → ITM；数量固定 1。保存草稿/命令不代表完成，请勿据此发放实物。</p>
+      <select id="itmKind" aria-label="动作"><option value="receive">入库</option><option value="issue">出库</option><option value="transfer">换箱</option><option value="moveContainer">容器移库</option><option value="placeContainer">容器定位</option><option value="verifyLegacy">旧物品核实（管理员）</option></select>
+      <button class="btn" id="itmNewRow">新行</button><select id="itmRows" aria-label="当前行"></select>
+      <div style="overflow-x:auto"><table><thead><tr><th>行</th><th>库位</th><th>容器</th><th>物品</th><th>操作</th><th>状态</th></tr></thead><tbody id="itmRowTable"></tbody></table></div>
+      <div id="itmStep" aria-live="polite"></div>
+      <input id="itmCode" placeholder="LOC:L-A / CTN:C-A / ITM:I-P" aria-label="三码输入">
+      <button class="btn" id="itmScanBtn">填入扫码</button><button class="btn ghost" id="itmReset">重扫本行</button>
+      <button class="btn" id="itmDraftSave">保存草稿</button><button class="btn ghost" id="itmDraftRestore">恢复最近草稿</button><button class="btn" id="itmConfirm">确认本行并保存待提交命令</button>
+      <button class="btn" id="itmCamera">相机扫码</button><button class="btn ghost" id="itmCameraStop">关闭相机</button>
+      <video id="itmVideo" playsinline muted style="width:100%;max-width:480px;display:none"></video>
+      <details><summary>管理员唯一实体建档</summary><select id="itmRegisterType"><option value="registerItem">物品</option><option value="registerLocation">库位</option><option value="registerContainer">容器</option></select><input id="itmRegisterName" placeholder="名称/说明"><button class="btn" id="itmRegister">生成随机唯一码并申请建档</button><p class="hint">需可靠共享协调和管理员认证；远端确认前不打印正式标签。</p></details>
+      <details><summary>管理员旧库位/容器核实启用</summary><p class="hint">须服务端管理员认证，仍受默认禁写门禁；仅生成待提交命令。</p><input id="itmAdminLoc" placeholder="LOC库位码"><input id="itmAdminContainer" placeholder="CTN容器码（启用容器时填写）"><button class="btn" id="itmActivateLoc">核实启用库位</button><button class="btn" id="itmActivateContainer">核实启用容器</button></details>
+      <details><summary>管理员物品退役</summary><p class="hint">仅允许 pending/out；服务端校验管理员权限。LOC停用不在当前协议内。</p><input id="itmRetireCode" placeholder="待退役物品码"><input id="itmRetireReason" placeholder="退役原因"><button class="btn" id="itmRetire">申请退役</button></details>
+      <div id="itmStatus" role="status"></div><div id="itmPending"></div>
+      <h3>导入命令只读复核</h3><div id="itmRecoveryReview" aria-live="polite"></div>
+      <h3>未解关系冲突</h3><button class="btn ghost" id="itmConflictRefresh">安全重新拉取检查</button><div id="itmConflictPanel" aria-live="polite"></div>
+    </div>
+  </section>
   <section class="tab on" id="tab-ledger">
     <p class="page-purpose"><span>主数据维护：编码不变、属性可变</span><span class="impact impact--confirm">手工改库存会写流水</span></p>
     <div class="panel">
@@ -1567,6 +1599,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   </section>
   <!-- ========== 扫码出入库 ========== -->
   <section class="tab" id="tab-scan">
+    <p class="hint">当前为旧 MAT/WIP 工作台。唯一物品请进入独立模式：<button class="btn" onclick="goTab('items')">ITM查询 / 严格三码作业</button></p>
     <p class="page-purpose"><span>七种机读串：MAT / LOC / CTN / WIP / NEC / ITM / MAN</span><span class="impact impact--none">查询只读</span><span class="impact impact--confirm">WIP 确认后改库存</span></p>
     <div class="panel">
       <h2>扫码 / 手输机读串</h2>
@@ -1707,6 +1740,14 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 <script src="mes-core.js?v=2.34.0"></script>
 <script src="lib/outbox.js?v=2.34.0"></script>
 <script src="lib/store.js?v=2.34.0"></script>
+<script src="lib/unique-items.js?v=2.34.0"></script>
+<script src="lib/item-persistence.js?v=2.34.0"></script>
+<script src="lib/item-sync.js?v=2.34.0"></script>
+<script src="vendor/zxing-0.21.3.min.js"></script>
+<script src="lib/item-barcode.js?v=2.34.0"></script>
+<script src="lib/item-scan.js?v=2.34.0"></script>
+<script src="lib/item-client.js?v=2.34.0"></script>
+<script src="lib/item-ui.js?v=2.34.0"></script>
 <script src="lib/replay-checkpoint.js?v=2.34.0"></script>
 <script src="lib/incremental.js?v=2.34.0"></script>
 <script src="lib/census-status.js?v=2.34.0"></script>
@@ -1741,6 +1782,11 @@ if (!CORE) {
    缺了它「离线期间的改动」就无处存放，宁可当场报错也不要静默丢数据。 */
 const OUTBOX = window.Outbox;
 const STORE = window.MesStore;
+const ITEM_PERSIST = window.ItemPersistence;
+const stateSaveQueue = ITEM_PERSIST.createQueue();
+let itmPersistence = null;
+let itmTabLease = null;
+let itmReadOnlyTab = false;
 const CHECKPOINT = window.MesReplayCheckpoint;
 const INC = window.MesIncremental;
 const TWM = window.MesThreeWay;
@@ -2122,6 +2168,7 @@ function migrateState(st) {
     C_LAYOUT.containers.forEach(c => { if (!st.containers.find(x => x.code === c.code)) st.containers.push(Object.assign({}, c)); });
     MODULE_ZONES.forEach(z => { if (!st.locations.find(x => x.code === z.code)) st.locations.push(Object.assign({}, z)); });
   } catch (e) { log('⚠️ 内置库位补种失败（继续用现有数据）：' + e.message); }
+  window.UniqueItems.migrate(st);
   return st;
 }
 
@@ -2162,7 +2209,7 @@ function load() {
  *   就有依据判断该信谁，而不是猜。
  */
 function writeStateToLs() {
-  if (!state) return false;
+  if (!state || itmReadOnlyTab) return false;
   state.__rev = (Number(state.__rev) || 0) + 1;
   const persist = Object.assign({}, state);
   delete persist.__base;
@@ -2225,18 +2272,30 @@ window.addEventListener('pagehide', flushStateOnHide);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushStateOnHide(); });
 async function initLocalStore() {
   try {
+    itmTabLease = await ITEM_PERSIST.acquireTab(navigator.locks);
+    // Browsers without Web Locks retain legacy saves, but cannot submit ITM commands.
+    itmReadOnlyTab = !!navigator.locks && !itmTabLease.acquired;
+    if (itmReadOnlyTab) showPersistentNotice('另一个标签正在编辑。本标签只读，请关闭后重新打开；ITM作业已禁用。');
     localStore = STORE.createIndexedDbStore({ dbName: 'mes416-state' });
     await localStore.open();
     const saved = await localStore.get('syncMeta', IDB_STATE_KEY);
     const idbState = saved && saved.value;
+    itmPersistence = ITEM_PERSIST.create({ store: localStore, queue: stateSaveQueue,
+      getState: () => state, publish: next => { state = next; },
+      canWrite: () => !!(itmTabLease && itmTabLease.acquired) && !itmReadOnlyTab });
+    const recoveredItems = await itmPersistence.recover();
     const lsRev = Number(state.__rev) || 0;
     const keepWarn = state.__loadWarning || '';
     const idbBehind = (() => { try { return !!localStorage.getItem(LS_DIRTY_KEY); } catch (e) { return false; } })();
+    if (itmReadOnlyTab) {
+      if (idbState) state = ITEM_PERSIST.restore(state, idbState, false, recoveredItems.commands);
+      return;
+    }
     if (idbState && !idbBehind) {
       /* IDB 是最新的（或者至少不比 LS 旧）→ 用它。IDB 里有 LS 故意不存的 __base。
          旧实现只有这一条路径、且调的是残缺的 hydrateState()：从 IDB 恢复的老数据
          **缺内置库位、缺新字段默认值**，而且这个缺陷是静默的。 */
-      state = idbState;
+      state = ITEM_PERSIST.restore(state, idbState, false, recoveredItems.commands);
       state.__freshSeed = false;
       state.__loadWarning = keepWarn;
       state.__rev = Math.max(Number(idbState.__rev) || 0, lsRev);
@@ -2253,6 +2312,7 @@ async function initLocalStore() {
          但 __base 只在 IDB 里，直接丢掉会让三方合并退回「无基线」，下一轮满屏假冲突 ——
          所以把 IDB 那份基线继承过来。这是「取新者」与「保留基线」两个目标的交点。 */
       if (idbState.__base) state.__base = idbState.__base;
+      state = ITEM_PERSIST.restore(state, idbState, true, recoveredItems.commands);
       log('ℹ️ 上次退出前 IndexedDB 落盘没跟上，已以 localStorage 里更新的副本为准（本机数据没有丢）');
     }
     // 迁移必须在同一 IDB transaction 中写 state + marker；成功前不清 LS。
@@ -2272,40 +2332,43 @@ async function initLocalStore() {
   }
 }
 async function persistStateToIdb() {
-  if (!localStore) return;
-  const myRev = Number(state.__rev) || 0;   // 本次落盘对应的修订号，收尾时用来判断有没有新改动
+  return stateSaveQueue.run(async () => {
+  if (!localStore || itmReadOnlyTab) return;
+  const snapshot = JSON.parse(JSON.stringify(state));
+  const myRev = Number(snapshot.__rev) || 0;   // 本次落盘对应的修订号，收尾时用来判断有没有新改动
   const tableDefs = [
     ['materials', 'code'], ['locations', 'code'], ['containers', 'code'], ['members', 'code'],
-    ['items', 'code'], ['manuals', 'code'], ['workorders', 'code'], ['necOrders', 'code']
+    ['items', 'code'], ['manuals', 'code'], ['workorders', 'code'], ['necOrders', 'code'], ['itemOperations', 'code']
   ];
   // 每次 save 用一个短 transaction 同步写 records、完整流水和兼容 state blob。
   // 这里绝不夹网络 await；网络冲刷在 transaction 之外，成功后才按 id 删除 outbox。
   await localStore.transaction(['records', 'transactions', 'baselines', 'syncMeta'], async tx => {
     const records = [];
-    tableDefs.forEach(([table, key]) => (state[table] || []).forEach(row => {
+    tableDefs.forEach(([table, key]) => (snapshot[table] || []).forEach(row => {
       if (row && row[key] != null && row[key] !== '') records.push({ table, key: String(row[key]), value: row });
     }));
     await tx.replaceAll('records', records);
-    await tx.replaceAll('transactions', (state.transactions || []).filter(t => t && t.seq != null));
+    await tx.replaceAll('transactions', (snapshot.transactions || []).filter(t => t && t.seq != null));
     /* checkpoint 只在流水条数真的变了才重建。
        旧实现挂在每次 save 上，而 save 被日志、改名、切页签等各种操作触发 ——
        等于每次状态变更都在**主线程**做一次全量账本重放，几万条时会明显卡。
        （另注：这批 checkpoint 目前只写不读，方案要求 replayAudit 消费它们，尚未接线。） */
-    const txnCount = (state.transactions || []).length;
+    const txnCount = (snapshot.transactions || []).length;
     if (txnCount !== _cpBuiltFor) {
-      _cpBuiltFor = txnCount;
-      const cp = CHECKPOINT.build(state.transactions || []);
+      const cp = CHECKPOINT.build(snapshot.transactions || []);
       await tx.replaceAll('baselines', cp.checkpoints);
       await tx.put('syncMeta', { key: 'checkpoint-meta', value: { reason: cp.reason, coverage: cp.coverage, at: new Date().toISOString() } });
     }
-    await tx.put('syncMeta', { key: IDB_STATE_KEY, value: state, savedAt: new Date().toISOString() });
+    await tx.put('syncMeta', { key: IDB_STATE_KEY, value: snapshot, savedAt: new Date().toISOString() });
   });
+  _cpBuiltFor = (snapshot.transactions || []).length;
   // 落盘成功 → 「IDB 落后」标记可以清了。但只有在这期间没有新的 save（rev 没推进）
   // 时才能清：否则会把「LS 更新、IDB 还没跟上」这个事实在真正落盘前抹掉。
   if ((Number(state.__rev) || 0) === myRev) {
     _idbPending = false;
     try { localStorage.removeItem(LS_DIRTY_KEY); } catch (e) { }
   }
+  });
 }
 
 /* 工单数据归一化（Excel 导入 / 备份合并 / 云端同步共用）：
@@ -2591,6 +2654,8 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('cl
     if (x === b) x.setAttribute('aria-current', 'page'); else x.removeAttribute('aria-current');
   });
   document.querySelectorAll('section.tab').forEach(s => s.classList.toggle('on', s.id === 'tab-' + b.dataset.tab));
+  if (!['items','item-work'].includes(b.dataset.tab) && itemPage) itemPage.stopCamera();
+  if (['items','item-work'].includes(b.dataset.tab)) mountItemPage();
   if (b.dataset.tab === 'ledger') renderLedger();   // 数据可能在别的页签被改过，切回时必须重渲染
   if (b.dataset.tab === 'txn') { _txnPage = 1; renderTxns(); }   // 阶段3：流水独立页，切回重置分页
   if (b.dataset.tab === 'label') renderLabelTab();
@@ -3321,6 +3386,22 @@ document.getElementById('fileImport').addEventListener('change', e => {
         createdAt: ncol(r, '创建时间', 9) || '', doneAt: ncol(r, '完成时间', 10) || ''
       })); }
 
+      // Excel relationships are review observations, not authenticated operation results.
+      state.__itmImportReview = state.__itmImportReview || [];
+      ['locations', 'containers', 'items'].forEach(table => {
+        const previous = importSnapshot[table];
+        const prior = Array.isArray(previous) ? previous : [];
+        const incoming = state[table] || [];
+        state[table] = prior.map(r => JSON.parse(JSON.stringify(r)));
+        incoming.forEach(row => {
+          state.__itmImportReview.push({ table, observed: JSON.parse(JSON.stringify(row)) });
+          const existing = state[table].find(r => r.code === row.code);
+          const ordinary = window.UniqueItems.ordinaryFields(table, row);
+          if (existing) Object.assign(existing, ordinary);
+          else state[table].push(window.UniqueItems.normalize(table, ordinary));
+        });
+      });
+
       /* ---------- 库存流水 sheet：有则原样恢复，保证「导出什么样、导入就什么样」 ---------- */
       const txs = sheet('库存流水');
       let restoredTxns = 0, diffTxns = 0;
@@ -3442,7 +3523,7 @@ document.getElementById('btnTemplate').addEventListener('click', () => {
 });
 
 /* ---------- 全量 JSON 备份 / 导入合并 ---------- */
-document.getElementById('btnBackupJson').addEventListener('click', () => {
+document.getElementById('btnBackupJson').addEventListener('click', async () => {
   // 导出前剔除全部内部簿记字段（__base 是整份飞书值快照，体积与 state 同量级）。
   // save() 早就把 __base 从 localStorage 副本里剔了，这里必须保持一致 ——
   // 否则备份文件体积翻倍，还会把同步内部簿记外泄给拿到该文件的人。
@@ -3455,7 +3536,8 @@ document.getElementById('btnBackupJson').addEventListener('click', () => {
      「明确要求把 PIN 清空」，恢复+推回飞书就把全员的 PIN 抹了。 */
   const withPin = confirm('备份文件要不要包含人员 PIN 码明文？\n\n【确定】包含 —— 完整备份，恢复后不用重新设置 PIN（文件请勿外传）。\n【取消】不包含 —— 可安全转发；恢复时保持本机原有 PIN 不变。');
   if (!withPin && Array.isArray(pub.members)) pub.members = pub.members.map(m => { const c = Object.assign({}, m); delete c.pin; return c; });
-  const blob = new Blob([JSON.stringify({ app: '416MES', version: 2, deviceId: state.deviceId, exportedAt: new Date().toLocaleString(), pinsIncluded: withPin, state: pub }, null, 1)], { type: 'application/json' });
+  const itemRecovery = itmPersistence ? await itmPersistence.recover() : { drafts: [], commands: [] };
+  const blob = new Blob([JSON.stringify({ app: '416MES', version: 2, deviceId: state.deviceId, exportedAt: new Date().toLocaleString(), pinsIncluded: withPin, itemRecovery, state: pub }, null, 1)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = '416MES_备份_' + ymdCompact(today()) + (withPin ? '_含PIN' : '') + '.json'; a.click();
   URL.revokeObjectURL(a.href);
@@ -3464,7 +3546,13 @@ document.getElementById('btnBackupJson').addEventListener('click', () => {
 });
 /* ---------- 通用合并：备份 JSON 导入 / 云端同步共用 ---------- */
 function mergePackage(pkg, { from = '备份文件', upsertMembers = false } = {}) {
-  const inc = pkg.state || pkg;                     // 兼容裸 state
+  const inc = JSON.parse(JSON.stringify(pkg.state || pkg));
+  if (pkg.itemRecovery) state.__itmRecoveryReview = JSON.parse(JSON.stringify(pkg.itemRecovery));
+  state.__itmImportReview = state.__itmImportReview || [];
+  ['locations', 'containers', 'items'].forEach(table => {
+    (inc[table] || []).forEach(row => state.__itmImportReview.push({ table, observed: row }));
+    inc[table] = (inc[table] || []).map(row => window.UniqueItems.normalize(table, window.UniqueItems.ordinaryFields(table, row)));
+  });
   if (!inc || !Array.isArray(inc.materials)) throw new Error('不是有效的 416MES 备份/云端数据');
   const stat = { mat: 0, loc: 0, ctn: 0, itm: 0, man: 0, mbr: 0, mbrUpd: 0, wip: 0, nec: 0, necUpd: 0, txn: 0 };
   const byCode = (arr, code) => arr.find(x => x.code === code);
@@ -4069,6 +4157,15 @@ async function exportLabelsPdf() {
 document.getElementById('btnPrint').addEventListener('click', () => { exportLabelsPdf(); });
 
 
+function blockLegacyUniqueLabels() {
+  const controlled = state.__itmControlledMode === true || ['locations','containers','items'].some(table =>
+    (state.__itmSchemaColumns?.[table] || []).some(name => ['状态','业务版本','最后操作ID'].includes(name)) ||
+    (state[table] || []).some(row => row.lastOpId || Number(row.version) > 0));
+  if (!controlled) return false;
+  alert('当前唯一实体采用受控模式：旧LOC/CTN批量生成不可生成正式标签，也不会新增本地档案。请在ITM作业页管理员注册，远端确认后打印。');
+  goTab('item-work');
+  return true;
+}
 /* ================= ③ 编码生成 ================= */
 function addUnique(arr, items, key, table) {
   let n = 0; const added = [];
@@ -4080,6 +4177,7 @@ function addUnique(arr, items, key, table) {
   return n;
 }
 document.getElementById('btnGenShelf').addEventListener('click', () => {
+  if (blockLegacyUniqueLabels()) return;
   const rg = document.getElementById('gLocRegion').value.trim().toUpperCase() || 'B';
   const SITE_NAMES = { TQ: '天权楼', YH: '玉衡A416', K401: '401开放空地', B: 'B区' };
   const ns = +document.getElementById('gLocShelf').value, nl = +document.getElementById('gLocLayer').value, np = +document.getElementById('gLocPos').value;
@@ -4091,6 +4189,7 @@ document.getElementById('btnGenShelf').addEventListener('click', () => {
   nextStrip('nextLoc', 'loc', state.locations.filter(x => !b1.has(x.code)).map(x => x.code), items.length);
 });
 document.getElementById('btnGenOpen').addEventListener('click', () => {
+  if (blockLegacyUniqueLabels()) return;
   const SITE_NAMES = { TQ: '天权楼', YH: '玉衡A416', K401: '401开放空地', B: 'B区' };
   const site = document.getElementById('gOpenSite').value.trim().toUpperCase() || 'K401';
   const a1 = (document.getElementById('gOpenAisleFrom').value.trim().toUpperCase() || 'A').charCodeAt(0);
@@ -4106,6 +4205,7 @@ document.getElementById('btnGenOpen').addEventListener('click', () => {
   nextStrip('nextLoc', 'loc', state.locations.filter(x => !b2.has(x.code)).map(x => x.code), items.length);
 });
 document.getElementById('btnGenWs').addEventListener('click', () => {
+  if (blockLegacyUniqueLabels()) return;
   const a = +document.getElementById('gWsFrom').value, b = +document.getElementById('gWsTo').value, g = +document.getElementById('gWsGrid').value;
   const items = [];
   for (let w = a; w <= b; w++) for (let i = 1; i <= g; i++)
@@ -4115,6 +4215,7 @@ document.getElementById('btnGenWs').addEventListener('click', () => {
   nextStrip('nextLoc', 'loc', state.locations.filter(x => !b3.has(x.code)).map(x => x.code), items.length);
 });
 document.getElementById('btnGenCtn').addEventListener('click', () => {
+  if (blockLegacyUniqueLabels()) return;
   const [pre, type, spec] = document.getElementById('gCtnType').value.split('|');
   const from = +document.getElementById('gCtnFrom').value, n = +document.getElementById('gCtnCount').value;
   const items = []; for (let i = from; i < from + n; i++) items.push({ code: pre + '-' + pad(i, 3), type, spec, loc: '' });
@@ -4124,6 +4225,7 @@ document.getElementById('btnGenCtn').addEventListener('click', () => {
 });
 /* ---- 模块区（A4 大卡） ---- */
 document.getElementById('btnGenZone').addEventListener('click', () => {
+  if (blockLegacyUniqueLabels()) return;
   const name = document.getElementById('gZoneName').value.trim();
   if (!name) { alert('请填写模块区名称'); return; }
   let max = 0;
@@ -4151,14 +4253,8 @@ function nextCode(arr, prefix) {
   return prefix + '-' + pad(max + 1, 3);
 }
 document.getElementById('btnGenItm').addEventListener('click', () => {
-  const name = document.getElementById('gItmName').value.trim();
-  if (!name) { alert('请填写物品名称'); return; }
-  const code = nextCode(state.items, 'WP');
-  const newItem = { code, name, spec: document.getElementById('gItmSpec').value.trim(), loc: document.getElementById('gItmLoc').value.trim() };
-  state.items.push(newItem);
-  fsPushRecord('items', [newItem]);
-  save();
-  nextStrip('nextItm', 'itm', [code], 1);
+  goTab('items');
+  alert('请使用管理员受控建档申请，远端确认后再打印唯一物品标签。');
 });
 document.getElementById('btnGenMan').addEventListener('click', () => {
   const name = document.getElementById('gManName').value.trim();
@@ -6211,7 +6307,13 @@ function resSave() {
     const el = document.getElementById('resF_' + f.k);
     patch[f.k] = el ? String(el.value).trim() : '';
   }
+  if (itmReadOnlyTab) { alert('本标签只读'); return; }
+  if (window.UniqueItems.CONTROLLED[table]) {
+    const safe = window.UniqueItems.ordinaryFields(table, patch);
+    Object.keys(patch).forEach(k => delete patch[k]); Object.assign(patch, safe);
+  }
   let pushed = null, msg = '', clearFields = [];
+  if (resEditing.mode === 'add' && window.UniqueItems.CONTROLLED[table]) { alert('唯一实体请在“库位/容器/物品查询”页通过管理员受控建档；未配置协调时仅保存申请。'); goTab('items'); return; }
   if (resEditing.mode === 'add') {
     /* 新增：业务键自动编（与批量建档同一套规则），避免用户瞎编导致和标签编码体系冲突 */
     const pre = table === 'locations' ? 'B' : table === 'containers' ? 'A4SH' : table === 'items' ? 'WP' : 'SC';
@@ -6255,6 +6357,7 @@ function resSave() {
 
 /** 作废删除：显示影响范围 + 同步状态 → 二次确认 → 写凭据 → 删本地 → 推飞书删除 */
 async function resDelete(key) {
+  if (['items', 'containers', 'locations'].includes(resType)) { alert('唯一实体编码不可硬删/回收；请通过受控退役或停用流程处理。'); return; }
   const cfg = RES_TYPES[resType], table = resType;
   const rec = (state[table] || []).find(r => String(r[cfg.key]) === String(key));
   if (!rec) { alert('记录已不存在，请刷新。'); renderRes(); return; }
@@ -6350,11 +6453,11 @@ function resPrintJump(key) {
   });
 })();
 
-const TABLE_LABEL = { materials: '物料台账', locations: '库位', containers: '容器', members: '人员', items: '物品', manuals: '手册', workorders: '工单记录', transactions: '库存流水' };
+const TABLE_LABEL = { materials: '物料台账', locations: '库位', containers: '容器', members: '人员', items: '物品', manuals: '手册', workorders: '工单记录', transactions: '库存流水', itemOperations: '物品操作' };
 /** 每张表的业务主键字段名（必须与 outbox.js DEFAULT_TABLES / mes-core MERGE_TABLES 一致） */
-const TABLE_KEY_FIELD = { materials: 'code', locations: 'code', containers: 'code', members: 'code', items: 'code', manuals: 'code', workorders: 'code', transactions: 'seq' };
+const TABLE_KEY_FIELD = { materials: 'code', locations: 'code', containers: 'code', members: 'code', items: 'code', manuals: 'code', workorders: 'code', transactions: 'seq', itemOperations: 'code' };
 const PUSHABLE = ['materials', 'locations', 'containers', 'members', 'items', 'manuals', 'workorders'];  // 流水由库存直写产生，不做批量推送
-const SYNC_TABLES = ['materials', 'locations', 'containers', 'members', 'items', 'manuals', 'workorders', 'transactions'];
+const SYNC_TABLES = ['materials', 'locations', 'containers', 'members', 'items', 'manuals', 'workorders', 'transactions', 'itemOperations'];
 
 let _pendingPush = null;    // 本次合并发现的「本地新建、飞书还没有」的记录
 let _lastReport = null;   // load() 之后由 restoreSyncUiState 恢复；此处 state 还是 null，不能直接读
@@ -7114,8 +7217,11 @@ async function fsIncrementalSync() {
       fsProbeSucceeded();
     }
     const wms = fsWatermarks();
-    const changed = d.changed || [];
-    Object.assign(wms, d.watermarks || {});
+    const changed = (d.changed || []).slice().sort((a, b) => {
+      const order = ['itemOperations', 'locations', 'containers', 'items'];
+      return (order.includes(a) ? order.indexOf(a) : 10) - (order.includes(b) ? order.indexOf(b) : 10);
+    });
+    const oldWatermarks = JSON.parse(JSON.stringify(wms));
     if (!changed.length) return 0;        // 零变化：一个内容请求都不发
 
     let total = 0;
@@ -7151,6 +7257,13 @@ async function fsIncrementalSync() {
     if (total) {
       HEALTH.pullCount++;
       HEALTH.lastSyncAt = new Date().toLocaleTimeString();
+      Object.assign(wms, d.watermarks || {});
+      try {
+        await persistStateToIdb();
+      } catch (e) {
+        Object.keys(wms).forEach(k => delete wms[k]); Object.assign(wms, oldWatermarks);
+        throw e;
+      }
       save();
       renderLedger(); renderTxns(); renderOperators(); renderMembers(); renderWip();
       log('⚡ 增量同步：' + changed.map(k => TABLE_LABEL[k] || k).join('、') + ' 共 ' + total + ' 行');
@@ -7228,7 +7341,7 @@ async function fsRunCensus(opts) {
      为什么：一次扫 7 张表要 ~8 秒，会把轮询循环整个卡住 ——
      实测端到端延迟因此从 ~7 秒涨到 ~11 秒。
      手动点「立即核对删除」时才扫全部（opts.all = true）。 */
-  const censusable = SYNC_TABLES.filter(k => k !== 'transactions');
+  const censusable = SYNC_TABLES.filter(k => k !== 'transactions' && k !== 'itemOperations');
   let targets;
   if (opts.all) targets = censusable;
   else {
@@ -7610,6 +7723,11 @@ function fsPartial(tables, keys) {
  * 这样三方合并的开销只与变化行数有关，而不是整表。
  */
 function fsThreeWayApply(table, remoteRows) {
+  if (table === 'itemOperations' || window.UniqueItems.CONTROLLED[table]) {
+    const merged = window.ItemSync.merge(state, { [table]: remoteRows });
+    if (table === 'itemOperations') return { auto: remoteRows.length, conflicts: merged.conflicts.length, degraded: false };
+    remoteRows = merged.ordinary[table];
+  }
   const id = TABLE_KEY_FIELD[table];
   const keys = remoteRows.map(r => String(r[id]));
   const base = fsMergeBase();
@@ -8191,6 +8309,8 @@ function dropSeedDemoRecords(remote) {
 
 /** 云端 → 本地：统一走 mes-core 的 mergeRemote，并把「本地新建」记下来待推送 */
 function fsMerge(remote) {
+  if (remote.columns) state.__itmSchemaColumns = JSON.parse(JSON.stringify(remote.columns));
+  remote = window.ItemSync.merge(state, remote).ordinary;
   dropSeedDemoRecords(remote);   // 出厂示例不属于「本地新建」，先清掉再合并，否则会被当成待推送
   // 必须**在合并之前**判断本机有没有基线：合并后 __syncedKeys 就被本次结果覆盖了。
   _hadFeishuBaseline = !!(state.__syncedKeys && Object.keys(state.__syncedKeys).length);
@@ -8415,6 +8535,7 @@ async function fsGiveUpItem(id) {
   const ob = await fsOutboxAsync();
   const it = ob ? (await ob.list()).find(x => x.id === id) : fsOutbox().list().find(x => x.id === id);
   if (!it) return null;
+  if (it.op === 'itemOperation') throw new Error('ITM结果未知命令不可放弃删除；请查询原opId并完成恢复');
   const dump = JSON.stringify(it);
   try {
     const blob = new Blob([dump], { type: 'application/json' });
@@ -8432,7 +8553,12 @@ async function fsGiveUpItem(id) {
 
 /** 执行一条队列项（也用于直写） */
 async function fsExecItem(item) {
+  if (itmReadOnlyTab) throw new Error('另一标签持有写权限，本标签只读');
   const op = item.op || 'stock';
+  if (op === 'itemOperation') {
+    // Recovery must explicitly query the original opId; never route ITM through stock/upsert.
+    throw new Error('ITM命令需在唯一物品作业页核对后提交/查询，普通队列不自动重发');
+  }
   if (op === 'stock') {
     const d = await fsPost('/api/feishu/stock', {
       matCode: item.matCode, qty: item.qty, delta: item.delta,
@@ -8879,6 +9005,20 @@ function renderDataStoreHint() {
   if (c) c.addEventListener('click', () => box.remove());
 }
 
+let itemPage = null;
+function mountItemPage() {
+  if (!itemPage) itemPage = window.ItemUI.mount({ document, getState: () => state, getPersistence: () => itmPersistence,
+    refreshConflicts: async () => { const remote = await fsPullState(); await stateSaveQueue.run(async () => {
+      if (!localStore || itmReadOnlyTab) throw new Error('本机不可持久化或标签只读');
+      const next = JSON.parse(JSON.stringify(state));
+      window.ItemSync.merge(next, remote);
+      if (remote.columns) next.__itmSchemaColumns = JSON.parse(JSON.stringify(remote.columns));
+      await localStore.transaction(['records','transactions','syncMeta'], tx => ITEM_PERSIST.writeSnapshot(tx, next));
+      state = next;
+    }); },
+    id: () => crypto.randomUUID(), getClient: () => window.ItemClient.create({ persistence: itmPersistence, fetch: window.fetch.bind(window) }), getCommands: async () => itmPersistence ? (await itmPersistence.recover()).commands : [] });
+  itemPage.render(); itemPage.pending().catch(e => log('ITM读取待提交失败：' + e.message));
+}
 load(); restoreSyncUiState(); renderDataStoreHint(); renderLedger(); renderRes(); refreshMatDatalist(); refreshMemberDatalist(); renderNec(); renderOperators(); renderTxns(); renderWip(); renderCtxBar(); renderStatusBar();
 // 阶段13：为初始当前页签补 aria-current（深链进入时也要正确）
 (function () { const on = document.querySelector('nav.tabs button.on'); if (on) on.setAttribute('aria-current', 'page'); })();

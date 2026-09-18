@@ -1,0 +1,22 @@
+✖ ITM real repository HTTP prepare/apply/readAfter/finish preserves clear and code (2542.98587ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3487.438628
+
+✖ failing tests:
+
+test at test/feishu-api.test.js:299:1
+✖ ITM real repository HTTP prepare/apply/readAfter/finish preserves clear and code (2542.98587ms)
+  Error: 写入表 tO 失败：DatetimeFieldConvFail: 完成时间
+      at fsError (/srv/416mes/.dev-lines/gpt6/lib/feishu-api.js:450:10)
+      at Object.batchCreate (/srv/416mes/.dev-lines/gpt6/lib/feishu-api.js:603:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Object.prepare (/srv/416mes/.dev-lines/gpt6/lib/item-repository.js:33:7)
+      at async TestContext.<anonymous> (/srv/416mes/.dev-lines/gpt6/test/feishu-api.test.js:317:15)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)

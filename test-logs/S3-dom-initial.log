@@ -1,0 +1,38 @@
+✖ DOM query typed prefix selects item and bare collision lists candidates without write (1902.594557ms)
+✖ DOM location drilldown to container then item works via actual clicks (892.39972ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11972.734815
+
+✖ failing tests:
+
+test at test/item-ui.test.js:5:1
+✖ DOM query typed prefix selects item and bare collision lists candidates without write (1902.594557ms)
+  TypeError: Cannot set property value of [object Object] which has only a getter
+      at render (/srv/416mes/.dev-lines/gpt6/lib/item-ui.js:19:303)
+      at Object.mount (/srv/416mes/.dev-lines/gpt6/lib/item-ui.js:46:2)
+      at setup (/srv/416mes/.dev-lines/gpt6/test/item-ui.test.js:4:424)
+      at TestContext.<anonymous> (/srv/416mes/.dev-lines/gpt6/test/item-ui.test.js:5:124)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.start (node:internal/test_runner/test:1242:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17)
+
+test at test/item-ui.test.js:6:1
+✖ DOM location drilldown to container then item works via actual clicks (892.39972ms)
+  TypeError: Cannot set property value of [object Object] which has only a getter
+      at render (/srv/416mes/.dev-lines/gpt6/lib/item-ui.js:19:303)
+      at Object.mount (/srv/416mes/.dev-lines/gpt6/lib/item-ui.js:46:2)
+      at setup (/srv/416mes/.dev-lines/gpt6/test/item-ui.test.js:4:424)
+      at TestContext.<anonymous> (/srv/416mes/.dev-lines/gpt6/test/item-ui.test.js:6:108)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)

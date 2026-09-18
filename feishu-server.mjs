@@ -60,6 +60,7 @@ const ROUTES = {
   '/api/feishu/stock': './api/feishu/stock.js',
   '/api/feishu/upsert': './api/feishu/upsert.js',
   '/api/feishu/delete': './api/feishu/delete.js',
+  '/api/feishu/item-operation': './api/feishu/item-operation.js',
   '/api/feishu/incremental': './api/feishu/incremental.js',
   '/api/feishu/changes': './api/feishu/changes.js',
   '/api/feishu/reconcile': './api/feishu/reconcile.js'

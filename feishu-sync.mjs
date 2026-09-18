@@ -115,6 +115,16 @@ const MAPS = {
 };
 const PUSH_ORDER = ['materials', 'locations', 'containers', 'members', 'items', 'manuals', 'workorders', 'transactions'];
 
+const READ_ORDER = [...PUSH_ORDER, 'itemOperations'];
+// Reuse the API contract for ITM reads. No network is performed by importing it.
+const { default: itemApi } = await import('./lib/feishu-api.js');
+for (const table of ['items', 'containers', 'locations', 'itemOperations']) {
+  const def = itemApi.TABLE_DEFS[table];
+  const old = MAPS[table];
+  MAPS[table] = { table: def.table, key: def.key, down: f => itemApi.mapDown(def, f, new Set(Object.keys(f))),
+    up: old ? old.up : () => { throw new Error('操作表不可通过CLI写入'); } };
+}
+
 /* ---------- CellValue 归一化 ---------- */
 function T(v) { if (v == null) return ''; if (Array.isArray(v)) return v.map(x => typeof x === 'string' ? x : ((x && (x.text || x.name)) || '')).join(''); return String(v); }
 function N(v) { if (v == null || v === '') return 0; const n = parseFloat(v); return isNaN(n) ? 0 : n; }
@@ -182,7 +192,11 @@ async function push(cfg, file, { dryRun = false } = {}) {
       console.log('  库存流水：跳过 ' + (st[key] || []).filter(r => r.seq == null).length + ' 条无 seq 旧数据');
     const map = MAPS[key], tableId = cfg.tables[map.table];
     const existing = {};
-    listAll(cfg, tableId, { dryRun }).forEach(r => { existing[T(r.fields[map.key])] = r.record_id || r.id; });
+    const existingRows = listAll(cfg, tableId, { dryRun });
+    const guarded = ['items', 'containers', 'locations'].includes(key) &&
+      (rows.some(r => r.status || r.version || r.lastOpId) || existingRows.some(r => ['状态', '业务版本', '最后操作ID'].some(k => Object.hasOwn(r.fields, k))));
+    if (guarded) throw new Error('CLI 禁止推送受控实体 ' + key + '；请使用认证网页档案/操作接口');
+    existingRows.forEach(r => { existing[T(r.fields[map.key])] = r.record_id || r.id; });
     const toCreate = [], toUpdate = {};
     rows.forEach(r => {
       const fields = map.up(r), code = T(fields[map.key]);
@@ -212,8 +226,9 @@ async function push(cfg, file, { dryRun = false } = {}) {
 async function pull(cfg, outFile, { dryRun = false } = {}) {
   console.log('== pull ' + cfg.url + ' → ' + outFile + (dryRun ? '（dry-run）' : '') + ' ==');
   const state = { materials: [], locations: [], containers: [], members: [], items: [], manuals: [], workorders: [], transactions: [], serials: {}, necOrders: [], necSerials: {}, scanLog: [] };
-  for (const key of PUSH_ORDER) {
+  for (const key of READ_ORDER) {
     const map = MAPS[key], tableId = cfg.tables[map.table];
+    if (!tableId && key === 'itemOperations') continue;
     const recs = listAll(cfg, tableId, { dryRun });
     state[key] = recs.map(r => map.down(r.fields)).filter(r => key === 'transactions' ? r.matCode : r.code);
     console.log(`  ${map.table}：${state[key].length} 条`);

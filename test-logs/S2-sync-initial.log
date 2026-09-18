@@ -1,0 +1,20 @@
+✔ IDB command/state/draft atomic, stable identity, no optimistic relation (243.632192ms)
+✔ IDB failure rolls back command and snapshot, publishes no success (143.652342ms)
+✔ save queue takes newest state; replaceAll preserves operations and draft namespace (78.899874ms)
+✔ LS dirty cannot erase IDB command or resurrect pre-issue container (40.844514ms)
+✔ unknown results retain command; final receipt atomically updates and removes (30.985029ms)
+✔ late ACK cannot roll back a newer proven snapshot; same-version conflict retains command (57.205509ms)
+✔ lack of browser lock or real IDB disables command persistence (14.338922ms)
+✔ full/incremental controlled groups preserve explicit clear and MAT (23.966866ms)
+✔ external edits, partial groups and higher versions without proof are isolated (49.303615ms)
+✔ same-version forged log cannot replace different confirmed relationship (8.452027ms)
+✔ operations are append cached; immutable payload changes and duplicates quarantined (9.945832ms)
+✔ legacy records are unknown, ordinary names remain available for existing merge (3.403056ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1642.753967

@@ -1,0 +1,9 @@
+✔ 写库【P7 核心】四段预读必须并行发出（串行会白等 3 个往返） (4049.715771ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5872.399118

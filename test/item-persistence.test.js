@@ -1,0 +1,103 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const F = require('fake-indexeddb');
+const Store = require('../lib/store');
+const P = require('../lib/item-persistence');
+async function setup(t) {
+  const store = Store.createIndexedDbStore({ indexedDB: new F.IDBFactory(), IDBKeyRange: F.IDBKeyRange, dbName: 'mes416-state' });
+  await store.open(); t.after(() => store.close());
+  let state = { items: [{ code: 'I-P', status: 'pending', container: '', version: 0, lastOpId: '' }], itemOperations: [], materials: [{ code: 'M-KEEP', qty: 7 }], transactions: [] };
+  const queue = P.createQueue();
+  const client = P.create({ store, queue, canWrite: () => true, getState: () => state, publish: s => { state = s; } });
+  return { store, queue, client, state: () => state };
+}
+const req = () => ({ schemaVersion: 1, opId: 'stable-1', kind: 'receive', itemCode: 'I-P', target: { loc: 'L-A', container: 'C-A' }, expected: { itemVersion: 0, containerVersion: 2 } });
+test('IDB command/state/draft atomic, stable identity, no optimistic relation', async t => {
+  const f = await setup(t); const request = req();
+  await f.client.enqueue(request, 'session-1', { rowId: 'row-1' }); request.kind = 'issue';
+  assert.equal((await f.store.getAll('outbox')).length, 1);
+  assert.equal((await f.store.get('syncMeta', 'state-v1')).value.__itmPending['stable-1'].request.kind, 'receive');
+  assert.equal(f.state().items[0].status, 'pending');
+  await f.client.enqueue(req(), 'session-1', {}); assert.equal((await f.store.getAll('outbox')).length, 1);
+  await assert.rejects(f.client.enqueue({ ...req(), kind: 'issue' }), /OP_ID_PAYLOAD_CONFLICT/);
+  assert.equal((await f.store.get('syncMeta', 'itmDraft:session-1')).value.locked, true);
+});
+test('IDB failure rolls back command and snapshot, publishes no success', async t => {
+  const f = await setup(t); const original = f.store.transaction.bind(f.store);
+  f.store.transaction = (names, work) => original(names, async tx => {
+    const put = tx.put; tx.put = async (name, value) => { if (name === 'syncMeta' && value.key === 'state-v1') throw new Error('injected IDB failure'); return put(name, value); };
+    return work(tx);
+  });
+  await assert.rejects(f.client.enqueue(req(), 'session-1', {}), /injected/);
+  f.store.transaction = original;
+  assert.equal((await f.store.getAll('outbox')).length, 0);
+  assert.equal(await f.store.get('syncMeta', 'itmDraft:session-1'), undefined);
+  assert.equal(f.state().__itmPending, undefined);
+});
+test('save queue takes newest state; replaceAll preserves operations and draft namespace', async t => {
+  const f = await setup(t); await f.client.saveDraft('s', { loc: 'L-A' });
+  const a = f.client.enqueue(req());
+  const b = f.queue.run(async () => f.store.transaction(['records', 'transactions', 'syncMeta'], tx => P.writeSnapshot(tx, f.state())));
+  await Promise.all([a, b]);
+  assert.ok((await f.store.get('syncMeta', 'state-v1')).value.__itmPending['stable-1']);
+  assert.equal((await f.store.get('syncMeta', 'itmDraft:s')).value.loc, 'L-A');
+  f.state().itemOperations.push({ code: 'old-op', phase: 'APPLIED' });
+  await f.store.transaction(['records', 'transactions', 'syncMeta'], tx => P.writeSnapshot(tx, f.state()));
+  assert.equal((await f.store.get('records', ['itemOperations', 'old-op'])).value.phase, 'APPLIED');
+});
+test('LS dirty cannot erase IDB command or resurrect pre-issue container', async t => {
+  const f = await setup(t); await f.client.enqueue(req());
+  const ls = structuredClone(f.state()); ls.items[0].container = 'C-OLD'; ls.items[0].status = 'in_stock'; delete ls.__itmPending;
+  const restored = P.restore(ls, f.state(), true, await f.store.getAll('outbox'));
+  assert.equal(restored.items[0].container, ''); assert.equal(restored.items[0].status, 'pending');
+  assert.ok(restored.__itmPending['stable-1']);
+  assert.equal((await f.client.recover()).commands.length, 1);
+});
+test('unknown results retain command; final receipt atomically updates and removes', async t => {
+  const f = await setup(t); await f.client.enqueue(req());
+  await f.client.markUnknown('stable-1', 'timeout');
+  assert.equal((await f.store.get('outbox', 'stable-1')).status, 'needs_attention');
+  await assert.rejects(f.client.acknowledge({ code: 'stable-1', phase: 'PREPARED' }), /RESULT_NOT_FINAL/);
+  await f.client.acknowledge({ code: 'stable-1', request: req(), phase: 'APPLIED', before: { items: [{ code: 'I-P', container: '', status: 'pending', version: 0, lastOpId: '' }] }, after: { items: [{ code: 'I-P', container: 'C-A', status: 'in_stock', version: 1, lastOpId: 'stable-1' }] } });
+  assert.equal(await f.store.get('outbox', 'stable-1'), undefined);
+  assert.equal(f.state().items[0].status, 'in_stock'); assert.equal(f.state().materials[0].qty, 7);
+  assert.equal((await f.store.get('records', ['itemOperations', 'stable-1'])).value.phase, 'APPLIED');
+});
+test('late ACK cannot roll back a newer proven snapshot; same-version conflict retains command', async t => {
+  const f = await setup(t); await f.client.enqueue(req());
+  const newer = { code: 'I-P', container: 'C-B', status: 'in_stock', version: 5, lastOpId: 'newer-op' };
+  Object.assign(f.state().items[0], newer);
+  const old = { code: 'stable-1', request: req(), phase: 'APPLIED', after: { items: [{ code: 'I-P', container: '', status: 'out', version: 4, lastOpId: 'stable-1' }] } };
+  await assert.rejects(f.client.acknowledge(old), /CURRENT_SNAPSHOT_UNVERIFIED/);
+  f.state().itemOperations.push({ code: 'newer-op', phase: 'APPLIED', after: { items: [newer] } });
+  await f.client.acknowledge(old);
+  assert.equal(f.state().items[0].version, 5); assert.equal(f.state().items[0].container, 'C-B');
+  assert.equal(await f.store.get('outbox', 'stable-1'), undefined);
+  assert.ok(f.state().itemOperations.some(o => o.code === 'stable-1'));
+  const nextReq = { ...req(), opId: 'same-v' }; await f.client.enqueue(nextReq);
+  await assert.rejects(f.client.acknowledge({ code: 'same-v', request: nextReq, phase: 'APPLIED', after: { items: [{ ...newer, container: '', lastOpId: 'same-v' }] } }), /SAME_VERSION_CONFLICT/);
+  assert.ok(await f.store.get('outbox', 'same-v'));
+});
+test('two tabs share lifecycle lock; second cannot become a writer until release', async () => {
+  let busy = false;
+  const locks = { async request(name, options, callback) { if (busy) return callback(null); busy = true; try { return await callback({ name }); } finally { busy = false; } } };
+  const a = await P.acquireTab(locks); const b = await P.acquireTab(locks);
+  assert.equal(a.acquired, true); assert.equal(b.acquired, false);
+  a.release(); await new Promise(resolve => setImmediate(resolve));
+  const c = await P.acquireTab(locks); assert.equal(c.acquired, true); c.release();
+});
+test('outbox projection reports ITM intent without altering confirmed fields or MAT', () => {
+  const O = require('../lib/outbox'); const state = { items: [{ code: 'I-P', status: 'pending', container: '' }], materials: [{ code: 'M', qty: 7 }] };
+  const result = O.project(state, [{ id: 'stable-1', op: 'itemOperation', request: req() }]);
+  assert.equal(result.view.items[0].status, 'pending'); assert.equal(result.view.materials[0].qty, 7);
+  assert.deepEqual(result.pending.items, ['I-P']); assert.equal(result.itemIntents.length, 1);
+});
+test('lack of browser lock or real IDB disables command persistence', async t => {
+  const f = await setup(t);
+  const denied = P.create({ store: f.store, getState: f.state, publish() {}, canWrite: () => false });
+  await assert.rejects(denied.enqueue(req()), /SINGLE_WRITER_TAB/);
+  assert.equal((await P.acquireTab(null)).acquired, false);
+  const memory = P.create({ store: { kind: 'memory' }, getState: f.state, publish() {}, canWrite: () => true });
+  await assert.rejects(memory.enqueue(req()), /INDEXEDDB/);
+});

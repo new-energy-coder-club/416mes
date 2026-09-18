@@ -261,6 +261,112 @@ function cleanupEnv() {
   Object.keys(require.cache).filter(k => k.includes('feishu-api.js')).forEach(k => delete require.cache[k]);
 }
 
+/* ================= 唯一物品：隔离 schema 与旁路封口 ================= */
+test('ITM schema 已启用：普通改名不覆盖关系，清空旁路无效，新码/硬删拒绝', async (t) => {
+  const mock = await startMock({ tables: { tblITM: { fields: ['物品码', '名称', '容器码', '状态', '业务版本', '最后操作ID'], rows: [{ '物品码': 'I-A', '名称': 'old', '容器码': 'C-A', '状态': 'in_stock', '业务版本': 3, '最后操作ID': 'prior' }] } }, fieldTypes: { tblITM: [
+    { name: '物品码', type: 1 }, { name: '名称', type: 1 }, { name: '容器码', type: 1 },
+    { name: '状态', type: 3, options: ['unknown', 'pending', 'in_stock', 'out', 'retired'] },
+    { name: '业务版本', type: 2 }, { name: '最后操作ID', type: 1 }
+  ] } });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: JSON.stringify({ items: 'tblITM' }) });
+  const r = await lib.upsertRecords('items', [{ code: 'I-A', name: 'new', container: '', status: 'out', version: 0, lastOpId: '' }], { clearFields: ['container', 'lastOpId'] });
+  assert.equal(r.updated, 1);
+  assert.deepEqual(mock.tables.tblITM.rows[0], { '物品码': 'I-A', '名称': 'new', '容器码': 'C-A', '状态': 'in_stock', '业务版本': 3, '最后操作ID': 'prior' });
+  assert.ok((await lib.upsertRecords('items', [{ code: 'I-NEW', name: 'new' }])).error);
+  assert.ok((await lib.deleteRecords('items', ['I-A'])).error);
+  assert.equal(mock.calls.created.length, 0); assert.equal(mock.calls.deleted.length, 0);
+});
+
+test('ITM 第九表全量/增量真实 localhost 读取包含 JSON 与显式空归属', async (t) => {
+  const mock = await startMock({ tables: {
+    tblITM: { fields: ['物品码', '容器码', '状态', '业务版本', '最后操作ID', '最后更新时间'], rows: [{ '物品码': '001', '容器码': '', '状态': 'out', '业务版本': 4, '最后操作ID': 'op-1', '最后更新时间': 100 }] },
+    tblOPS: { fields: ['操作ID', '请求内容', '处理阶段', '目标快照', '最后更新时间'], rows: [{ '操作ID': 'op-1', '请求内容': '{"kind":"issue"}', '处理阶段': 'APPLIED', '目标快照': '{"items":[{"code":"001","container":""}]}', '最后更新时间': 100 }] }
+  }, fieldTypes: {
+    tblITM: [{ name: '物品码', type: 1 }, { name: '容器码', type: 1 }, { name: '状态', type: 3 }, { name: '业务版本', type: 2 }, { name: '最后操作ID', type: 1 }, { name: '最后更新时间', type: 1002 }],
+    tblOPS: [{ name: '操作ID', type: 1 }, { name: '请求内容', type: 1 }, { name: '处理阶段', type: 3 }, { name: '目标快照', type: 1 }, { name: '最后更新时间', type: 1002 }]
+  } });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port, { FEISHU_TABLES: JSON.stringify({ items: 'tblITM', itemOperations: 'tblOPS' }) });
+  const full = await lib.pullState();
+  assert.equal(full.items[0].container, ''); assert.equal(full.itemOperations[0].code, 'op-1');
+  assert.deepEqual(full.itemOperations[0].request, { kind: 'issue' });
+  const inc = await lib.pullChangesBySort('itemOperations', { ts: 0, seen: [] });
+  assert.equal(inc.records[0].code, 'op-1'); assert.equal(inc.records[0].after.items[0].container, '');
+  assert.equal(mock.calls.created.length + mock.calls.updated.length + mock.calls.deleted.length, 0);
+});
+
+test('ITM real repository HTTP prepare/apply/readAfter/finish preserves clear and code', async t => {
+  const schema = require('../lib/item-schema');
+  const tableIds = { items: 'tI', containers: 'tC', locations: 'tL', itemOperations: 'tO' };
+  const fieldTypes = {}, tables = {};
+  for (const [key, columns] of Object.entries(schema.REQUIREMENTS)) {
+    fieldTypes[tableIds[key]] = Object.entries(columns).map(([name, [type, options]]) => ({ name, type: Array.isArray(type) ? type[0] : type, options }));
+    tables[tableIds[key]] = { fields: Object.keys(columns), rows: [] };
+  }
+  fieldTypes.tI.push({ name: '名称', type: 1 }, { name: '规格型号', type: 1 }); tables.tI.fields.push('名称', '规格型号');
+  tables.tI.rows.push({ '物品码': '001', '容器码': 'C', '状态': 'in_stock', '业务版本': 3, '最后操作ID': 'prior' });
+  tables.tC.rows.push({ '容器码': 'C', '当前库位码': 'L', '状态': 'active', '业务版本': 2, '最后操作ID': 'prior' });
+  tables.tO.rows.push({ '操作ID': 'prior', '处理阶段': 'APPLIED', '目标快照': JSON.stringify({ items: [{ code: '001', container: 'C', status: 'in_stock', version: 3, lastOpId: 'prior' }], containers: [{ code: 'C', loc: 'L', status: 'active', version: 2, lastOpId: 'prior' }] }) });
+  tables.tO.rows.push({ '操作ID': 'activate-l', '操作类型': 'activateLocation', '处理阶段': 'APPLIED', '目标快照': JSON.stringify({ locations: [{ code: 'L', status: 'active' }] }) });
+  tables.tL.rows.push({ '库位码': 'L', '状态': 'active' });
+  const mock = await startMock({ tables, fieldTypes });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const api = loadLib(mock.port, { FEISHU_TABLES: JSON.stringify(tableIds) });
+  const repository = require('../lib/item-repository').create(api);
+  await repository.validateSchema();
+  const operation = require('../lib/unique-items').plan(await repository.snapshot(), { schemaVersion: 1, opId: 'http-op', kind: 'issue', itemCode: '001', source: { loc: 'L', container: 'C' }, expected: { itemVersion: 3, containerVersion: 2 } }, { id: 'fake-user', roles: ['operator'] });
+  operation.requestHash = 'fake-hash'; operation.requestedAt = new Date().toISOString();
+  // Successful chain: real IDB adapter -> HTTP handler -> real Repository -> localhost Feishu.
+  const F = require('fake-indexeddb');
+  const store = require('../lib/store').createIndexedDbStore({ indexedDB: new F.IDBFactory(), IDBKeyRange: F.IDBKeyRange, dbName: 'mes416-state' });
+  await store.open(); t.after(() => store.close());
+  let local = await repository.snapshot();
+  const persistence = require('../lib/item-persistence').create({ store, getState: () => local, publish: s => { local = s; }, canWrite: () => true });
+  const service = require('../lib/item-operation').create({ repository, coordinator: require('./fixtures/item-protocol').coordinatorFixture(), enabled: true, authenticate: async () => ({ id: 'fake-user', roles: ['operator'] }) });
+  const handler = require('../api/feishu/item-operation').handlerFor(service);
+  const bridge = http.createServer((req, res) => { req.query = Object.fromEntries(new URL(req.url, 'http://localhost').searchParams); res.status = n => { res.statusCode = n; return res; }; res.json = o => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(o)); }; handler(req, res); });
+  await new Promise(resolve => bridge.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => bridge.close(resolve)));
+  const command = await persistence.enqueue(operation.request);
+  const client = require('../lib/item-client').create({ persistence, fetch: (url, opts) => fetch('http://127.0.0.1:' + bridge.address().port + url, opts) });
+  const receipt = await client.submit(command);
+  assert.equal(receipt.phase, 'APPLIED'); assert.equal(local.items[0].container, ''); assert.equal((await store.getAll('outbox')).length, 0);
+  const secondPull = await api.pullState();
+  const secondClient = { items: [], containers: [], locations: [], itemOperations: [] };
+  require('../lib/item-sync').merge(secondClient, secondPull);
+  assert.equal(secondClient.items[0].status, 'out'); assert.equal(secondClient.items[0].container, '');
+  const rid = (await repository.operations('http-op'))[0].recordId;
+  assert.deepEqual(await repository.readAfter(operation.after), operation.after);
+  operation.requestHash = receipt.requestHash;
+  await repository.finish(rid, { ...operation, phase: 'APPLIED', finishedAt: new Date().toISOString() });
+  const logs = await repository.operations('http-op'); assert.equal(logs.length, 1); assert.equal(logs[0].phase, 'APPLIED');
+  assert.equal(tables.tI.rows[0]['容器码'], ''); assert.equal(tables.tI.rows[0]['物品码'], '001');
+  for (const [kind, entity] of [['registerItem', { code: 'WP-NEW', name: 'new-name', spec: 'new-spec' }], ['registerContainer', { code: 'C-NEW' }], ['registerLocation', { code: 'L-NEW' }]]) {
+    const adminService = require('../lib/item-operation').create({ repository, coordinator: require('./fixtures/item-protocol').coordinatorFixture(), enabled: true, authenticate: async () => ({ id: 'admin', roles: ['admin'] }) });
+    const registered = await adminService.post({}, { schemaVersion: 1, opId: kind, kind, entity });
+    assert.equal(registered.phase, 'APPLIED', registered.error);
+  }
+  const bootstrap = require('../lib/item-operation').create({ repository, coordinator: require('./fixtures/item-protocol').coordinatorFixture(), enabled: true, authenticate: async () => ({ id: 'admin', roles: ['admin'] }) });
+  const chain = [
+    { kind: 'activateLocation', locationCode: 'L-NEW', expected: { locationStatus: 'unknown' } },
+    { kind: 'activateContainer', containerCode: 'C-NEW', target: { loc: 'L-NEW' }, expected: { containerVersion: 1 } },
+    { kind: 'receive', itemCode: 'WP-NEW', target: { loc: 'L-NEW', container: 'C-NEW' }, expected: { itemVersion: 1, containerVersion: 2 } },
+    { kind: 'issue', itemCode: 'WP-NEW', source: { loc: 'L-NEW', container: 'C-NEW' }, expected: { itemVersion: 2, containerVersion: 2 } }
+  ];
+  for (const [index, step] of chain.entries()) { const result = await bootstrap.post({}, { schemaVersion: 1, opId: 'bootstrap-' + index, ...step }); assert.equal(result.phase, 'APPLIED', result.error); }
+  const finalClient = { items: [], containers: [], locations: [], itemOperations: [] };
+  require('../lib/item-sync').merge(finalClient, await api.pullState());
+  assert.equal(finalClient.items.find(r => r.code === 'WP-NEW').status, 'out');
+  assert.equal(finalClient.items.find(r => r.code === 'WP-NEW').container, '');
+  assert.equal(tables.tI.rows.find(r => r['物品码'] === 'WP-NEW')['状态'], 'out');
+  assert.equal(tables.tC.rows.find(r => r['容器码'] === 'C-NEW')['状态'], 'active');
+  assert.equal(tables.tL.rows.find(r => r['库位码'] === 'L-NEW')['状态'], 'active');
+  tables.tI.rows[0]['容器码'] = 'C'; // direct external edit with unchanged version/opId
+  const observed = await repository.snapshot();
+  assert.ok(observed.__itmConflicts['items:001']);
+  assert.throws(() => require('../lib/unique-items').plan(observed, { schemaVersion: 1, opId: 'illegal', kind: 'receive', itemCode: '001', target: { loc: 'L', container: 'C' }, expected: { itemVersion: 4, containerVersion: 2 } }, { id: 'fake', roles: ['operator'] }), e => e.code === 'UNRESOLVED_ENTITY_CONFLICT');
+});
+
 /* ================= 读 ================= */
 
 test('飞书读：pullState 组装出正确的 state', async (t) => {

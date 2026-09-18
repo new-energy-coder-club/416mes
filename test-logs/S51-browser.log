@@ -1,0 +1,14 @@
+
+> 416mes@1.0.0 test:browser
+> node --test test/*.browser.cjs
+
+{"blockedExternalOrigins":["https://mes.newenergycoder.club"],"viewport":390,"commands":1,"pageErrors":[]}
+✔ entire index boots in Chromium, real IDB draft survives reload, narrow UI and default API denial (74347.215393ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 94904.997493

@@ -1,0 +1,11 @@
+✔ client timeout aborts and durably marks same command unknown, never rotates ID (52.920776ms)
+✔ ACK IDB failure plus unknown-marker failure reports both and never success (9.976511ms)
+✔ client query uses original ID and acknowledges only terminal response (4.209737ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1097.225384
