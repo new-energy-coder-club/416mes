@@ -1,0 +1,12 @@
+✔ S5.1 imported commands display original payload and inspect GET without mutation/requeue (701.080573ms)
+✔ S5.1 conflict panel shows both facts and refresh never freely resolves (550.421844ms)
+✔ S5.1 retire UI only queues pending/out with version, never directly retires (2808.680324ms)
+✔ S5.1 actual legacy generation click handlers exit before any archive or label mutation (33.616896ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9450.347839

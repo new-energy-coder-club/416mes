@@ -1138,7 +1138,10 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <video id="itmVideo" playsinline muted style="width:100%;max-width:480px;display:none"></video>
       <details><summary>管理员唯一实体建档</summary><select id="itmRegisterType"><option value="registerItem">物品</option><option value="registerLocation">库位</option><option value="registerContainer">容器</option></select><input id="itmRegisterName" placeholder="名称/说明"><button class="btn" id="itmRegister">生成随机唯一码并申请建档</button><p class="hint">需可靠共享协调和管理员认证；远端确认前不打印正式标签。</p></details>
       <details><summary>管理员旧库位/容器核实启用</summary><p class="hint">须服务端管理员认证，仍受默认禁写门禁；仅生成待提交命令。</p><input id="itmAdminLoc" placeholder="LOC库位码"><input id="itmAdminContainer" placeholder="CTN容器码（启用容器时填写）"><button class="btn" id="itmActivateLoc">核实启用库位</button><button class="btn" id="itmActivateContainer">核实启用容器</button></details>
+      <details><summary>管理员物品退役</summary><p class="hint">仅允许 pending/out；服务端校验管理员权限。LOC停用不在当前协议内。</p><input id="itmRetireCode" placeholder="待退役物品码"><input id="itmRetireReason" placeholder="退役原因"><button class="btn" id="itmRetire">申请退役</button></details>
       <div id="itmStatus" role="status"></div><div id="itmPending"></div>
+      <h3>导入命令只读复核</h3><div id="itmRecoveryReview" aria-live="polite"></div>
+      <h3>未解关系冲突</h3><button class="btn ghost" id="itmConflictRefresh">安全重新拉取检查</button><div id="itmConflictPanel" aria-live="polite"></div>
     </div>
   </section>
   <section class="tab on" id="tab-ledger">
@@ -4154,6 +4157,15 @@ async function exportLabelsPdf() {
 document.getElementById('btnPrint').addEventListener('click', () => { exportLabelsPdf(); });
 
 
+function blockLegacyUniqueLabels() {
+  const controlled = state.__itmControlledMode === true || ['locations','containers','items'].some(table =>
+    (state.__itmSchemaColumns?.[table] || []).some(name => ['状态','业务版本','最后操作ID'].includes(name)) ||
+    (state[table] || []).some(row => row.lastOpId || Number(row.version) > 0));
+  if (!controlled) return false;
+  alert('当前唯一实体采用受控模式：旧LOC/CTN批量生成不可生成正式标签，也不会新增本地档案。请在ITM作业页管理员注册，远端确认后打印。');
+  goTab('item-work');
+  return true;
+}
 /* ================= ③ 编码生成 ================= */
 function addUnique(arr, items, key, table) {
   let n = 0; const added = [];
@@ -4165,6 +4177,7 @@ function addUnique(arr, items, key, table) {
   return n;
 }
 document.getElementById('btnGenShelf').addEventListener('click', () => {
+  if (blockLegacyUniqueLabels()) return;
   const rg = document.getElementById('gLocRegion').value.trim().toUpperCase() || 'B';
   const SITE_NAMES = { TQ: '天权楼', YH: '玉衡A416', K401: '401开放空地', B: 'B区' };
   const ns = +document.getElementById('gLocShelf').value, nl = +document.getElementById('gLocLayer').value, np = +document.getElementById('gLocPos').value;
@@ -4176,6 +4189,7 @@ document.getElementById('btnGenShelf').addEventListener('click', () => {
   nextStrip('nextLoc', 'loc', state.locations.filter(x => !b1.has(x.code)).map(x => x.code), items.length);
 });
 document.getElementById('btnGenOpen').addEventListener('click', () => {
+  if (blockLegacyUniqueLabels()) return;
   const SITE_NAMES = { TQ: '天权楼', YH: '玉衡A416', K401: '401开放空地', B: 'B区' };
   const site = document.getElementById('gOpenSite').value.trim().toUpperCase() || 'K401';
   const a1 = (document.getElementById('gOpenAisleFrom').value.trim().toUpperCase() || 'A').charCodeAt(0);
@@ -4191,6 +4205,7 @@ document.getElementById('btnGenOpen').addEventListener('click', () => {
   nextStrip('nextLoc', 'loc', state.locations.filter(x => !b2.has(x.code)).map(x => x.code), items.length);
 });
 document.getElementById('btnGenWs').addEventListener('click', () => {
+  if (blockLegacyUniqueLabels()) return;
   const a = +document.getElementById('gWsFrom').value, b = +document.getElementById('gWsTo').value, g = +document.getElementById('gWsGrid').value;
   const items = [];
   for (let w = a; w <= b; w++) for (let i = 1; i <= g; i++)
@@ -4200,6 +4215,7 @@ document.getElementById('btnGenWs').addEventListener('click', () => {
   nextStrip('nextLoc', 'loc', state.locations.filter(x => !b3.has(x.code)).map(x => x.code), items.length);
 });
 document.getElementById('btnGenCtn').addEventListener('click', () => {
+  if (blockLegacyUniqueLabels()) return;
   const [pre, type, spec] = document.getElementById('gCtnType').value.split('|');
   const from = +document.getElementById('gCtnFrom').value, n = +document.getElementById('gCtnCount').value;
   const items = []; for (let i = from; i < from + n; i++) items.push({ code: pre + '-' + pad(i, 3), type, spec, loc: '' });
@@ -4209,6 +4225,7 @@ document.getElementById('btnGenCtn').addEventListener('click', () => {
 });
 /* ---- 模块区（A4 大卡） ---- */
 document.getElementById('btnGenZone').addEventListener('click', () => {
+  if (blockLegacyUniqueLabels()) return;
   const name = document.getElementById('gZoneName').value.trim();
   if (!name) { alert('请填写模块区名称'); return; }
   let max = 0;
@@ -8292,6 +8309,7 @@ function dropSeedDemoRecords(remote) {
 
 /** 云端 → 本地：统一走 mes-core 的 mergeRemote，并把「本地新建」记下来待推送 */
 function fsMerge(remote) {
+  if (remote.columns) state.__itmSchemaColumns = JSON.parse(JSON.stringify(remote.columns));
   remote = window.ItemSync.merge(state, remote).ordinary;
   dropSeedDemoRecords(remote);   // 出厂示例不属于「本地新建」，先清掉再合并，否则会被当成待推送
   // 必须**在合并之前**判断本机有没有基线：合并后 __syncedKeys 就被本次结果覆盖了。
@@ -8990,6 +9008,14 @@ function renderDataStoreHint() {
 let itemPage = null;
 function mountItemPage() {
   if (!itemPage) itemPage = window.ItemUI.mount({ document, getState: () => state, getPersistence: () => itmPersistence,
+    refreshConflicts: async () => { const remote = await fsPullState(); await stateSaveQueue.run(async () => {
+      if (!localStore || itmReadOnlyTab) throw new Error('本机不可持久化或标签只读');
+      const next = JSON.parse(JSON.stringify(state));
+      window.ItemSync.merge(next, remote);
+      if (remote.columns) next.__itmSchemaColumns = JSON.parse(JSON.stringify(remote.columns));
+      await localStore.transaction(['records','transactions','syncMeta'], tx => ITEM_PERSIST.writeSnapshot(tx, next));
+      state = next;
+    }); },
     id: () => crypto.randomUUID(), getClient: () => window.ItemClient.create({ persistence: itmPersistence, fetch: window.fetch.bind(window) }), getCommands: async () => itmPersistence ? (await itmPersistence.recover()).commands : [] });
   itemPage.render(); itemPage.pending().catch(e => log('ITM读取待提交失败：' + e.message));
 }

@@ -1,5 +1,13 @@
 # GPT-6 独立路线开发进度
 
+## S5.1 — 限定四项补齐（基线cfc6b44）
+
+主会话明确授权，仅新增导入命令只读复核/查询、未解冲突面板与安全重拉、旧LOC/CTN五类批量生成封口、pending/out管理员retire UI。不扩LOC禁用协议，不新增后端产品。客户端inspect为纯GET只读，不acknowledge/markUnknown，不入队。查询结果仅显示原opId结果。safe refresh不调用fsBoot/flush/push，只GET拉取、字段组校验、本机保存。
+
+`node --test test/item-s51.test.js test/item-client.test.js test/item-ui.test.js` 16/16通过，退出0，`test-logs/S51-focused.log`。包含四项实际DOM/生成handler执行及只读GET验证；内联语法4/4通过。完整初次回归581/581通过（S51-npm-test.log）。主会话指出旧schema误封停，已改真实门禁：保存全量remote.columns，schema含受控列/存在已确认版本身份/显式开启新模式才拦截；旧unknown/v0无标记不拦。safe refresh改stateSaveQueue任务执行时取最新快照，事务完成才发布，不在队列外预先修改state。修订后完整回归 **581/581通过，退出0**（S51-final-npm-test.log，94681ms）；浏览器 **1/1通过，退出0**（S51-browser.log，pageErrors空，外网阻断）。git diff --check通过，全部后台job已收集。四项限定补齐完成，提交后冻结。
+
+same-session goal已改为S5.1，但平台拒绝resume（用户必须恢复paused goal）；不绕过，按本次直接人类授权实施，结束后冻结。
+
 ## 执行约束
 
 cwd `/srv/416mes/.dev-lines/gpt6`；分支 `feature/unique-item-gpt6`；共同基线 `55d9297292db09ffc74497a1a4318ee724073ccc`。无 push/部署；未读取真实配置或其他路线；所有 HTTP 测试仅 localhost/fake。真实飞书/手机相机/共享协调为外部门禁。
