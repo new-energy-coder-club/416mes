@@ -23,7 +23,7 @@ request/before/after/progress 为文本JSON，时间为日期时间（type5）�
 
 ## 旧 LOC/CTN 核实入口
 
-不把全部旧记录自动改 active。管理员受控操作依次：activateLocation（要求 expected.locationStatus 与当前 unknown/disabled 一致）→ activateContainer（核对现有库位线索，不匹配则拒绝；校验业务版本）→ verifyLegacy。三个操作都须按正式接口协议写日志和共享协调，不允许 ordinaryFields 带 status 绕过。领域层 bootstrap 已有自动化测试；页面及服务端接线属于后续 S3/S4。
+不把全部旧记录自动改 active。管理员受控操作依次：activateLocation（仅允许 unknown→active，要求 expected.locationStatus 一致；v1不支持停用/重新启用）→ activateContainer（核对现有库位线索，不匹配则拒绝；校验业务版本）→ verifyLegacy。三个操作都须按正式接口协议写日志和共享协调，不允许 ordinaryFields 带 status 绕过。领域层 bootstrap 已有自动化测试；页面及服务端接线属于后续 S3/S4。
 
 库位没有引入未经需求批准的新 version 列，activateLocation 使用当前状态前置条件和共享串行仲裁；缓存接收时需要核验操作 after。非管理员不得核实/启用。
 

@@ -1708,6 +1708,8 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 <script src="lib/outbox.js?v=2.34.0"></script>
 <script src="lib/store.js?v=2.34.0"></script>
 <script src="lib/unique-items.js?v=2.34.0"></script>
+<script src="lib/item-persistence.js?v=2.34.0"></script>
+<script src="lib/item-sync.js?v=2.34.0"></script>
 <script src="lib/replay-checkpoint.js?v=2.34.0"></script>
 <script src="lib/incremental.js?v=2.34.0"></script>
 <script src="lib/census-status.js?v=2.34.0"></script>
@@ -1742,6 +1744,11 @@ if (!CORE) {
    缺了它「离线期间的改动」就无处存放，宁可当场报错也不要静默丢数据。 */
 const OUTBOX = window.Outbox;
 const STORE = window.MesStore;
+const ITEM_PERSIST = window.ItemPersistence;
+const stateSaveQueue = ITEM_PERSIST.createQueue();
+let itmPersistence = null;
+let itmTabLease = null;
+let itmReadOnlyTab = false;
 const CHECKPOINT = window.MesReplayCheckpoint;
 const INC = window.MesIncremental;
 const TWM = window.MesThreeWay;
@@ -2164,7 +2171,7 @@ function load() {
  *   就有依据判断该信谁，而不是猜。
  */
 function writeStateToLs() {
-  if (!state) return false;
+  if (!state || itmReadOnlyTab) return false;
   state.__rev = (Number(state.__rev) || 0) + 1;
   const persist = Object.assign({}, state);
   delete persist.__base;
@@ -2227,18 +2234,30 @@ window.addEventListener('pagehide', flushStateOnHide);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushStateOnHide(); });
 async function initLocalStore() {
   try {
+    itmTabLease = await ITEM_PERSIST.acquireTab(navigator.locks);
+    // Browsers without Web Locks retain legacy saves, but cannot submit ITM commands.
+    itmReadOnlyTab = !!navigator.locks && !itmTabLease.acquired;
+    if (itmReadOnlyTab) showPersistentNotice('另一个标签正在编辑。本标签只读，请关闭后重新打开；ITM作业已禁用。');
     localStore = STORE.createIndexedDbStore({ dbName: 'mes416-state' });
     await localStore.open();
     const saved = await localStore.get('syncMeta', IDB_STATE_KEY);
     const idbState = saved && saved.value;
+    itmPersistence = ITEM_PERSIST.create({ store: localStore, queue: stateSaveQueue,
+      getState: () => state, publish: next => { state = next; },
+      canWrite: () => !!(itmTabLease && itmTabLease.acquired) && !itmReadOnlyTab });
+    const recoveredItems = await itmPersistence.recover();
     const lsRev = Number(state.__rev) || 0;
     const keepWarn = state.__loadWarning || '';
     const idbBehind = (() => { try { return !!localStorage.getItem(LS_DIRTY_KEY); } catch (e) { return false; } })();
+    if (itmReadOnlyTab) {
+      if (idbState) state = ITEM_PERSIST.restore(state, idbState, false, recoveredItems.commands);
+      return;
+    }
     if (idbState && !idbBehind) {
       /* IDB 是最新的（或者至少不比 LS 旧）→ 用它。IDB 里有 LS 故意不存的 __base。
          旧实现只有这一条路径、且调的是残缺的 hydrateState()：从 IDB 恢复的老数据
          **缺内置库位、缺新字段默认值**，而且这个缺陷是静默的。 */
-      state = idbState;
+      state = ITEM_PERSIST.restore(state, idbState, false, recoveredItems.commands);
       state.__freshSeed = false;
       state.__loadWarning = keepWarn;
       state.__rev = Math.max(Number(idbState.__rev) || 0, lsRev);
@@ -2255,6 +2274,7 @@ async function initLocalStore() {
          但 __base 只在 IDB 里，直接丢掉会让三方合并退回「无基线」，下一轮满屏假冲突 ——
          所以把 IDB 那份基线继承过来。这是「取新者」与「保留基线」两个目标的交点。 */
       if (idbState.__base) state.__base = idbState.__base;
+      state = ITEM_PERSIST.restore(state, idbState, true, recoveredItems.commands);
       log('ℹ️ 上次退出前 IndexedDB 落盘没跟上，已以 localStorage 里更新的副本为准（本机数据没有丢）');
     }
     // 迁移必须在同一 IDB transaction 中写 state + marker；成功前不清 LS。
@@ -2274,40 +2294,43 @@ async function initLocalStore() {
   }
 }
 async function persistStateToIdb() {
-  if (!localStore) return;
-  const myRev = Number(state.__rev) || 0;   // 本次落盘对应的修订号，收尾时用来判断有没有新改动
+  return stateSaveQueue.run(async () => {
+  if (!localStore || itmReadOnlyTab) return;
+  const snapshot = JSON.parse(JSON.stringify(state));
+  const myRev = Number(snapshot.__rev) || 0;   // 本次落盘对应的修订号，收尾时用来判断有没有新改动
   const tableDefs = [
     ['materials', 'code'], ['locations', 'code'], ['containers', 'code'], ['members', 'code'],
-    ['items', 'code'], ['manuals', 'code'], ['workorders', 'code'], ['necOrders', 'code']
+    ['items', 'code'], ['manuals', 'code'], ['workorders', 'code'], ['necOrders', 'code'], ['itemOperations', 'code']
   ];
   // 每次 save 用一个短 transaction 同步写 records、完整流水和兼容 state blob。
   // 这里绝不夹网络 await；网络冲刷在 transaction 之外，成功后才按 id 删除 outbox。
   await localStore.transaction(['records', 'transactions', 'baselines', 'syncMeta'], async tx => {
     const records = [];
-    tableDefs.forEach(([table, key]) => (state[table] || []).forEach(row => {
+    tableDefs.forEach(([table, key]) => (snapshot[table] || []).forEach(row => {
       if (row && row[key] != null && row[key] !== '') records.push({ table, key: String(row[key]), value: row });
     }));
     await tx.replaceAll('records', records);
-    await tx.replaceAll('transactions', (state.transactions || []).filter(t => t && t.seq != null));
+    await tx.replaceAll('transactions', (snapshot.transactions || []).filter(t => t && t.seq != null));
     /* checkpoint 只在流水条数真的变了才重建。
        旧实现挂在每次 save 上，而 save 被日志、改名、切页签等各种操作触发 ——
        等于每次状态变更都在**主线程**做一次全量账本重放，几万条时会明显卡。
        （另注：这批 checkpoint 目前只写不读，方案要求 replayAudit 消费它们，尚未接线。） */
-    const txnCount = (state.transactions || []).length;
+    const txnCount = (snapshot.transactions || []).length;
     if (txnCount !== _cpBuiltFor) {
-      _cpBuiltFor = txnCount;
-      const cp = CHECKPOINT.build(state.transactions || []);
+      const cp = CHECKPOINT.build(snapshot.transactions || []);
       await tx.replaceAll('baselines', cp.checkpoints);
       await tx.put('syncMeta', { key: 'checkpoint-meta', value: { reason: cp.reason, coverage: cp.coverage, at: new Date().toISOString() } });
     }
-    await tx.put('syncMeta', { key: IDB_STATE_KEY, value: state, savedAt: new Date().toISOString() });
+    await tx.put('syncMeta', { key: IDB_STATE_KEY, value: snapshot, savedAt: new Date().toISOString() });
   });
+  _cpBuiltFor = (snapshot.transactions || []).length;
   // 落盘成功 → 「IDB 落后」标记可以清了。但只有在这期间没有新的 save（rev 没推进）
   // 时才能清：否则会把「LS 更新、IDB 还没跟上」这个事实在真正落盘前抹掉。
   if ((Number(state.__rev) || 0) === myRev) {
     _idbPending = false;
     try { localStorage.removeItem(LS_DIRTY_KEY); } catch (e) { }
   }
+  });
 }
 
 /* 工单数据归一化（Excel 导入 / 备份合并 / 云端同步共用）：
@@ -3323,6 +3346,22 @@ document.getElementById('fileImport').addEventListener('change', e => {
         createdAt: ncol(r, '创建时间', 9) || '', doneAt: ncol(r, '完成时间', 10) || ''
       })); }
 
+      // Excel relationships are review observations, not authenticated operation results.
+      state.__itmImportReview = state.__itmImportReview || [];
+      ['locations', 'containers', 'items'].forEach(table => {
+        const previous = importSnapshot[table];
+        const prior = Array.isArray(previous) ? previous : [];
+        const incoming = state[table] || [];
+        state[table] = prior.map(r => JSON.parse(JSON.stringify(r)));
+        incoming.forEach(row => {
+          state.__itmImportReview.push({ table, observed: JSON.parse(JSON.stringify(row)) });
+          const existing = state[table].find(r => r.code === row.code);
+          const ordinary = window.UniqueItems.ordinaryFields(table, row);
+          if (existing) Object.assign(existing, ordinary);
+          else state[table].push(window.UniqueItems.normalize(table, ordinary));
+        });
+      });
+
       /* ---------- 库存流水 sheet：有则原样恢复，保证「导出什么样、导入就什么样」 ---------- */
       const txs = sheet('库存流水');
       let restoredTxns = 0, diffTxns = 0;
@@ -3444,7 +3483,7 @@ document.getElementById('btnTemplate').addEventListener('click', () => {
 });
 
 /* ---------- 全量 JSON 备份 / 导入合并 ---------- */
-document.getElementById('btnBackupJson').addEventListener('click', () => {
+document.getElementById('btnBackupJson').addEventListener('click', async () => {
   // 导出前剔除全部内部簿记字段（__base 是整份飞书值快照，体积与 state 同量级）。
   // save() 早就把 __base 从 localStorage 副本里剔了，这里必须保持一致 ——
   // 否则备份文件体积翻倍，还会把同步内部簿记外泄给拿到该文件的人。
@@ -3457,7 +3496,8 @@ document.getElementById('btnBackupJson').addEventListener('click', () => {
      「明确要求把 PIN 清空」，恢复+推回飞书就把全员的 PIN 抹了。 */
   const withPin = confirm('备份文件要不要包含人员 PIN 码明文？\n\n【确定】包含 —— 完整备份，恢复后不用重新设置 PIN（文件请勿外传）。\n【取消】不包含 —— 可安全转发；恢复时保持本机原有 PIN 不变。');
   if (!withPin && Array.isArray(pub.members)) pub.members = pub.members.map(m => { const c = Object.assign({}, m); delete c.pin; return c; });
-  const blob = new Blob([JSON.stringify({ app: '416MES', version: 2, deviceId: state.deviceId, exportedAt: new Date().toLocaleString(), pinsIncluded: withPin, state: pub }, null, 1)], { type: 'application/json' });
+  const itemRecovery = itmPersistence ? await itmPersistence.recover() : { drafts: [], commands: [] };
+  const blob = new Blob([JSON.stringify({ app: '416MES', version: 2, deviceId: state.deviceId, exportedAt: new Date().toLocaleString(), pinsIncluded: withPin, itemRecovery, state: pub }, null, 1)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = '416MES_备份_' + ymdCompact(today()) + (withPin ? '_含PIN' : '') + '.json'; a.click();
   URL.revokeObjectURL(a.href);
@@ -3466,7 +3506,13 @@ document.getElementById('btnBackupJson').addEventListener('click', () => {
 });
 /* ---------- 通用合并：备份 JSON 导入 / 云端同步共用 ---------- */
 function mergePackage(pkg, { from = '备份文件', upsertMembers = false } = {}) {
-  const inc = pkg.state || pkg;                     // 兼容裸 state
+  const inc = JSON.parse(JSON.stringify(pkg.state || pkg));
+  if (pkg.itemRecovery) state.__itmRecoveryReview = JSON.parse(JSON.stringify(pkg.itemRecovery));
+  state.__itmImportReview = state.__itmImportReview || [];
+  ['locations', 'containers', 'items'].forEach(table => {
+    (inc[table] || []).forEach(row => state.__itmImportReview.push({ table, observed: row }));
+    inc[table] = (inc[table] || []).map(row => window.UniqueItems.normalize(table, window.UniqueItems.ordinaryFields(table, row)));
+  });
   if (!inc || !Array.isArray(inc.materials)) throw new Error('不是有效的 416MES 备份/云端数据');
   const stat = { mat: 0, loc: 0, ctn: 0, itm: 0, man: 0, mbr: 0, mbrUpd: 0, wip: 0, nec: 0, necUpd: 0, txn: 0 };
   const byCode = (arr, code) => arr.find(x => x.code === code);
@@ -6352,11 +6398,11 @@ function resPrintJump(key) {
   });
 })();
 
-const TABLE_LABEL = { materials: '物料台账', locations: '库位', containers: '容器', members: '人员', items: '物品', manuals: '手册', workorders: '工单记录', transactions: '库存流水' };
+const TABLE_LABEL = { materials: '物料台账', locations: '库位', containers: '容器', members: '人员', items: '物品', manuals: '手册', workorders: '工单记录', transactions: '库存流水', itemOperations: '物品操作' };
 /** 每张表的业务主键字段名（必须与 outbox.js DEFAULT_TABLES / mes-core MERGE_TABLES 一致） */
-const TABLE_KEY_FIELD = { materials: 'code', locations: 'code', containers: 'code', members: 'code', items: 'code', manuals: 'code', workorders: 'code', transactions: 'seq' };
+const TABLE_KEY_FIELD = { materials: 'code', locations: 'code', containers: 'code', members: 'code', items: 'code', manuals: 'code', workorders: 'code', transactions: 'seq', itemOperations: 'code' };
 const PUSHABLE = ['materials', 'locations', 'containers', 'members', 'items', 'manuals', 'workorders'];  // 流水由库存直写产生，不做批量推送
-const SYNC_TABLES = ['materials', 'locations', 'containers', 'members', 'items', 'manuals', 'workorders', 'transactions'];
+const SYNC_TABLES = ['materials', 'locations', 'containers', 'members', 'items', 'manuals', 'workorders', 'transactions', 'itemOperations'];
 
 let _pendingPush = null;    // 本次合并发现的「本地新建、飞书还没有」的记录
 let _lastReport = null;   // load() 之后由 restoreSyncUiState 恢复；此处 state 还是 null，不能直接读
@@ -7116,8 +7162,11 @@ async function fsIncrementalSync() {
       fsProbeSucceeded();
     }
     const wms = fsWatermarks();
-    const changed = d.changed || [];
-    Object.assign(wms, d.watermarks || {});
+    const changed = (d.changed || []).slice().sort((a, b) => {
+      const order = ['itemOperations', 'locations', 'containers', 'items'];
+      return (order.includes(a) ? order.indexOf(a) : 10) - (order.includes(b) ? order.indexOf(b) : 10);
+    });
+    const oldWatermarks = JSON.parse(JSON.stringify(wms));
     if (!changed.length) return 0;        // 零变化：一个内容请求都不发
 
     let total = 0;
@@ -7153,6 +7202,13 @@ async function fsIncrementalSync() {
     if (total) {
       HEALTH.pullCount++;
       HEALTH.lastSyncAt = new Date().toLocaleTimeString();
+      Object.assign(wms, d.watermarks || {});
+      try {
+        await persistStateToIdb();
+      } catch (e) {
+        Object.keys(wms).forEach(k => delete wms[k]); Object.assign(wms, oldWatermarks);
+        throw e;
+      }
       save();
       renderLedger(); renderTxns(); renderOperators(); renderMembers(); renderWip();
       log('⚡ 增量同步：' + changed.map(k => TABLE_LABEL[k] || k).join('、') + ' 共 ' + total + ' 行');
@@ -7230,7 +7286,7 @@ async function fsRunCensus(opts) {
      为什么：一次扫 7 张表要 ~8 秒，会把轮询循环整个卡住 ——
      实测端到端延迟因此从 ~7 秒涨到 ~11 秒。
      手动点「立即核对删除」时才扫全部（opts.all = true）。 */
-  const censusable = SYNC_TABLES.filter(k => k !== 'transactions');
+  const censusable = SYNC_TABLES.filter(k => k !== 'transactions' && k !== 'itemOperations');
   let targets;
   if (opts.all) targets = censusable;
   else {
@@ -7612,6 +7668,11 @@ function fsPartial(tables, keys) {
  * 这样三方合并的开销只与变化行数有关，而不是整表。
  */
 function fsThreeWayApply(table, remoteRows) {
+  if (table === 'itemOperations' || window.UniqueItems.CONTROLLED[table]) {
+    const merged = window.ItemSync.merge(state, { [table]: remoteRows });
+    if (table === 'itemOperations') return { auto: remoteRows.length, conflicts: merged.conflicts.length, degraded: false };
+    remoteRows = merged.ordinary[table];
+  }
   const id = TABLE_KEY_FIELD[table];
   const keys = remoteRows.map(r => String(r[id]));
   const base = fsMergeBase();
@@ -8193,6 +8254,7 @@ function dropSeedDemoRecords(remote) {
 
 /** 云端 → 本地：统一走 mes-core 的 mergeRemote，并把「本地新建」记下来待推送 */
 function fsMerge(remote) {
+  remote = window.ItemSync.merge(state, remote).ordinary;
   dropSeedDemoRecords(remote);   // 出厂示例不属于「本地新建」，先清掉再合并，否则会被当成待推送
   // 必须**在合并之前**判断本机有没有基线：合并后 __syncedKeys 就被本次结果覆盖了。
   _hadFeishuBaseline = !!(state.__syncedKeys && Object.keys(state.__syncedKeys).length);
@@ -8417,6 +8479,7 @@ async function fsGiveUpItem(id) {
   const ob = await fsOutboxAsync();
   const it = ob ? (await ob.list()).find(x => x.id === id) : fsOutbox().list().find(x => x.id === id);
   if (!it) return null;
+  if (it.op === 'itemOperation') throw new Error('ITM结果未知命令不可放弃删除；请查询原opId并完成恢复');
   const dump = JSON.stringify(it);
   try {
     const blob = new Blob([dump], { type: 'application/json' });
@@ -8434,7 +8497,12 @@ async function fsGiveUpItem(id) {
 
 /** 执行一条队列项（也用于直写） */
 async function fsExecItem(item) {
+  if (itmReadOnlyTab) throw new Error('另一标签持有写权限，本标签只读');
   const op = item.op || 'stock';
+  if (op === 'itemOperation') {
+    // Recovery must explicitly query the original opId; never route ITM through stock/upsert.
+    throw new Error('ITM命令需在唯一物品作业页核对后提交/查询，普通队列不自动重发');
+  }
   if (op === 'stock') {
     const d = await fsPost('/api/feishu/stock', {
       matCode: item.matCode, qty: item.qty, delta: item.delta,

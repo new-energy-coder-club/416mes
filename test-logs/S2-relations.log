@@ -1,0 +1,14 @@
+✔ full/incremental controlled groups preserve explicit clear and MAT (29.789683ms)
+✔ external edits, partial groups and higher versions without proof are isolated (21.660155ms)
+✔ same-version forged log cannot replace different confirmed relationship (5.138275ms)
+✔ operations are append cached; immutable payload changes and duplicates quarantined (6.837949ms)
+✔ APPLIED proof cannot introduce dangling or ambiguous container/location (13.138902ms)
+✔ legacy records are unknown, ordinary names remain available for existing merge (4.964202ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1257.203909

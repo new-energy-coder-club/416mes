@@ -85,6 +85,17 @@ async function runSync(env, args, { expectFail = false } = {}) {
   }
 }
 
+/* ================= unique-item CLI boundary ================= */
+test('CLI refuses controlled ITM push and preserves fake remote relationship', async t => {
+  const env = mkEnv(); t.after(() => cleanup(env));
+  const backup = join(env.dir, 'controlled.json');
+  writeFileSync(backup, JSON.stringify({ state: { materials: [], items: [{ code: 'WP-001', status: 'in_stock', container: 'bad', version: 2 }] } }));
+  const before = readFileSync(env.fixturePath, 'utf8');
+  const result = await runSync(env, ['push', backup], { expectFail: true });
+  assert.match(result.stderr, /CLI 禁止推送受控实体/);
+  assert.equal(readFileSync(env.fixturePath, 'utf8'), before);
+});
+
 /* ================= status ================= */
 
 test('feishu status：列出 8 张表与记录数', async (t) => {

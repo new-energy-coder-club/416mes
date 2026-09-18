@@ -1,0 +1,14 @@
+✔ IDB command/state/draft atomic, stable identity, no optimistic relation (495.419732ms)
+✔ IDB failure rolls back command and snapshot, publishes no success (62.51867ms)
+✔ save queue takes newest state; replaceAll preserves operations and draft namespace (97.203893ms)
+✔ LS dirty cannot erase IDB command or resurrect pre-issue container (51.815541ms)
+✔ unknown results retain command; final receipt atomically updates and removes (48.106063ms)
+✔ lack of browser lock or real IDB disables command persistence (36.748888ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2230.562957

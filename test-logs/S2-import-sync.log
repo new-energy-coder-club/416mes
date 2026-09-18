@@ -1,0 +1,41 @@
+✔ 导出与模板：每张表的列结构逐列相同 (88.348292ms)
+✔ PIN 码：导出人员表只写已设置/未设置，绝不写明文 (2.638467ms)
+✔ PIN 码：导入保持原值，只有 4 位数字/清空 才改动 (4.128209ms)
+✔ PIN 码：JSON 备份默认不含，且用「删键」而不是写空串 (4.041041ms)
+✔ B7【关键】导入必须认得导出/模板自己写的表头（否则导出→导入往返直接失败） (7.975616ms)
+✔ full/incremental controlled groups preserve explicit clear and MAT (27.658256ms)
+✔ external edits, partial groups and higher versions without proof are isolated (15.317986ms)
+✔ same-version forged log cannot replace different confirmed relationship (8.18063ms)
+✔ operations are append cached; immutable payload changes and duplicates quarantined (6.80669ms)
+✔ APPLIED proof cannot introduce dangling or ambiguous container/location (10.229032ms)
+✔ unversioned LOC historical matching proof cannot silently disable active location (4.917882ms)
+✔ missing LOC status cannot erase confirmed active and late log resolves association on retry (4.334477ms)
+✔ legacy records are unknown, ordinary names remain available for existing merge (2.412187ms)
+✔ P5-4 每个 sheet 的业务键列都要在预检阶段校验，且校验发生在任何改动之前 (10.927047ms)
+✔ P5-4 空业务键的行必须被丢弃并告警，且每张表都要过这道滤网 (1.711542ms)
+✔ P5-5 导入必须整体快照 + 失败回滚（整表替换不允许留半成品） (115.155737ms)
+✔ P5-5 导入用到的 sheet 局部变量必须都已声明（改名的漏网引用会 ReferenceError） (22.622579ms)
+✔ P5-6 mergePackage 不能因为备份里没有 minQty 就把本机安全库存清零 (8.432795ms)
+✔ P5-1「待人工处理」的条目不能再被自动重试 (33.381787ms)
+✔ P5-1 队列有人能收场的入口：角标可点、面板可重试/放弃，且 fsGiveUpItem 真被调用 (114.306659ms)
+✔ P5-2「来历不明」必须被检测并报警，且不能在没基线时误报 (35.717087ms)
+✔ P5-4 必需列（库存数量）的检查不能被「业务键命中」短路 (63.2437ms)
+✔ B8【关键】导入的快照/回滚声明必须在 try 之外，否则 catch 里够不着（回滚形同虚设） (207.845164ms)
+✔ save()：localStorage 写失败不能再被吞掉 (11.690907ms)
+✔ 修订号与「IDB 落后」标记：两边都要维护 (3.970225ms)
+✔ 启动时必须在 LS 与 IDB 之间判新，且走同一套迁移 (41.805852ms)
+✔ 关页/切后台要同步落盘（IDB 异步来不及） (3.306643ms)
+✔ log()：去抖 save + 封顶，且不再是每行一次全量落盘 (5.692802ms)
+✔ 入队绝不抛：三级降级都要在 (3.154944ms)
+✔ fsPush 不把异常抛给 fire-and-forget 的调用方 (2.990221ms)
+✔ 离线队列迁移后要删 LS 源，否则每次启动重复推送 (4.366049ms)
+✔ 推送成功要把业务键记进 __syncedKeys；删除成功要摘掉 (5.784653ms)
+✔ 手工改库存：必须先本地算账落盘，再 await 网络 (4.791512ms)
+ℹ tests 33
+ℹ suites 0
+ℹ pass 33
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4517.405518
