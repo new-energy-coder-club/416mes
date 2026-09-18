@@ -33,7 +33,7 @@ same-session goal 已建立：`goal-0b8690b2-4cf4-4842-aa7c-7ced4fd750ff`，目�
 - `git diff --check` 通过，无新增依赖。
 - 阶段提交：`2a4a8f0ddc1a2b0509ab4efcb779e7ad89c283d8`，提交后更新本记录。
 
-## S2 — 阶段实现与回归通过，提交中
+## S2 — 已完成（c501249）
 
 - 已新增 `lib/item-persistence.js`：共享串行队列、生命周期 Web Lock 单写标签能力、state/outbox/draft 原子事务、未知结果保留、回执原子落盘、dirty LS 不覆盖 IDB 关系与命令、records镜像包含操作缓存。
 - `node --test test/item-persistence.test.js` 退出0，6/6通过，使用 fake-indexeddb 实际事务与失败注入，日志 `test-logs/S2-persistence-initial.log`。
@@ -50,7 +50,17 @@ same-session goal 已建立：`goal-0b8690b2-4cf4-4842-aa7c-7ced4fd750ff`，目�
 - 阶段全量 `npm test` 退出0：543/543通过、0失败/跳过，79868ms，`test-logs/S2-npm-test.log`；增加生命周期双标签锁模拟、确认/待提交投影分离、CLI真实fake进程禁写用例。
 - 全量启动后追加网页实际函数VM+fake-indexeddb用例2/2通过：`test-logs/S2-page-persistence.log`。不是仅字符串断言：执行实际persistStateToIdb和fsThreeWayApply，检查队列快照、outbox/draft保留及关系隔离。
 - git diff --check通过。S3将实际UI接入草稿/命令/投影和复核显示，S4接正式API；本阶段没有声称UI端到端或生产正式可写。
-- S2提交号于提交后追加。
+- S2提交：`c501249479cf608ae5a2a6494446e6b2f623f058`。
+
+## S3 — 实施中
+
+已新增 `lib/item-scan.js` 严格行会话状态机与 `lib/item-ui.js` 查询/草稿控制器，index导航和实际独立查询/作业区已挂载。支持三级下钻、固定数量1、LOC→CTN→ITM、入/出/换箱/容器定位移库、行代际和稳定opId、本机草稿/命令保存。当前S3继续：安装本worktree锁版ZXing0.21.3(MIT)与dev linkedom0.18.12(ISC)，未改父依赖；离线浏览器vendor 336008bytes。Code128合成RGBA fixture实际解码+扫码状态机5/5通过（首次fixture checksum错误已修77，非mock输出），`test-logs/S3-barcode-scan.log`。相机帧接jsQR/Code128并绑定行token，权限失败手输降级。
+
+DOM实际点击查询前缀/裸码跨类型歧义候选/三级下钻2/2通过，`test-logs/S3-dom-retest.log`；初测linkedom select.value只读，改option.selected后通过。草稿恢复按钮已接scan.restore；IDB入队失败解锁但保留opId。
+
+真实第九表已建的信息仅记为外部事实，tableId/schema未核验，不访问生产。真实第九表已建的信息仅记为外部事实，tableId/schema未核验，不访问生产。
+
+S3增补：未持久化失败可同opId原载荷重试，reset改变意图清旧opId，已锁定不可重扫；ITM步骤可精确识别唯一已建档WP裸码，拒绝EAN猜测。DOM真实草稿保存/恢复、双击仅一命令、IDB失败不谎报通过；查询/扫码/Code128共11/11，`test-logs/S3-ui-scan.log`。离开页签/pagehide停止相机。全量回归退出0，556/556通过，111428ms，日志S3-npm-test.log。随后修复cameraGeneration/启动行绑定、切行停止、迟到授权释放流、旧tick不重设timer；新增可控mediaDevices Promise用例，DOM5/5通过（S3-camera-lifecycle-retest.log）。测试初次注入linkedom navigator未生效，改显式mediaDevices依赖注入后验证真实异步分支。S3提交中，真实硬件仍待验证。
 
 统一IDB保存队列、命令/state事务、LS恢复、受控字段组全量/增量和CLI封口。阶段门槛尚未完成。
 

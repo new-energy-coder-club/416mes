@@ -16,9 +16,11 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@zxing/library": "0.21.3",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "fake-indexeddb": "^6.2.5"
+    "fake-indexeddb": "^6.2.5",
+    "linkedom": "0.18.12"
   }
 }
