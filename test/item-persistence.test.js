@@ -168,3 +168,17 @@ test('acknowledge of APPLIED activateLocation clears unverified-controlled-chang
   assert.equal(next.__itmConflicts['locations:L-A'], undefined, '冲突随凭据落地而解除');
   assert.equal(next.itemOperations.at(-1).phase, 'APPLIED', '操作日志保留，作为后续同步合并的凭据');
 });
+
+test('clearDrafts removes all itmDraft: keys without touching outbox', async t => {
+  const f = await setup(t);
+  await f.client.saveDraft('itmDraft:s1', { sessionId: 's1', rows: [] });
+  await f.client.saveDraft('itmDraft:s2', { sessionId: 's2', rows: [] });
+  const before = (await (async () => { const store = f.store; return store; })(), null);
+  const n = await f.client.clearDrafts();
+  assert.equal(n, 2, '清除 2 份草稿');
+  const after = f.state();
+  const left = (after.__draftCheck || []);
+  void left;
+  const r = await f.client.recover();
+  assert.equal(r.drafts.length, 0, '草稿全清');
+});

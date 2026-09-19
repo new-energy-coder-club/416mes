@@ -68,3 +68,16 @@ test('scan: 命令终态后 forget(opId) 移除已完成行，同码立即可再
  assert.equal(s.row().values.length,0,'新行从零开始，同码可重新走全流程');
  assert.equal(s.forget('不存在的opId'),false);
 });
+
+test('scan: removeRow 只删草稿行（锁定行拒绝）；clearUnlocked 清后自动补空行',()=>{
+ const s=Scan.create({getState:()=>({locations:[{code:'L-A',status:'active'}],containers:[{code:'C-A',loc:'L-A',status:'active',version:1}],items:[{code:'WP-001',status:'pending',version:0}]}),id:()=>'t'});
+ s.add('receive');
+ ['LOC:L-A','CTN:C-A','ITM:WP-001'].forEach(x=>s.accept(x));
+ s.lock();                                    // 行1 锁定
+ s.add('issue');                              // 行2 草稿
+ assert.equal(s.removeRow(1),true,'草稿行可删');
+ assert.throws(()=>s.removeRow(0),/已入队/,'锁定行拒绝删除');
+ s.clearUnlocked();
+ assert.equal(s.snapshot().rows.length,1,'清空后自动补空行');
+ assert.equal(s.snapshot().rows[0].kind,'receive');
+});
