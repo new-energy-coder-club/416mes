@@ -1,6 +1,0 @@
-'use strict';const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');const root=path.resolve(__dirname,'../../.dev-lines/gpt6');const {parseHTML}=require(require.resolve('linkedom',{paths:[root]}));const UI=require(root+'/lib/item-ui');const fixture=require('./fixture.json');
-test('S5.1 imported opId review is visible and querying never enqueues or applies',async()=>{
- const {document}=parseHTML(fs.readFileSync(root+'/index.html','utf8'));const state=structuredClone(fixture);state.__itmRecoveryReview={commands:[{id:'import-op',op:'itemOperation',request:{opId:'import-op',itemCode:'I-A'}}]};let n=0,inspect=0,enqueue=0;
- UI.mount({document,getState:()=>state,getPersistence:()=>({async enqueue(){enqueue++;}}),getCommands:async()=>[],id:()=>String(++n),getClient:()=>({async inspect(id){assert.equal(id,'import-op');inspect++;return{phase:'APPLIED',code:id};}})});
- const box=document.getElementById('itmRecoveryReview');assert.match(box.textContent,/import-op/);box.querySelector('button').click();await new Promise(r=>setImmediate(r));await new Promise(r=>setImmediate(r));assert.equal(inspect,1);assert.equal(enqueue,0);assert.equal(state.items.find(i=>i.code==='I-A').status,'in_stock');assert.match(box.textContent,/未应用/);
-});

@@ -85,3 +85,8 @@ deep-miss.png
 sticky-header.png
 sidebar-distinct.png
 sidebar-only.png
+
+# 本地开发文档/验收材料/测试日志不入库（2026-09-19 用户要求）
+dev-docs/
+evaluation/
+test-logs/

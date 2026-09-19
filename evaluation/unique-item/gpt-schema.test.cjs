@@ -1,8 +1,0 @@
-'use strict';
-const test=require('node:test'); const assert=require('node:assert/strict');
-const schema=require('../../.dev-lines/gpt6/lib/item-schema.js');
-function fixture(){const tables={},schemas={};for(const [t,fields]of Object.entries(schema.REQUIREMENTS)){tables[t]='FAKE_'+t;schemas[t]=Object.entries(fields).map(([name,[type,options]])=>({name,type:Array.isArray(type)?type[0]:type,...(options?{options:[...options]}:{})}));}return{tables,schemas};}
-test('GPT schema: complete types never alone enable production writing',()=>{const f=fixture(),r=schema.validate(f.schemas,f.tables);assert.equal(r.schemaValid,true);assert.equal(r.writeEnabled,false);});
-for(const [table,name] of [['items','容器码'],['items','状态'],['items','业务版本'],['items','最后操作ID'],['itemOperations','操作ID']])test('GPT schema: missing critical '+table+'/'+name+' rejected',()=>{const f=fixture();f.schemas[table]=f.schemas[table].filter(x=>x.name!==name);assert.equal(schema.validate(f.schemas,f.tables).schemaValid,false);});
-test('GPT schema: wrong type or incomplete single-select options rejected',()=>{const f=fixture();f.schemas.items.find(x=>x.name==='状态').options=['in_stock'];f.schemas.items.find(x=>x.name==='业务版本').type=1;const r=schema.validate(f.schemas,f.tables);assert.equal(r.schemaValid,false);assert.ok(r.problems.some(p=>p.reason==='missing-options'));assert.ok(r.problems.some(p=>p.reason==='wrong-type'));});
-test('GPT schema: absent operation table and partial migration fail closed',()=>{const f=fixture();delete f.tables.itemOperations;assert.equal(schema.validate(f.schemas,f.tables).schemaValid,false);assert.equal(schema.isControlledSchema('items',[{name:'最后操作ID',type:1}]),true);});
