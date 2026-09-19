@@ -220,3 +220,77 @@ test('E1：errZh 覆盖发号/手动码四类新错误码',async()=>{
  const text=d.getElementById('itmPending').textContent;
  for(const [code,zh] of cases){assert.ok(text.includes(zh),'应有中文文案：'+code);assert.ok(text.includes(code),'保留英文错误码便于排查：'+code);}
 });
+
+/* ================= 2.48.0：入库死端修复 ================= */
+test('conflict-blocked fill offers guided activate instead of raw table:key error',async()=>{
+ const s=setupGuided();const d=s.document,page=s.page;
+ s.state.__itmConflicts={'locations:L-OLD':{table:'locations',key:'L-OLD',reason:'unverified-controlled-change',local:{code:'L-OLD',status:'unknown'},observed:{code:'L-OLD',status:'active'}}};
+ d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN();
+ const text=d.getElementById('itmStatus').textContent;
+ assert.match(text,/未核验的云端变更|现场核实/,'错误必须可读，不得裸报 locations: 码');
+ assert.doesNotMatch(text,/locations: L-OLD$/,'不得只有裸表名+码');
+ const action=d.getElementById('itmStatus').querySelector('button');
+ assert.ok(action,'冲突拦截也必须给出出口');
+ action.click();await tickN(12);
+ assert.equal(s.queued&&s.queued.kind,'activateLocation','冲突路径同样生成核实启用命令');
+});
+test('guided activate REJECTED (STATE_CONFLICT) reports rejection honestly without dead-end wording',async()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const state={locations:[{code:'L-OLD',status:'unknown'}],containers:[],items:[]};
+ let queuedCmd=null;
+ const persistence={async enqueue(r){queuedCmd=r;},async saveDraft(){},async recover(){return{drafts:[],commands:[]}}};
+ const page=UI.mount({document:d,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>queuedCmd?[{id:queuedCmd.opId,op:'itemOperation',request:queuedCmd}]:[],getClient:()=>({async submit(){return {phase:'REJECTED',error:'STATE_CONFLICT'};}}),id:()=>'g3-x'});
+ d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN();
+ const action=d.getElementById('itmStatus').querySelector('button');assert.ok(action);
+ action.click();await tickN(12);
+ const text=d.getElementById('itmStatus').textContent;
+ assert.match(text,/启用被拒绝/,'如实说被拒绝');
+ assert.match(text,/重新扫码生成新命令/,'给出下一步');
+ assert.doesNotMatch(text,/启用结果待确认/,'不得再说「待确认」');
+ assert.doesNotMatch(text,/请查询原命令/,'拒绝后卡已删除，不得指向查询');
+});
+test('retired entity shows plain notice without activate button',async()=>{
+ const s=setupGuided();const d=s.document;
+ s.state.locations[0]={code:'L-OLD',status:'retired'};
+ d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN();
+ const text=d.getElementById('itmStatus').textContent;
+ assert.match(text,/已退役/);assert.equal(d.getElementById('itmStatus').querySelector('button'),null,'退役不得提供启用按钮');
+});
+test('guided activate REJECTED legacy mismatch offers override resubmit',async()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ let n=0,queued=null;
+ const state={locations:[{code:'L-A',status:'active'}],containers:[{code:'C-OLD',loc:'W-ELSEWHERE',status:'unknown',version:0}],items:[]};
+ const persistence={async enqueue(r){queued=r;},async saveDraft(){},async recover(){return{drafts:[],commands:[]}}};
+ const client={async submit(){return {phase:'REJECTED',error:'LEGACY_LOCATION_CONFLICT'};}};
+ const page=UI.mount({document:d,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>queued?[{id:queued.opId,op:'itemOperation',request:queued}]:[],getClient:()=>client,id:()=>'g2-'+(++n)});
+ await page.accept('LOC:L-A');
+ d.getElementById('itmCode').value='CTN:C-OLD';d.getElementById('itmScanBtn').click();await tickN();
+ const action=d.getElementById('itmStatus').querySelector('button');
+ assert.ok(action,'容器未启用有启用按钮');action.click();await tickN(12);
+ const override=[...d.getElementById('itmStatus').querySelectorAll('button')].find(b=>b.textContent.includes('以现场扫描为准'));
+ assert.ok(override,'REJECTED(LEGACY_LOCATION_CONFLICT) 应提供现场扫描为准重发');
+ override.click();await tickN(12);
+ assert.equal(queued.confirmLegacyLocOverride,true,'重发命令带现场确认覆盖标记');
+ assert.doesNotMatch(d.getElementById('itmStatus').textContent,/请查询原命令/,'拒绝后不再指向已删除的卡');
+});
+test('pending card surfaces lastError and offers needs_attention submit',async()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const command={id:'stuck-1',status:'needs_attention',lastError:'请求超时，结果未知，请查询原opId',request:{schemaVersion:1,opId:'stuck-1',kind:'registerItem',entity:{category:'TS',name:'示波器'}}};
+ let submitted=0;
+ const page=UI.mount({document:d,getState:()=>({}),id:()=>'id',getPersistence:()=>null,getCommands:async()=>[command],getClient:()=>({submit:async()=>{submitted++;return {phase:'APPLIED'};},query:async()=>({phase:'REPAIR_REQUIRED',error:'原命令未决'})})});
+ await page.pending();
+ const card=d.getElementById('itmPending').querySelector('article');
+ assert.match(card.textContent,/上次结果：/,'核验卡必须显示真实失败原因');
+ assert.match(card.textContent,/超时/);
+ const btns=[...card.querySelectorAll('button')].map(b=>b.textContent);
+ assert.ok(btns.some(t=>t==='查询并确认原命令'),'needs_attention 卡提供查询并确认入口');
+});
+test('work tab conflict banner lists blocked codes',()=>{
+ const s=setupGuided();const d=s.document;
+ s.state.__itmConflicts={'locations:L-OLD':{table:'locations',key:'L-OLD',reason:'unverified-controlled-change',local:{code:'L-OLD',status:'unknown'},observed:{code:'L-OLD',status:'active'}}};
+ s.page.render();
+ const banner=d.getElementById('itmConflictBanner');
+ assert.equal(banner.hidden,false,'有冲突时横幅必须可见');
+ assert.match(banner.textContent,/locations:L-OLD/);
+ assert.match(banner.textContent,/现场核实并启用/,'横幅要给出出口说明');
+});

@@ -152,3 +152,19 @@ test('registerItem 无码命令 REJECTED（发号后 plan 拒）也能 ACK 出�
   assert.equal(await f.store.get('outbox', 'reg-rej'), undefined);
   assert.equal(f.state().items.some(i => i.code === 'WP-TS-001'), false, 'REJECTED 不落物品');
 });
+
+/* ================= 2.48.0：APPLIED ACK 解除「未核验变更」冲突（现场核实即凭据） ================= */
+test('acknowledge of APPLIED activateLocation clears unverified-controlled-change conflict', async t => {
+  const f = await setup(t);
+  const state = f.state();
+  // 本地 unknown + 冲突（云端 active 但无凭据的历史现场）
+  state.locations = [{ code: 'L-A', status: 'unknown' }];
+  state.__itmConflicts = { 'locations:L-A': { table: 'locations', key: 'L-A', reason: 'unverified-controlled-change', local: { code: 'L-A', status: 'unknown' }, observed: { code: 'L-A', status: 'active' } } };
+  const activate = { schemaVersion: 1, opId: 'act-1', kind: 'activateLocation', locationCode: 'L-A', expected: { locationStatus: 'unknown' } };
+  await f.client.enqueue(activate);
+  await f.client.acknowledge({ code: 'act-1', request: activate, phase: 'APPLIED', before: { locations: [{ code: 'L-A', status: 'unknown' }] }, after: { locations: [{ code: 'L-A', status: 'active' }] } });
+  const next = f.state();
+  assert.equal(next.locations[0].status, 'active', 'ACK 应用启用结果');
+  assert.equal(next.__itmConflicts['locations:L-A'], undefined, '冲突随凭据落地而解除');
+  assert.equal(next.itemOperations.at(-1).phase, 'APPLIED', '操作日志保留，作为后续同步合并的凭据');
+});

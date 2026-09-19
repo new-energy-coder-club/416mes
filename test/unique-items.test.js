@@ -106,3 +106,22 @@ test('schema contract validates required fields, types and enums, never claims w
   schemas.items.find(f => f.name === '状态').options = ['pending']; assert.equal(S.validate(schemas, tables).schemaValid, false);
   schemas.items.find(f => f.name === '业务版本').type = 1; assert.ok(S.validate(schemas, tables).problems.some(p => p.reason === 'wrong-type'));
 });
+
+/* ================= 2.48.0：activateLocation 幂等重确认（解锁「无凭据 active」死锁） ================= */
+test('activateLocation on already-active location is an idempotent re-confirmation that generates proof', () => {
+  const st = { locations: [{ code: 'L-A', status: 'active' }], containers: [], items: [] };
+  U.migrate(st);
+  const admin = { id: 'admin-x', roles: ['admin'] };
+  // expected 允许与本地陈旧视图一致（unknown）——现场核实以实物为准
+  const p = U.plan(st, { schemaVersion: 1, opId: 're-confirm', kind: 'activateLocation', locationCode: 'L-A', expected: { locationStatus: 'unknown' } }, admin);
+  assert.equal(p.phase, 'PREPARED');
+  assert.deepEqual(p.after.locations, [{ code: 'L-A', status: 'active' }], '实体值不变（幂等）');
+  assert.deepEqual(p.before.locations, [{ code: 'L-A', status: 'active' }]);
+});
+test('activateLocation still rejects retired/disabled locations', () => {
+  for (const status of ['retired', 'disabled']) {
+    const st = { locations: [{ code: 'L-R', status }], containers: [], items: [] };
+    U.migrate(st);
+    assert.throws(() => U.plan(st, { schemaVersion: 1, opId: 'x', kind: 'activateLocation', locationCode: 'L-R', expected: { locationStatus: status } }, { id: 'a', roles: ['admin'] }), e => e.code === 'STATE_CONFLICT');
+  }
+});
