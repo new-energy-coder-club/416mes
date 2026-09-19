@@ -351,3 +351,17 @@ test('complete-row status explains that stock is untouched until confirm+submit'
  assert.match(d.getElementById('itmStatus').textContent,/库存还没动/);
  assert.match(d.getElementById('itmStatus').textContent,/确认本行/);
 });
+
+test('conflicted entity detail renders read-only card with conflict info instead of empty failure',()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const state={locations:[{code:'L-X',status:'unknown',desc:'X位'}],containers:[],items:[],
+   __itmConflicts:{'locations:L-X':{table:'locations',key:'L-X',reason:'unverified-controlled-change',
+     local:{code:'L-X',status:'unknown'},observed:{code:'L-X',status:'active'}}}};
+ const page=UI.mount({document:d,getState:()=>state,getPersistence:()=>null,getCommands:async()=>[],id:()=>'cf'});
+ page.detail('locations','L-X');
+ const box=d.getElementById('itmResults').innerText;
+ assert.match(box,/待核实/,'冲突实体详情必须可见');
+ assert.match(box,/未核验的云端变更/,'必须显示冲突说明');
+ assert.match(box,/云端观察值/,'必须显示云端观察值供人工比对');
+ assert.doesNotMatch(d.getElementById('itmSearchStatus').textContent,/查询失败/,'只读查询不得被冲突守卫拦成失败');
+});
