@@ -49,6 +49,16 @@ test('scan: 行已填齐后再扫给明确指引而不是「当前请扫描已�
  assert.deepEqual(s.accept('ITM:WP-001'),{duplicate:true},'重扫同码按重复忽略，不得当作待填步骤');
 });
 
+test('scan: 锁定行不参与批次防重（自动恢复的已完成行不再拦同码）',()=>{
+ const s=Scan.create({getState:()=>({locations:[{code:'L-A',status:'active'}],containers:[{code:'C-A',loc:'L-A',status:'active',version:1}],items:[{code:'WP-001',status:'in_stock',container:'C-A',version:1}]}),id:()=>'t'});
+ s.add('issue');
+ s.accept('LOC:L-A');s.accept('CTN:C-A');s.accept('ITM:WP-001');
+ s.lock();                                   // 行锁定（已提交）
+ s.add('issue');                             // 新行再扫同码
+ s.accept('LOC:L-A');s.accept('CTN:C-A');
+ const r=s.accept('ITM:WP-001');             // 旧逻辑在此抛「批次已包含此物品」
+ assert.equal(r.complete,true,'锁定行的物品不拦新行');
+});
 test('scan: 命令终态后 forget(opId) 移除已完成行，同码立即可再操作',()=>{
  const s=Scan.create({getState:()=>({locations:[{code:'L-A',status:'active'}],containers:[{code:'C-A',loc:'L-A',status:'active',version:1}],items:[{code:'WP-001',status:'pending',version:0}]}),id:()=>'t'});
  s.add('receive');
