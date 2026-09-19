@@ -102,3 +102,25 @@ test('parseScanText：印刷版全大写 URL / 带 query / 锚点（D2：整条�
   assert.equal(L.parseScanText(short.toLowerCase()).code, 'WP-001', '小写裸码归一');
   assert.equal(L.parseScanText('HTTPS://X.COM/I/' + short + '?to=feishu').code, 'WP-001', '任意主机+大写+query');
 });
+
+/* ================= 2.50.1（审计 D bug1/bug4）：ILOU Crockford 映射 + 尾斜杠 ================= */
+test('decode 把 O/I/L 映射回 0/1/1（Crockford），手输易混字符不再必失败', () => {
+  // 找一个含 0 或 1 的合法短码，把手输易混字符代入后 decode 必须还原同一物品
+  let hit = null;
+  for (let serial = 1; serial <= 200 && !hit; serial++) {
+    const code = 'WP-TS-' + String(serial).padStart(3, '0');
+    const short = L.fromItemCode(code);
+    if (!short) continue;
+    if (short.includes('0')) hit = { short: short.replace('0', 'O'), expect: code };
+    else if (short.includes('1')) hit = { short: short.replace('1', 'I'), expect: code };
+  }
+  assert.ok(hit, '200 个短码里必然有含 0/1 的');
+  const d = L.parseScanText(hit.short);
+  assert.ok(d, 'ILOU 代入后仍可解码（' + hit.short + '）');
+  assert.equal(d.code, hit.expect, '映射还原同一物品');
+});
+test('parseScanText 容忍尾斜杠', () => {
+  const base = L.linkFor('WP-TS-001');
+  assert.deepEqual(L.parseScanText(base + '/'), L.parseScanText(base));
+  assert.deepEqual(L.parseScanText(base + '/?to=feishu'), L.parseScanText(base));
+});

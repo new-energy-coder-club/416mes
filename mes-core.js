@@ -1016,7 +1016,7 @@
     if (isCancelled(order)) return { ok: false, error: '工单 ' + order.code + ' 已是「已取消」状态' };
     var prog = orderProgress(order);
     if (prog.anyExecuted) {
-      return { ok: false, error: '工单已执行 ' + prog.executedTotal + ' 件，不能直接取消；请使用「冲销」把库存还回后再关闭' };
+      return { ok: false, error: '工单已执行 ' + prog.executedTotal + ' 件，不能直接取消；冲销入口已下线（历史单只读），请用「导出 Excel」核对或联系管理员修数' };
     }
     var now = opts.now ? new Date(opts.now) : new Date();
     order.status = STATUS.CANCELLED;
@@ -1045,25 +1045,47 @@
     var sign = signOf(order.type);
     var now = opts.now ? new Date(opts.now) : new Date();
     var reason = opts.reason || ('冲销 ' + order.code);
+    /* 2.50.1 幂等冲销（审计 R3）：此前中途失败（某物料库存不足以反向）直接 return，
+       已冲销物料不回滚、reverseInfo 不留痕 → 重试对同一物料再次反向（双重冲销实证：A 回 10 变 6）。
+       现在每成功一条即登记进 order.reverseInfo.items，重试时跳过已登记物料；全部完成才关单。 */
+    var prevItems = (order.reverseInfo && Array.isArray(order.reverseInfo.items)) ? order.reverseInfo.items : [];
+    var doneCodes = {};
+    prevItems.forEach(function (x) { if (x && x.matCode != null) doneCodes[x.matCode] = true; });
     var applied = [];
+    var lastError = '';
     for (var i = 0; i < prog.items.length; i++) {
       var it = prog.items[i];
       if (it.executed <= 0) continue;
+      if (doneCodes[it.matCode]) continue;
       // 反向：出库(LL/JH)执行时 -qty，冲销为 +qty；入库(BH/TL)执行时 +qty，冲销为 -qty
       var r = applyStockChange(state, {
         matCode: it.matCode, mode: 'delta', qty: round6(-sign * it.executed), type: '冲销', ref: order.code,
         reason: reason, operator: opts.operator, device: opts.device, now: now
       });
-      if (!r.ok) return { ok: false, error: r.error, applied: applied };
+      if (!r.ok) { lastError = it.matCode + '：' + r.error; break; }
       applied.push({ matCode: it.matCode, qty: it.executed, delta: r.delta, balance: r.balance, txn: r.txn });
     }
 
     var at = now.toLocaleString();
+    var allItems = prevItems.concat(applied.map(function (a) { return { matCode: a.matCode, qty: a.qty, delta: a.delta }; }));
+    var allDone = prog.items.every(function (it) {
+      return it.executed <= 0 || doneCodes[it.matCode] || applied.some(function (a) { return a.matCode === it.matCode; });
+    });
+    if (!allDone) {
+      if (applied.length) order.reverseInfo = {
+        at: at,
+        operator: opts.operator != null ? opts.operator : (state.operator || ''),
+        reason: reason,
+        items: allItems,
+        partial: true
+      };
+      return { ok: false, error: '冲销未完成（' + lastError + '）；已冲销物料已留痕，条件补足后再次冲销只会补剩余物料', applied: applied, partial: true };
+    }
     order.reverseInfo = {
       at: at,
       operator: opts.operator != null ? opts.operator : (state.operator || ''),
       reason: reason,
-      items: applied.map(function (a) { return { matCode: a.matCode, qty: a.qty, delta: a.delta }; })
+      items: allItems
     };
     order.reversedAt = at;
     order.status = STATUS.CANCELLED;

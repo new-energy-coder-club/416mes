@@ -1900,3 +1900,40 @@ test('部分执行后冲销：只回退已执行数量，计划保持原样', ()
   /* 冲销后仍不能再改计划（已取消） */
   assert.equal(Core.updateOrderPlan(st, w, { items: [{ matCode: 'MAT-A', qty: 1 }] }).ok, false);
 });
+
+/* ================= 2.50.1（审计 R3）：冲销幂等——部分失败重试不得双重冲销 ================= */
+test('reverseOrder 部分失败重试：已冲销物料不再反向，补齐后关单且账实一致', () => {
+  const s = mkState();
+  // BH 补货单：执行时 A/B 各 +4
+  const r = Core.createOrder(s, {
+    type: 'BH', date: '2026-09-19', code: 'BH20260919001',
+    items: [{ matCode: 'MAT-A', qty: 4 }, { matCode: 'MAT-B', qty: 4 }]
+  });
+  assert.equal(r.ok, true, r.errors.join('；'));
+  const o = r.order;
+  const exec = Core.executeOrder(s, o);
+  assert.equal(exec.ok, true, exec.error || '');
+  assert.equal(stockOf(s, 'MAT-A'), 9);
+  assert.equal(stockOf(s, 'MAT-B'), 14);
+
+  // 制造 B 无法反向的条件：把 B 的库存清零（冲销 B 是 -4，会被负库存守卫拒绝）
+  Core.applyStockChange(s, { matCode: 'MAT-B', mode: 'delta', qty: -14, type: '手工调整', reason: '测试铺垫', operator: '测试员' });
+  const first = Core.reverseOrder(s, o, { reason: '单据作废' });
+  assert.equal(first.ok, false, 'B 反向必须失败');
+  assert.equal(first.partial, true);
+  assert.equal(stockOf(s, 'MAT-A'), 5, 'A 已冲销一次：9-4=5');
+  assert.equal(o.status, '已执行', '未全部冲销不得关单（状态保持执行态）');
+  assert.ok(o.reverseInfo && o.reverseInfo.partial, '部分冲销留痕');
+  const txnCountAfterFirst = s.transactions.filter(t => t.type === '冲销').length;
+
+  // 补足 B 库存后重试：只补冲 B，A 不再反向
+  Core.applyStockChange(s, { matCode: 'MAT-B', mode: 'delta', qty: 4, type: '手工调整', reason: '测试铺垫', operator: '测试员' });
+  const second = Core.reverseOrder(s, o, { reason: '单据作废' });
+  assert.equal(second.ok, true, second.error || '');
+  assert.equal(stockOf(s, 'MAT-A'), 5, 'A 绝不二次反向（旧实现 A=6 → 双重冲销）');
+  assert.equal(stockOf(s, 'MAT-B'), 0, 'B 只补冲一次：铺垫后 4，冲销 -4 → 0');
+  assert.equal(o.status, '已取消', '全部冲销完成才关单');
+  const revTxns = s.transactions.filter(t => t.type === '冲销');
+  assert.equal(revTxns.length, txnCountAfterFirst + 1, '重试只补 B 一条冲销流水');
+  assert.equal(Core.replayAudit(s).ok, true, '回放校验仍一致');
+});
