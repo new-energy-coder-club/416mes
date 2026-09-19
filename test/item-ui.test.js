@@ -297,3 +297,17 @@ test('work tab conflict banner lists blocked codes',()=>{
  assert.match(banner.textContent,/locations:L-OLD/);
  assert.match(banner.textContent,/现场核实并启用/,'横幅要给出出口说明');
 });
+
+test('confirm card on complete row says 已填齐 instead of 当前步骤需要undefined码',async()=>{
+ const cam=fakeCam();const {document:d,page}=setup(null,cam);
+ await page.accept('LOC:L-A');await page.accept('CTN:C-A');await page.accept('ITM:I-P');
+ d.getElementById('itmCamera').click();await new Promise(r=>setImmediate(r));
+ /* 用户实测场景：行已填齐后重扫物品短链 → 确认卡必须说清「无需再扫」，不得出现 undefined */
+ const verdict=cam.lastOpts.describe({text:'HTTPS://MES.NEWENERGYCODER.CLUB/I/XW4QYARX',format:'二维码'});
+ assert.equal(verdict.ok,false);
+ assert.match(verdict.text,/本行步骤已填齐/);
+ assert.match(verdict.text,/确认本行/,'要指明下一步动作');
+ assert.doesNotMatch(verdict.text,/undefined/,'不得出现 undefined 字样');
+ assert.equal(verdict.action,'本行已填齐，无需重扫','按钮不得误导为「类型不符，请重扫」');
+ page.stopCamera();
+});

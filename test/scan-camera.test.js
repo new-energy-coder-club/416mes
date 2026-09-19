@@ -159,3 +159,15 @@ test('确定填入后再关闭不会报未确认', async () => {
   d.getElementById('scanCamYes').click();
   assert.equal(pending, 'unset');
 });
+
+test('describe 拒绝时可自定义按钮文案（如「本行已填齐，无需重扫」）', async () => {
+  const { document: d, cam } = setup({ decode: async () => ({ text: 'ITM:WP-001', format: '二维码' }) });
+  await cam.open({
+    describe: () => ({ text: '本行步骤已填齐，无需再扫码。请点「确认本行，保存待提交」', ok: false, action: '本行已填齐，无需重扫' })
+  });
+  await tick(30);
+  const yes = d.getElementById('scanCamYes');
+  assert.equal(yes.disabled, true);
+  assert.equal(yes.textContent, '本行已填齐，无需重扫', '不得误导为「类型不符，请重扫」');
+  cam.close('test');
+});

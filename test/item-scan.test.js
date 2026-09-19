@@ -40,3 +40,11 @@ test('scan: 印刷版全大写短链 URL 在 ITM 步骤解析为物品码（冻�
  assert.equal(r.complete,true);
  assert.equal(s.row().values[2].code,'WP-001');
 });
+
+test('scan: 行已填齐后再扫给明确指引而不是「当前请扫描已完成」',()=>{
+ const s=Scan.create({getState:()=>({locations:[{code:'L-A',status:'active',version:0}],containers:[{code:'C-A',loc:'L-A',status:'active',version:1}],items:[{code:'WP-001',status:'pending',version:0}]}),id:()=>'t'});
+ s.add('receive');
+ s.accept('LOC:L-A');s.accept('CTN:C-A');s.accept('ITM:WP-001');
+ assert.throws(()=>s.accept('LOC:L-A'),/本行已填齐/,'填齐后扫其他类型也指向确认按钮');
+ assert.deepEqual(s.accept('ITM:WP-001'),{duplicate:true},'重扫同码按重复忽略，不得当作待填步骤');
+});
