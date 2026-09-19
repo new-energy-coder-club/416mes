@@ -703,3 +703,99 @@ test('InvenTree 集成必须已被彻底移除，且不得回流', () => {
   const pkg = fs.readFileSync(path.join(REPO, 'package.json'), 'utf8');
   assert.ok(!/inventree/.test(pkg), 'package.json 不得再引用 inventree-sync.mjs');
 });
+
+/* ================= E2：标签页 qrPayload 换短链 + 物品短链面板（定稿 §五/§6.1-6.7） ================= */
+
+test('E2：itm 二维码内容必须且仅经 qrPayload 单点构造（三条生成路径收敛）', () => {
+  const qp = fnSrc('qrPayload');
+  assert.match(qp, /t === 'itm' && window\.ItemLink/, 'itm 且 ItemLink 可用时才走短链');
+  assert.match(qp, /ItemLink\.linkFor\(code\)/, '短链必须来自 ItemLink.linkFor');
+  assert.match(qp, /TYPES\[t\]\.prefix \+ code/, '回退路径必须保持旧的前缀格式（旧 ITM: 标签永久可读）');
+  /* labelHtml（屏幕预览）/ pdfLabelPage（标签纸 PDF）/ pdfA4SheetPage（A4 整版 PDF）
+     三处的二维码内容均且仅经 qrPayload 取得 —— 禁止任何一处再自己拼 prefix，
+     否则屏幕看到的和印出来的会不一样。 */
+  ['labelHtml', 'pdfLabelPage', 'pdfA4SheetPage'].forEach(name => {
+    const s = fnSrc(name);
+    assert.match(s, /qrPayload\(t, (code|recCode\(t, rec\))\)/, name + ' 必须经 qrPayload 取二维码内容');
+    assert.ok(!/prefix\s*\+/.test(s), name + ' 不得再直接拼 TYPES.prefix（qrPayload 之外禁止第二处拼内容）');
+  });
+});
+
+test('E2：itm 标签人读区 —— 主码保持 WP-xxx，短码为右栏第 4 条 attr', () => {
+  const la = fnSrc('labelAttrs');
+  const itmBranch = la.slice(la.indexOf("t === 'itm'"), la.indexOf("t === 'man'"));
+  assert.match(itmBranch, /'短码'/, 'labelAttrs(itm) 必须含「短码」行（右栏 4 行硬约束的第 4 条）');
+  assert.match(itmBranch, /fromItemCode\(r\.code\)/, '短码必须来自 ItemLink.fromItemCode（确定性函数，重印不换码）');
+  /* 右栏最多 4 行（名称/规格/库位/短码），不能再加物料行 —— PDF 侧超限会直接丢行 */
+  const pairs = itmBranch.match(/\['[^']+',/g) || [];
+  assert.ok(pairs.length <= 4, 'itm 右栏 attrs 不得超过 4 行，实际 ' + pairs.length);
+  /* 人读主码 .code 保持 WP-xxx 不动 */
+  assert.match(fnSrc('labelHtml'), /<div class="code">' \+ esc\(code\) \+ '<\/div>/, '左栏人读主码必须仍是物品码原文');
+});
+
+test('E2：物品短链面板 DOM 结构 —— .panel 直子、label-layout 之后 danger-zone 之前、不在打印域', () => {
+  const labelSec = HTML.slice(HTML.indexOf('id="tab-label"'), HTML.indexOf('</section>', HTML.indexOf('id="tab-label"')));
+  assert.ok(labelSec.includes('id="itemLinksPanel"'), '缺少物品短链面板 #itemLinksPanel');
+  /* 与 .label-layout / .danger-zone 同级（6 空格缩进的 .panel 直子），不是它们的后代 */
+  assert.ok(labelSec.includes('\n      <div class="links-panel" id="itemLinksPanel"'), '面板必须是 .panel 直子元素');
+  const iLayout = labelSec.indexOf('class="label-layout"');
+  const iPanel = labelSec.indexOf('id="itemLinksPanel"');
+  const iDanger = labelSec.indexOf('<details class="danger-zone"');
+  assert.ok(iLayout > 0 && iPanel > iLayout && iDanger > iPanel,
+    '插入点必须是 .label-layout 收尾之后、danger-zone 之前');
+  /* 不是 #printSheet 的后代 → @media print 的 body *{visibility:hidden} 自动隐藏它，
+     打印域零改动的结构保证 */
+  const iPrintSheet = labelSec.indexOf('id="printSheet"');
+  assert.ok(iPrintSheet > 0 && iPanel > iPrintSheet, '面板必须在 #printSheet 之外');
+  const between = labelSec.slice(iPrintSheet, iPanel);
+  assert.ok(between.includes('</div>'), '#printSheet 必须在面板开始之前就已闭合');
+  /* 按钮 id 齐全 */
+  ['btnLinksCopyAll', 'btnLinksCsv', 'linksTable', 'linksQrPreview'].forEach(id =>
+    assert.ok(labelSec.includes('id="' + id + '"'), '面板缺少 #' + id));
+  /* 表格 6 数据列：物品码/名称/关联物料/8位短码/短链接/状态 */
+  ['物品码', '名称', '关联物料', '8位短码', '短链接', '状态'].forEach(h =>
+    assert.ok(labelSec.includes('<th>' + h + '</th>'), '面板表格缺列「' + h + '」'));
+});
+
+test('E2：≥1100px 屏幕网格必须有 links 行且面板声明 grid-area:links', () => {
+  assert.match(HTML, /"links\s+links\s+links"/, 'grid-template-areas 必须追加 links 行（否则 .panel 直子会挤乱三栏作业台）');
+  assert.match(HTML, /#tab-label \.panel>\.links-panel\{grid-area:links/, '面板必须显式声明 grid-area:links');
+  /* links 行必须在 danger 行之前（与 DOM 顺序一致）；注意取标签页的那一处 grid（body 布局另有一处） */
+  const gridStart = HTML.indexOf('grid-template-areas:', HTML.indexOf('#tab-label .panel{display:grid'));
+  const css = HTML.slice(gridStart, gridStart + 400);
+  assert.ok(css.indexOf('"links') < css.indexOf('"danger'), 'links 行必须排在 danger 行之前');
+});
+
+test('E2：打印冻结块一行不动 —— 面板靠结构自动隐藏，不得为它改 @media print/@page', () => {
+  assert.match(HTML, /@page\{size:60mm 40mm;margin:0;\}/, '@page 冻结声明不得改动');
+  /* 冻结块 = 07 PRINT — FROZEN 段的 @media print（前面还有一个小打印块，不能切错） */
+  const frozen = HTML.slice(HTML.indexOf('07 PRINT — FROZEN'));
+  const printBlock = frozen.slice(frozen.indexOf('@media print{'), frozen.indexOf('@media print{') + 2200);
+  assert.ok(!/links|itemLinks/.test(printBlock), '@media print 冻结块不得出现面板相关选择器');
+  assert.match(printBlock, /body \*\{visibility:hidden;\}/, '冻结的可见性规则必须在（面板靠它自动隐藏）');
+  assert.match(printBlock, /#printSheet,#printSheet \*\{visibility:visible;\}/, '打印域白名单必须仍只有 #printSheet');
+});
+
+test('E2：面板只在 curType===itm 时渲染，数据源复用 sel.itm，非规范码不静默跳过', () => {
+  const s = fnSrc('renderItemLinksPanel');
+  assert.match(s, /curType !== 'itm'[\s\S]{0,120}return/, '非 itm 类型必须隐藏并清空面板');
+  assert.match(s, /sel\.itm/, '数据源必须复用 sel.itm（与导出 PDF 同一选择集）');
+  assert.match(s, /需先改顺序码/, '非规范码（WP-随机串）行状态列必须标「需先改顺序码」，不静默跳过');
+  /* 面板渲染必须挂在 renderLabelTab 与勾选变化两处（否则勾选后行数不更新） */
+  assert.match(fnSrc('renderLabelTab'), /renderItemLinksPanel\(\)/, 'renderLabelTab 必须刷新短链面板');
+  const labelSec = HTML.slice(HTML.indexOf('id="tab-label"'), HTML.indexOf('</section>', HTML.indexOf('id="tab-label"')));
+  assert.ok(!/fsPush/.test(labelSec), '面板只做复制/导出，不得引入写飞书动作');
+});
+
+test('E2：复制全部 / 导出 CSV 接线 —— 纯函数 + BOM + 文件名口径', () => {
+  const copyAll = HTML.slice(HTML.indexOf("getElementById('btnLinksCopyAll')"), HTML.indexOf("getElementById('btnLinksCopyAll')") + 900);
+  assert.match(copyAll, /shortlinksCopyText\(/, '复制全部必须走纯函数 shortlinksCopyText');
+  assert.match(copyAll, /clipboard\.writeText/, '必须写剪贴板');
+  const csv = HTML.slice(HTML.indexOf("getElementById('btnLinksCsv')"), HTML.indexOf("getElementById('btnLinksCsv')") + 700);
+  assert.match(csv, /shortlinksCsvText\(/, '导出 CSV 必须走纯函数 shortlinksCsvText');
+  assert.match(csv, /物品短链-' \+ ymdCompact\(today\(\)\) \+ '\.csv'/, '文件名必须是 物品短链-YYYYMMDD.csv');
+  const csvFn = fnSrc('shortlinksCsvText');
+  assert.ok(csvFn.includes('﻿'), 'CSV 必须带 UTF-8 BOM（Excel 直开不乱码）');
+  assert.match(csvFn, /物品码,名称,关联物料,短码,短链接/, 'CSV 表头固定 5 列');
+  assert.match(fnSrc('shortlinksCopyText'), /join\('\\n'\)/, '复制全部必须 LF 分隔、无表头');
+});
