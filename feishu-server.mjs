@@ -141,6 +141,15 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
+  /* 物品短链：/i/{8位} 前缀路由，复用云端同一个 handler（与 vercel.json rewrite 等价） */
+  if (u.pathname.startsWith('/i/')) {
+    try {
+      const h = require('./api/item-link/[code].js');
+      req.query = Object.assign({}, req.query || {}, { code: u.pathname.slice(3) });
+      await h(req, adaptRes(res));
+    } catch (e) { json(res, 500, { ok: false, error: String((e && e.message) || e) }); }
+    return;
+  }
   if (u.pathname.startsWith('/api/feishu/')) {
     return json(res, 501, {
       ok: false, code: 'LOCAL_ROUTE_UNSUPPORTED',

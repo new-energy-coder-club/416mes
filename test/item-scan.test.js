@@ -9,3 +9,18 @@ test('failed unpersisted intention can retry same ID but rescan allocates new ID
 test('bare WP item barcode accepted only at ITM step, EAN never inferred',()=>{const {scan,state}=setup();state.items.push({code:'WP-001',status:'pending',version:0});scan.add('receive');assert.throws(()=>scan.accept('WP-001'),/前缀/);scan.accept('LOC:L-A');scan.accept('CTN:C-A');assert.throws(()=>scan.accept('6901234567890'),/前缀/);scan.accept('WP-001');assert.equal(scan.request().itemCode,'WP-001');});
 test('conflict arriving after scans blocks confirmation for every related entity',()=>{for(const key of ['locations:L-A','containers:C-A','items:I-P']){const {scan,state}=setup();scan.add('receive');['LOC:L-A','CTN:C-A','ITM:I-P'].forEach(x=>scan.accept(x));state.__itmConflicts={[key]:{reason:'external-edit'}};assert.throws(()=>scan.lock(),e=>e.code==='UNRESOLVED_ENTITY_CONFLICT');assert.equal(scan.row().locked,false);}});
 test('issue validates source and new receive rejects already in stock',()=>{const {scan}=setup();scan.add('issue');scan.accept('LOC:L-B');scan.accept('CTN:C-B');assert.throws(()=>scan.accept('ITM:I-A'),/来源/);scan.add('receive');scan.accept('LOC:L-A');scan.accept('CTN:C-A');assert.throws(()=>scan.accept('ITM:I-A'),/重复入库/);});
+test('scan: 短链二维码在ITM步骤解析为物品码（离线本地解码）',()=>{
+ const L=require('../lib/item-link');
+ const s=Scan.create({getState:()=>({locations:[{code:'L-A',status:'active'}],containers:[{code:'C-A',loc:'L-A',status:'active',version:2}],items:[{code:'WP-001',status:'pending',version:1}]}),id:()=> 't'+Math.random()});
+ s.add('receive');s.accept('LOC:L-A');s.accept('CTN:C-A');
+ const link=L.linkFor('WP-001');
+ const r=s.accept(link);
+ assert.equal(r.complete,true);
+ assert.equal(s.row().values[2].code,'WP-001');
+});
+test('scan: 短链错步骤仍被拒（库位步骤扫物品短链）',()=>{
+ const L=require('../lib/item-link');
+ const s=Scan.create({getState:()=>({locations:[],containers:[],items:[]}),id:()=> 't'});
+ s.add('receive');
+ assert.throws(()=>s.accept(L.linkFor('WP-001')),/当前请扫描/);
+});
