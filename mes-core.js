@@ -1049,27 +1049,33 @@
        已冲销物料不回滚、reverseInfo 不留痕 → 重试对同一物料再次反向（双重冲销实证：A 回 10 变 6）。
        现在每成功一条即登记进 order.reverseInfo.items，重试时跳过已登记物料；全部完成才关单。 */
     var prevItems = (order.reverseInfo && Array.isArray(order.reverseInfo.items)) ? order.reverseInfo.items : [];
-    var doneCodes = {};
-    prevItems.forEach(function (x) { if (x && x.matCode != null) doneCodes[x.matCode] = true; });
+    /* 2.52.1（k3 审计 D1/D2）：已冲数量按 matCode 记账，且用 Object.create(null)——
+       裸对象会把 'constructor' 这类物料码沿原型链取成 truthy 被静默跳过还照常关单。
+       粒度是数量而非整码：部分冲销后工单继续执行再重试时补冲差值，不再产生幽灵库存。 */
+    var doneQty = Object.create(null);
+    prevItems.forEach(function (x) { if (x && x.matCode != null) doneQty[x.matCode] = round6((doneQty[x.matCode] || 0) + Math.abs(x.qty || 0)); });
     var applied = [];
     var lastError = '';
     for (var i = 0; i < prog.items.length; i++) {
       var it = prog.items[i];
       if (it.executed <= 0) continue;
-      if (doneCodes[it.matCode]) continue;
+      var remain = round6(it.executed - (doneQty[it.matCode] || 0));
+      if (remain <= 0) continue;
       // 反向：出库(LL/JH)执行时 -qty，冲销为 +qty；入库(BH/TL)执行时 +qty，冲销为 -qty
       var r = applyStockChange(state, {
-        matCode: it.matCode, mode: 'delta', qty: round6(-sign * it.executed), type: '冲销', ref: order.code,
+        matCode: it.matCode, mode: 'delta', qty: round6(-sign * remain), type: '冲销', ref: order.code,
         reason: reason, operator: opts.operator, device: opts.device, now: now
       });
       if (!r.ok) { lastError = it.matCode + '：' + r.error; break; }
-      applied.push({ matCode: it.matCode, qty: it.executed, delta: r.delta, balance: r.balance, txn: r.txn });
+      applied.push({ matCode: it.matCode, qty: remain, delta: r.delta, balance: r.balance, txn: r.txn });
     }
 
     var at = now.toLocaleString();
     var allItems = prevItems.concat(applied.map(function (a) { return { matCode: a.matCode, qty: a.qty, delta: a.delta }; }));
+    var reversedNow = Object.create(null);
+    applied.forEach(function (a) { reversedNow[a.matCode] = round6((reversedNow[a.matCode] || 0) + a.qty); });
     var allDone = prog.items.every(function (it) {
-      return it.executed <= 0 || doneCodes[it.matCode] || applied.some(function (a) { return a.matCode === it.matCode; });
+      return it.executed <= 0 || round6((doneQty[it.matCode] || 0) + (reversedNow[it.matCode] || 0)) >= round6(it.executed) - 1e-9;
     });
     if (!allDone) {
       if (applied.length) order.reverseInfo = {
@@ -1515,7 +1521,7 @@
        而它正是判断「能不能用快照」的依据，不能省）。 */
     var cp = opts.fromCheckpoint;
     var useCp = null;
-    if (cp && cp.version === 1 && cp.balances && cp.coverage && cp.coverage.complete
+    if (cp && (cp.version === 1 || cp.version === 2) && cp.balances && cp.coverage && cp.coverage.complete
         && coverage.complete && Number.isFinite(Number(cp.seq)) && Number(cp.seq) <= maxSeq) {
       var prefix = ord.filter(function (t) { return Number(t.seq) <= Number(cp.seq); });
       var ok = true;
@@ -1524,6 +1530,13 @@
         var s0 = 0;
         for (var q = 0; q < prefix.length; q++) s0 += Number(prefix[q].delta || 0);
         if (Math.abs(round6(s0) - cp.deltaSum) > EPS) ok = false;
+      }
+      /* 2.52.1（k3 审计 MAT-2）：前缀指纹加入 Σbalance——只验条数+Σdelta 时，
+         前缀内 balance 被篡改（delta 不变）会拿到假绿灯 complete-valid。旧 v1 快照无此字段则跳过。 */
+      if (ok && cp.balanceSum != null) {
+        var s1 = 0;
+        for (var q2 = 0; q2 < prefix.length; q2++) if (typeof prefix[q2].balance === 'number') s1 += Number(prefix[q2].balance);
+        if (Math.abs(round6(s1) - cp.balanceSum) > EPS) ok = false;
       }
       if (ok) useCp = cp;
     }
@@ -1756,7 +1769,12 @@
       var r = resolveLocation(state, located.loc);
       if (r.level === 'shelf' || r.level === 'workstation' || r.level === 'block') return { grade: 'exact', text: r.text, level: r.level };
       if (r.level === 'zone') return { grade: 'zone', text: r.text, level: r.level };
-      return { grade: 'exact', text: r.text, level: r.level };
+      /* 2.52.1（k3 审计 MAT-1）：无法解析的 loc 文本不再谎报 exact——定位验收精确率曾被注水 */
+      if (r.level === 'container') {
+        if (r.containerAt) return { grade: 'exact', text: r.containerAt.text + '（容器 ' + located.loc + '）', level: r.containerAt.level };
+        return { grade: 'container', text: '容器 ' + located.loc, level: 'container' };
+      }
+      return { grade: 'clue', text: r.text, level: 'unknown' };
     }
     if (located.container) {
       var cr = resolveLocation(state, located.container);
@@ -1941,7 +1959,11 @@
 
       var changed = [];
       // 数量 / 成本：外部值始终采用（0 表示售罄）
-      if (r.qty !== null && r.qty !== m.qty) { changed.push('qty: ' + m.qty + ' → ' + r.qty); m.qty = r.qty; }
+      if (r.qty !== null && r.qty !== m.qty) {
+        /* 2.52.1（k3 审计 MAT-3）：拒绝负数直写——外部脏值曾可直接造成负库存且零流水 */
+        if (!(r.qty >= 0)) { changed.push('qty 负值 ' + r.qty + ' 已拒绝'); }
+        else { changed.push('qty: ' + m.qty + ' → ' + r.qty); m.qty = r.qty; }
+      }
       if (r.cost !== null && r.cost !== m.cost) { changed.push('cost: ' + m.cost + ' → ' + r.cost); m.cost = r.cost; }
       // 其余字段：空值不覆盖旧值
       ['name', 'xy', 'img'].forEach(function (f) {

@@ -125,7 +125,7 @@ const server = http.createServer(async (req, res) => {
   // 2.50.2（审计 I-B6）：与 lib/feishu-api.setCors 白名单口径一致——只对已知来源发 CORS 头；
   // 本机页面与服务器同源，不受影响；file:// 等未知来源不再放行（数据空间隔离本就要求分开用）。
   const _origin = req.headers.origin;
-  if (_origin && (_origin === 'https://mes.newenergycoder.club' || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(_origin) || /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/.test(_origin) || /^http:\/\/10\.\d+\.\d+\.\d+(:\d+)?$/.test(_origin))) {
+  if (_origin && (_origin === 'https://mes.newenergycoder.club' || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(_origin) || /^http:\/\/192\.168\.\d+\.\d+(:8000)?$/.test(_origin))) {
     res.setHeader('Access-Control-Allow-Origin', _origin);
     res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-416mes-Same-Origin');
@@ -141,7 +141,7 @@ const server = http.createServer(async (req, res) => {
     try {
       if (req.method === 'POST' && req.headers.origin) {
         const sh = (req.headers && req.headers['x-416mes-same-origin']) || '';
-        const originOk = _origin === 'https://mes.newenergycoder.club' || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(_origin) || /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/.test(_origin) || /^http:\/\/10\.\d+\.\d+\.\d+(:\d+)?$/.test(_origin);
+        const originOk = _origin === 'https://mes.newenergycoder.club' || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(_origin) || /^http:\/\/192\.168\.\d+\.\d+(:8000)?$/.test(_origin);
         if (!(originOk && sh === '1')) return json(res, 403, { ok: false, error: '缺少同源标记（X-416mes-Same-Origin），本接口不开放跨站调用' });
       }
       // 直接调用**云端那一个** handler；req 本身是流，readBody(req) 能正常工作
