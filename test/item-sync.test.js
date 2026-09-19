@@ -61,3 +61,15 @@ test('legacy records are unknown, ordinary names remain available for existing m
   const st = base(); const r = S.merge(st, { items: [{ code: 'legacy', name: 'old', loc: 'L-HISTORY' }] });
   assert.equal(st.items[1].status, 'unknown'); assert.equal(r.ordinary.items[0].name, 'old');
 });
+
+/* ================= 2.49.5：库位多次重确认不使凭据失效（审计 Bug1） ================= */
+test('location proof survives multiple idempotent re-confirmations (dedupe by opId, >=1)', () => {
+  const logs = [
+    { code: 'op-1', kind: 'activateLocation', phase: 'APPLIED', after: { locations: [{ code: 'L-A', status: 'active' }] } },
+    { code: 'op-2', kind: 'activateLocation', phase: 'APPLIED', after: { locations: [{ code: 'L-A', status: 'active' }] } },
+  ];
+  const row = { code: 'L-A', status: 'active' };
+  assert.equal(S.proof('locations', row, logs), true, '两次启用后凭据必须仍成立（否则库位永久锁死）');
+  assert.equal(S.proof('locations', row, [{ code: 'op-1', kind: 'activateLocation', phase: 'APPLIED', after: { locations: [{ code: 'L-A', status: 'active' }] } }, { code: 'op-1', kind: 'activateLocation', phase: 'APPLIED', after: { locations: [{ code: 'L-A', status: 'active' }] } }]), true, '同 opId 重复日志行按一次计');
+  assert.equal(S.proof('locations', { code: 'L-B', status: 'unknown' }, logs), false, '非 active 永远无凭据');
+});

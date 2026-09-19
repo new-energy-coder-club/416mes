@@ -78,7 +78,8 @@ test('P5-4 空业务键的行必须被丢弃并告警，且每张表都要过这
     ['人员', "dropNoKey(bodyRows(ppl0, codeIdx('人员', '编号')), r => pcol(r, '编号', 0)"],
     ['物品', "dropNoKey(bodyRows(is2, codeIdx('物品', '物品码')), r => icol(r, '物品码', 0)"],
     ['手册', "dropNoKey(bodyRows(ms2, codeIdx('手册', '手册码')), r => mcol(r, '手册码', 0)"],
-    ['NEC工单', "dropNoKey(bodyRows(ns, codeIdx('NEC工单', '编码', '编号')), r => ncol(r, '编码', 0)"]
+    /* 2.49.5：NEC 导入表头优先「工单号」（导出/模板口径），旧手抄「编码」「编号」兜底 */
+    ['NEC工单', "dropNoKey(bodyRows(ns, codeIdx('NEC工单', '工单号', '编码', '编号')), codeVal, '工单号', 'NEC工单：')"]
   ]) {
     assert.ok(after.includes(needle), label + ' 没有过 dropNoKey 滤网');
   }

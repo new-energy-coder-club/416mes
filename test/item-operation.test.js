@@ -99,3 +99,17 @@ test('发号发生在 claim 之前：SERIAL_EXHAUSTED 与校验失败不占 clai
   assert.equal((await f.repository.operations('reg-full')).length,0);
   assert.equal((await s.get({},'reg-full')).phase,'UNKNOWN','未 claim，重试可用同 opId');
 });
+
+/* ================= 2.49.5：trial 前置失败 → 终态 REJECTED，不再留未决行死锁队列（审计 Bug2） ================= */
+test('trial concurrent-precheck failure (no entity writes) settles as REJECTED, not REPAIR_REQUIRED', async () => {
+  const f = setup();
+  const trial = { contract: 'feishu-trial-best-effort-v1', claim: async () => ({ acquired: true }), prepare: async () => {}, progress: async () => {}, finish: async () => {}, uncertain: async () => {}, get: async () => null };
+  const service = () => create({ repository: f.repository, coordinator: trial, enabled: true, mode: 'feishu-trial', authenticate: async () => ({ id: 'u', roles: ['admin', 'operator'] }) });
+  f.repository.faults.apply = true;                            // 制造一条 REPAIR_REQUIRED 未决行
+  await service().post({}, request());
+  f.repository.faults.apply = false;
+  const r2 = await service().post({}, { ...request(), opId: 'op-b' });   // 前置并发检查命中未决行
+  assert.equal(r2.phase, 'REJECTED', '无实体写入的检查失败 → 终态 REJECTED（不再留未决行）');
+  assert.match(String(r2.error || ''), /TRIAL_CONCURRENT_OPERATION_DETECTED/);
+  assert.ok(f.repository.logs.some(l => l.code === 'op-b' && l.phase === 'REJECTED'), '日志行以 REJECTED 收口');
+});
