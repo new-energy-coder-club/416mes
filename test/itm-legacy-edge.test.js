@@ -81,14 +81,16 @@ test('A7 receive: 完全未建档裸码 WP-999 → NOT_FOUND 原始英文错误'
   const r = outcome(() => s.accept('WP-999'));
   assert.equal(r.ok, false); assert.equal(r.error, 'items: WP-999');
 });
-test('A8 placeContainer: unknown容器被拒「容器未启用」；active未定位容器可定位；已定位被拒', () => {
+test('A8 placeContainer 反转：unknown 容器直接可定位；已绑定拒绝并引导移库', () => {
   const st = state();
-  const s1 = scanOf(st, 'placeContainer'); s1.accept('LOC:W01-G01');
-  assert.match(outcome(() => s1.accept('CTN:C-NEW')).error, /容器未启用/);
-  const s2 = scanOf(st, 'placeContainer'); s2.accept('LOC:W01-G01');
-  assert.equal(outcome(() => s2.accept('CTN:C-B')).ok, true);
-  const s3 = scanOf(st, 'placeContainer'); s3.accept('LOC:W02-G01');
-  assert.match(outcome(() => s3.accept('CTN:C-A')).error, /容器已有库位/);
+  const s0 = scanOf(st, 'placeContainer');
+  /* 新序列：先扫容器（看现状），再扫目标库位 */
+  assert.equal(outcome(() => s0.accept('CTN:C-NEW')).ok, true, 'unknown 容器放行（定位即启用）');
+  const s2 = scanOf(st, 'placeContainer');
+  const r2 = outcome(() => s2.accept('CTN:C-A'));
+  assert.equal(r2.ok, false);
+  assert.match(r2.error, /已绑定库位/);
+  assert.match(r2.error, /容器移库/);
 });
 
 /* ---------- B. 领域层（lib/unique-items.js plan）---------- */
@@ -190,4 +192,25 @@ test('C3 修复后：建档可沿用扫到的实物码 WP-999', async () => {
   d2.getElementById('itmRegister').click(); await tick();
   assert.equal(queued.kind, 'registerItem');
   assert.equal(queued.entity.code, 'WP-999', '修复后应沿用扫到的实物码');
+});
+
+/* ================= 2.57.0 Phase4：plan 层 placeContainer 反转 ================= */
+test('B10 plan placeContainer: unknown+空loc 原子启用定位；豁免自身冲突标记', () => {
+  const st = { locations: [{ code: 'L-A', status: 'active' }], containers: [{ code: 'C-U', status: 'unknown', version: 0, lastOpId: '' }], items: [] };
+  U.migrate(st);
+  st.__itmConflicts = { 'containers:C-U': { reason: 'server-snapshot-unverified' } };
+  const admin = { id: 'a', roles: ['admin'] };
+  const p = U.plan(st, { schemaVersion: 1, opId: 'op-pc', kind: 'placeContainer', containerCode: 'C-U', target: { loc: 'L-A' }, expected: { containerVersion: 0 } }, admin);
+  assert.equal(p.after.containers[0].status, 'active', 'unknown 容器原子启用');
+  assert.equal(p.after.containers[0].loc, 'L-A');
+  assert.equal(p.after.containers[0].version, 1);
+  assert.equal(st.__itmConflicts['containers:C-U'].reason, 'server-snapshot-unverified', 'plan 纯净：标记不被改写');
+});
+test('B11 plan placeContainer: 已绑定容器拒绝并提示移库', () => {
+  const st = { locations: [{ code: 'L-A', status: 'active' }, { code: 'L-B', status: 'active' }], containers: [{ code: 'C-B', loc: 'L-A', status: 'active', version: 1, lastOpId: '' }], items: [] };
+  U.migrate(st);
+  assert.throws(
+    () => U.plan(st, { schemaVersion: 1, opId: 'op-x', kind: 'placeContainer', containerCode: 'C-B', target: { loc: 'L-B' }, expected: { containerVersion: 1 } }, { id: 'a', roles: ['admin'] }),
+    e => e.code === 'ALREADY_PLACED'
+  );
 });
