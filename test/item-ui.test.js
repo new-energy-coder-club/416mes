@@ -148,11 +148,11 @@ test('E1：分类下拉 8 类且顺序与 item-link CATS 一致；分类/名称�
  assert.deepEqual(values,['JG','DJ','DZ','GZ','TS','GJ','HC','QT'],'分类下拉顺序必须与短码 CATS 一致（P8）');
  d.getElementById('itmRegisterName').value='示波器';
  d.getElementById('itmRegister').click();await tickN();
- assert.match(d.getElementById('itmStatus').textContent,/请先选择物品分类/);
+ assert.match(d.getElementById('itmRegisterResult').textContent,/请先选择物品分类/,'建档校验提示就近落在建档区');
  assert.equal(s.queued,null,'未选分类不得入队');
  pick(d,'itmRegisterCat','TS');d.getElementById('itmRegisterName').value='';
  d.getElementById('itmRegister').click();await tickN();
- assert.match(d.getElementById('itmStatus').textContent,/请填写物品名称/);
+ assert.match(d.getElementById('itmRegisterResult').textContent,/请填写物品名称/,'建档校验提示就近落在建档区');
  assert.equal(s.queued,null,'未填名称不得入队');
 });
 test('E1：在线建档不带码提交 → APPLIED 展示物品码 + 8 位短码 + 二维码预览',async()=>{
@@ -169,7 +169,7 @@ test('E1：在线建档不带码提交 → APPLIED 展示物品码 + 8 位短码
  assert.match(box.textContent,new RegExp('短码：'+LINK.fromItemCode('WP-TS-001')));
  assert.ok(box.querySelector('.itm-qr'),'应有二维码预览容器');
  assert.match(box.querySelector('.itm-qr').textContent,new RegExp('QR\\['+LINK.linkFor('WP-TS-001').toUpperCase().replace(/[/.]/g,'\\$&')+'\\]'),'二维码内容为冻结规格整条大写短链');
- assert.match(d.getElementById('itmStatus').textContent,/建档完成：WP-TS-001/);
+ assert.match(d.getElementById('itmRegisterResult').textContent,/建档完成：WP-TS-001/,'完成语追加在预览之后（不覆盖二维码）');
 });
 test('E1：「去入库」切 receive 行并在物品步骤预填新码',async()=>{
  const s=setupE1(),d=s.document;
@@ -190,7 +190,7 @@ test('E1：离线只入队不提交，提示提交后分配物品码',async()=>{
  assert.ok(s.queued,'离线也应入队保存');
  assert.equal(s.queued.entity.code,undefined);
  assert.equal(s.submitted,null,'离线不得提交');
- assert.match(d.getElementById('itmStatus').textContent,/提交后由服务端分配物品码/);
+ assert.match(d.getElementById('itmRegisterResult').textContent,/提交后由服务端分配物品码/);
 });
 test('E1：手动码路径保留——填码即带码入队、不走发号提交',async()=>{
  const s=setupE1(),d=s.document;
@@ -199,7 +199,7 @@ test('E1：手动码路径保留——填码即带码入队、不走发号提交
  d.getElementById('itmRegister').click();await tickN();
  assert.equal(s.queued.entity.code,'WP-999','手动码原样带上（规范形校验在服务端）');
  assert.equal(s.submitted,null,'手动码只入队，待在待处理区提交');
- assert.match(d.getElementById('itmStatus').textContent,/手动码/);
+ assert.match(d.getElementById('itmRegisterResult').textContent,/手动码/);
 });
 test('E1（P6）：pending 卡对无码 registerItem 显示「物品建档·分类·待发号」',async()=>{
  const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
