@@ -7,7 +7,7 @@ test('期望值锁定（算法冻结点）', () => {
   assert.equal(L.fromItemCode('WP-001'), 'KW4QYSBD');
   assert.equal(L.fromItemCode('WP-TS-001'), '5W4QY7BQ');
   assert.equal(L.fromItemCode('WP-JG-7'), 'MHVJWBGX');
-  assert.equal(L.linkFor('WP-001'), 'https://mes.newenergycoder.club/i/KW4QYSBD');
+  assert.equal(L.linkFor('WP-001'), 'HTTPS://MES.NEWENERGYCODER.CLUB/I/KW4QYSBD', '冻结印刷版整条大写（定稿 §二/§6.3）');
 });
 
 test('编码往返：存量未分类 + 八分类边界 + 序号上限（解码归一到 3 位序号）', () => {

@@ -7,7 +7,7 @@
 const test = require('node:test'), assert = require('node:assert/strict'), fs = require('node:fs/promises'), path = require('node:path'), http = require('node:http');
 const { chromium } = require('playwright-core');
 const root = path.resolve(__dirname, '..');
-const LINK_001 = 'https://mes.newenergycoder.club/i/KW4QYSBD';   // test/item-link.test.js 锁值
+const LINK_001 = 'HTTPS://MES.NEWENERGYCODER.CLUB/I/KW4QYSBD';   // test/item-link.test.js 锁值（冻结大写形态）
 
 test('E2: 标签二维码 jsQR 解码 === 短链（三路径）+ 回退 + 短链面板行为', { timeout: 180000 }, async t => {
   const server = http.createServer(async (req, res) => {

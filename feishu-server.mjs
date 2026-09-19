@@ -141,8 +141,9 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
-  /* 物品短链：/i/{8位} 前缀路由，复用云端同一个 handler（与 vercel.json rewrite 等价） */
-  if (u.pathname.startsWith('/i/')) {
+  /* 物品短链：/i/{8位} 前缀路由，复用云端同一个 handler（与 vercel.json rewrite 等价）。
+     冻结 URL 是大写 /I/（QR alphanumeric 模式），小写 /i/ 保留兼容入口。 */
+  if (u.pathname.startsWith('/i/') || u.pathname.startsWith('/I/')) {
     try {
       const h = require('./api/item-link/[code].js');
       req.query = Object.assign({}, req.query || {}, { code: u.pathname.slice(3) });

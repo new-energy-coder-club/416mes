@@ -33,16 +33,17 @@ function loadFn(name, extraWindow) {
   return new Function('window', 'TYPES', src + '; return ' + name + ';')(win, TYPES);
 }
 
-const LINK_001 = 'https://mes.newenergycoder.club/i/KW4QYSBD';   // test/item-link.test.js 锁值
+const LINK_001 = 'HTTPS://MES.NEWENERGYCODER.CLUB/I/KW4QYSBD';   // test/item-link.test.js 锁值（冻结大写形态）
 
 /* ---------- qrPayload 单点构造（§6.3.1） ---------- */
 test('qrPayload：itm 规范码 → 42 字符大写短链', () => {
   const qrPayload = loadFn('qrPayload');
   assert.equal(qrPayload('itm', 'WP-001'), LINK_001);
-  assert.equal(qrPayload('itm', 'WP-TS-001'), 'https://mes.newenergycoder.club/i/5W4QY7BQ');
+  assert.equal(qrPayload('itm', 'WP-TS-001'), 'HTTPS://MES.NEWENERGYCODER.CLUB/I/5W4QY7BQ');
   const link = qrPayload('itm', 'WP-001');
   assert.equal(link.length, 42, '印刷版短链全长必须 42 字符（QR V3-M 零余量，不可再加字符）');
-  assert.match(link, /\/i\/[0-9A-HJKMNP-TV-Z]{8}$/, '短码部分必须是 8 位大写 Crockford');
+  assert.match(link, /\/I\/[0-9A-HJKMNP-TV-Z]{8}$/, '短码部分必须是 8 位大写 Crockford');
+  assert.equal(link, link.toUpperCase(), '整条 URL 必须全大写（QR alphanumeric 模式冻结形态）');
 });
 test('qrPayload：ItemLink 缺失时 itm 回退旧 ITM: 格式，页面不崩', () => {
   const qrPayload = new Function('window', 'TYPES', fnSrc('qrPayload') + '; return qrPayload;')({}, TYPES);
@@ -135,7 +136,7 @@ test('shortlinksCopyText：每行恰好 42 字符完整短链、LF 分隔、无�
   assert.equal(lines.length, 2, '无短链的行不产生空行（逐条粘贴进乐写不能有空行）');
   lines.forEach(l => {
     assert.equal(l.length, 42, '每行恰好 42 字符');
-    assert.ok(l.startsWith('https://mes.newenergycoder.club/i/'), '每行都是完整短链 URL');
+    assert.ok(l.startsWith('HTTPS://MES.NEWENERGYCODER.CLUB/I/'), '每行都是完整大写短链 URL');
     assert.ok(!/["',]/.test(l), '无表头无引号无分隔符');
   });
   assert.equal(lines[0], LINK_001, '顺序与面板表格一致');
