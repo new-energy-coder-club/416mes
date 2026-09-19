@@ -126,7 +126,7 @@ test('D2-④：扫短链（已建档）正常填入当前步骤，不走引导',
  await page.accept('LOC:L-A');await page.accept('CTN:C-A');
  d.getElementById('itmCode').value=LINK.linkFor('WP-001').toUpperCase();d.getElementById('itmScanBtn').click();await tickN();
  assert.deepEqual(page.scan.row().values.map(v=>v.code),['L-A','C-A','WP-001']);
- assert.match(d.getElementById('itmStatus').textContent,/已填写草稿/);
+ assert.match(d.getElementById('itmStatus').textContent,/已填齐|已填写草稿/);
  assert.equal(d.getElementById('itmStatus').querySelector('button'),null,'不应出现引导按钮');
 });
 /* ================= E1（定稿§三.3 + §三.2 P4/P6）：建档改版 ================= */
@@ -310,4 +310,44 @@ test('confirm card on complete row says 已填齐 instead of 当前步骤需要u
  assert.doesNotMatch(verdict.text,/undefined/,'不得出现 undefined 字样');
  assert.equal(verdict.action,'本行已填齐，无需重扫','按钮不得误导为「类型不符，请重扫」');
  page.stopCamera();
+});
+
+/* ================= 2.49.2：草稿自动保存/恢复（刷新不再丢扫码行） ================= */
+test('refresh auto-restores the latest unfinished draft row',async()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const saved={sessionId:'sess-7',rows:[{rowId:'r1',kind:'receive',generation:2,values:[{type:'LOC',code:'L-A',version:0}],locked:false,opId:null}],active:0,savedAt:1234};
+ const persistence={async recover(){return{drafts:[{key:'itmDraft:sess-7',value:saved}],commands:[]};},async saveDraft(){},async enqueue(){}};
+ const state={locations:[{code:'L-A',status:'active'}],containers:[],items:[]};
+ const page=UI.mount({document:d,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>[],id:()=>'n'});
+ await page.autoRestoreDraft();
+ assert.deepEqual(page.scan.row().values.map(v=>v.code),['L-A'],'刷新后应恢复未完成的扫码行');
+ assert.match(d.getElementById('itmStatus').textContent,/已自动恢复/);
+ assert.match(d.getElementById('itmStep').textContent,/✓ 1 目标库位：L-A/);
+});
+test('auto-restore skips all-locked or empty drafts',async()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const saved={sessionId:'s9',rows:[{rowId:'r1',kind:'receive',generation:1,values:[{type:'LOC',code:'L-A',version:0}],locked:true,opId:'op-1'}],active:0,savedAt:9};
+ let restored=false;
+ const persistence={async recover(){return{drafts:[{key:'k',value:saved}],commands:[]};},saveDraft:async()=>{restored=true;}};
+ const page=UI.mount({document:d,getState:()=>({locations:[],containers:[],items:[]}),getPersistence:()=>persistence,getCommands:async()=>[],id:()=>'n'});
+ await page.autoRestoreDraft();
+ assert.equal(page.scan.row().values.length,0,'锁定行已在待处理区，不再还原');
+});
+test('every render persists the session snapshot (auto-save)',async()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ let savedSnap=null;
+ const persistence={async saveDraft(id,v){savedSnap=v;},async recover(){return{drafts:[],commands:[]}}};
+ const page=UI.mount({document:d,getState:()=>({locations:[{code:'L-A',status:'active'}],containers:[],items:[]}),getPersistence:()=>persistence,getCommands:async()=>[],id:()=>'n'});
+ await page.accept('LOC:L-A');
+ await new Promise(r=>setImmediate(r));
+ assert.ok(savedSnap,'render 应触发草稿自动保存');
+ assert.equal(savedSnap.rows[0].values[0].code,'L-A');
+ assert.ok(savedSnap.savedAt>0,'快照带时间戳供恢复时取最新');
+ assert.match(d.getElementById('itmStatus').textContent,/已填写草稿/);
+});
+test('complete-row status explains that stock is untouched until confirm+submit',async()=>{
+ const {document:d,page}=setup();
+ await page.accept('LOC:L-A');await page.accept('CTN:C-A');await page.accept('ITM:I-P');
+ assert.match(d.getElementById('itmStatus').textContent,/库存还没动/);
+ assert.match(d.getElementById('itmStatus').textContent,/确认本行/);
 });
