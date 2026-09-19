@@ -12,3 +12,90 @@ test('entity succeeded log finish failed: fresh recovery only finalizes log',asy
 test('missing coordination or auth fail before repository side effects',async()=>{const repository=repositoryFixture();const a=create({repository,enabled:true,authenticate:async()=>({id:'user',roles:['operator']})});await assert.rejects(a.post({},request()),/COORDINATION/);const b=create({repository,enabled:false,authenticate:async()=>null});await assert.rejects(b.post({},request()),/UNAUTHENTICATED/);assert.equal(repository.writes,0);});
 test('operation visibility is owner/admin/service only and missing roles gets 403',async()=>{const f=setup();await f.service().post({},request());const as=actor=>create({repository:f.repository,coordinator:coordinatorFixture(f.durable),enabled:true,authenticate:async()=>actor});for(const actor of [{id:'stranger',roles:['operator']},{id:'server-user',roles:[]},{id:'server-user'}]){await assert.rejects(as(actor).get({},'op-1'),e=>e.status===403);}await assert.rejects(as({id:'stranger',roles:['operator']}).post({},request()),e=>e.status===403);await assert.rejects(as({id:'server-user'}).recover({},'op-1'),e=>e.status===403);assert.equal((await as({id:'admin',roles:['admin']}).get({},'op-1')).phase,'APPLIED');});
 test('schema failure rejects without effect, unknown GET does not claim never executed',async()=>{const f=setup();f.repository.faults.schema=true;assert.equal((await f.service().post({},request())).phase,'REJECTED');assert.equal(f.repository.writes,0);assert.equal((await f.service().get({},'missing')).phase,'UNKNOWN');});
+
+/* ================= A 阶段：服务端发号（定稿 §三） ================= */
+
+function adminSetup(){
+  const durable={commands:new Map(),owner:null},repository=repositoryFixture();
+  const service=()=>create({repository,coordinator:coordinatorFixture(durable),enabled:true,authenticate:async()=>({id:'admin',roles:['admin']})});
+  return {durable,repository,service};
+}
+const autoReq=(opId,entity)=>({schemaVersion:1,opId,kind:'registerItem',entity});
+
+test('registerItem 不带码：服务端发号全链（分类→max+1→回填→APPLIED→短码可解）',async()=>{
+  const f=adminSetup();
+  const L=require('../lib/item-link');
+  const r=await f.service().post({},autoReq('reg-1',{category:'TS',name:'示波器',spec:'100MHz'}));
+  assert.equal(r.phase,'APPLIED',r.error);
+  assert.equal(r.request.entity.code,'WP-TS-001','回填码进冻结请求');
+  assert.equal(r.after.items[0].code,'WP-TS-001');
+  assert.equal(r.after.items[0].name,'示波器');
+  assert.equal(r.after.items[0].category,undefined,'category 不落物品表行（ordinaryFields 丢弃）');
+  assert.equal(f.repository.state.items.some(i=>i.code==='WP-TS-001'),true);
+  assert.equal(L.toItemCode(L.decode(L.fromItemCode('WP-TS-001'))),'WP-TS-001','发号即可短链往返');
+  // 存量污染不影响序列：塞入 WP-uuid / WP-DEMO-001 / 小写码后取下一号
+  f.repository.state.items.push({code:'WP-9f8d7c6b-aaaa-4bbb-8ccc-0123456789ab',status:'unknown',container:'',version:0,lastOpId:''});
+  f.repository.state.items.push({code:'WP-DEMO-001',status:'unknown',container:'',version:0,lastOpId:''});
+  f.repository.state.items.push({code:'wp-ts-007',status:'unknown',container:'',version:0,lastOpId:''});
+  const r2=await f.service().post({},autoReq('reg-2',{category:'ts',name:'小写分类归一'}));
+  assert.equal(r2.request.entity.code,'WP-TS-008','小写存码计入 TS 序列，uuid/DEMO 不计入');
+  const r3=await f.service().post({},autoReq('reg-3',{category:'JG',name:'另一分类'}));
+  assert.equal(r3.request.entity.code,'WP-JG-001','分类序列独立');
+});
+
+test('同 opId 重试不重发号（coordinator.get 幂等短路）',async()=>{
+  const f=adminSetup(),s=f.service();
+  const first=await s.post({},autoReq('reg-retry',{category:'TS',name:'x'}));
+  assert.equal(first.phase,'APPLIED');
+  const again=await f.service().post({},autoReq('reg-retry',{category:'TS',name:'x'}));
+  assert.equal(again.phase,'APPLIED');
+  assert.equal(again.request.entity.code,'WP-TS-001','重试返回原受理结果');
+  assert.equal(f.repository.writes,1,'不重新发号不重复写入');
+  assert.equal(f.repository.state.items.filter(i=>i.code==='WP-TS-001').length,1);
+});
+
+test('两 opId 并发撞号：陈旧快照取到同号，plan 查重拒 CODE_ALREADY_REGISTERED',async()=>{
+  const f=adminSetup(),s=f.service();
+  const stale=await f.repository.snapshot(); // 设备 B 在设备 A 落库前的快照
+  await s.post({},autoReq('reg-a',{category:'TS',name:'先到者'})); // WP-TS-001 落库
+  const orig=f.repository.snapshot.bind(f.repository);
+  let calls=0;
+  f.repository.snapshot=async()=>(++calls===1?structuredClone(stale):orig()); // 仅发号用旧快照，plan 用新快照
+  const second=await f.service().post({},autoReq('reg-b',{category:'TS',name:'后到者'}));
+  assert.equal(second.phase,'REJECTED');
+  assert.match(second.error,/CODE_ALREADY_REGISTERED/);
+  assert.equal(second.request.entity.code,'WP-TS-001','后到者确实撞了同一个号');
+  assert.equal(f.repository.state.items.filter(i=>i.code==='WP-TS-001').length,1,'无重复写入');
+  // 重新提交即取下一号
+  const retry=await f.service().post({},autoReq('reg-b2',{category:'TS',name:'后到者'}));
+  assert.equal(retry.phase,'APPLIED');
+  assert.equal(retry.request.entity.code,'WP-TS-002');
+});
+
+test('发号前置校验：BAD_CATEGORY / NON_CANONICAL_ITEM_CODE / DUPLICATE_SHORTLINK_IDENTITY',async()=>{
+  const f=adminSetup(),s=f.service();
+  await assert.rejects(s.post({},autoReq('reg-bad1',{name:'无分类'})),e=>e.status===400&&/BAD_CATEGORY/.test(e.message));
+  await assert.rejects(s.post({},autoReq('reg-bad2',{category:'XX',name:'假分类'})),e=>e.status===400&&/BAD_CATEGORY/.test(e.message));
+  await assert.rejects(s.post({},autoReq('reg-bad3',{category:0,name:'未分类不开放'})),/BAD_CATEGORY/);
+  await assert.rejects(s.post({},{schemaVersion:1,opId:'reg-bad4',kind:'registerItem'}),e=>e.status===400&&/INVALID_REQUEST/.test(e.message));
+  // 手动码：非规范形拒收（WP-TS-7 与 WP-TS-007 短码相同但身份不同，P3）
+  await assert.rejects(s.post({},autoReq('reg-m1',{code:'WP-TS-7',name:'非规范'})),e=>e.status===400&&/NON_CANONICAL_ITEM_CODE/.test(e.message));
+  await assert.rejects(s.post({},autoReq('reg-m2',{code:'wp-ts-007',name:'小写非规范'})),/NON_CANONICAL_ITEM_CODE/);
+  // 快照已有异写法同 (cat,serial)：规范形也拒 DUPLICATE_SHORTLINK_IDENTITY
+  f.repository.state.items.push({code:'WP-TS-9',status:'unknown',container:'',version:0,lastOpId:''});
+  await assert.rejects(s.post({},autoReq('reg-m3',{code:'WP-TS-009',name:'撞车'})),e=>e.status===409&&/DUPLICATE_SHORTLINK_IDENTITY/.test(e.message));
+  // 规范形手动码正常建档；旧自由格式（无短链）放行
+  const manual=await s.post({},autoReq('reg-m4',{code:'WP-TS-100',name:'沿用实物码'}));
+  assert.equal(manual.phase,'APPLIED',manual.error);
+  const legacy=await s.post({},autoReq('reg-m5',{code:'WP-legacy-bolt',name:'旧码'}));
+  assert.equal(legacy.phase,'APPLIED',legacy.error);
+  assert.equal(f.repository.writes,2,'校验失败的请求无任何写入');
+});
+
+test('发号发生在 claim 之前：SERIAL_EXHAUSTED 与校验失败不占 claim、不留日志',async()=>{
+  const f=adminSetup(),s=f.service();
+  f.repository.state.items.push({code:'WP-QT-2097151',status:'unknown',container:'',version:0,lastOpId:''});
+  await assert.rejects(s.post({},autoReq('reg-full',{category:'QT',name:'满'})),e=>e.status===409&&/SERIAL_EXHAUSTED/.test(e.message));
+  assert.equal((await f.repository.operations('reg-full')).length,0);
+  assert.equal((await s.get({},'reg-full')).phase,'UNKNOWN','未 claim，重试可用同 opId');
+});

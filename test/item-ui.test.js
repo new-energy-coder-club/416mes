@@ -71,3 +71,60 @@ test('rejected legacy conflict command offers override resubmit with new opId',a
  await tickN(10);
  assert.equal(queued.confirmLegacyLocOverride,true);assert.equal(queued.opId,'new-op');assert.equal(queued.error,undefined);
 });
+/* ================= D2（§六待修③④）：短链归一进查询手输入口与建档引导 ================= */
+const LINK=require('../lib/item-link');
+function setupLink(state){const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document}=parseHTML(html);document.defaultView.ItemLink=LINK;let n=0;const page=UI.mount({document,getState:()=>state,getPersistence:()=>null,getCommands:async()=>[],id:()=>'d2-'+(++n)});return {document,state,page};}
+const linkState=()=>({locations:[{code:'L-A',status:'active'}],containers:[{code:'C-A',loc:'L-A',status:'active',version:2}],items:[{code:'WP-001',name:'灯珠',status:'pending',version:0}]});
+test('D2-③：查询框手输整条短链按回车 → 归一成物品码并查到',()=>{
+ const {document:d}=setupLink(linkState());
+ const input=d.getElementById('itmSearch');input.value=LINK.linkFor('WP-001');
+ const e=new d.defaultView.Event('keydown',{bubbles:true,cancelable:true});e.key='Enter';input.dispatchEvent(e);
+ assert.equal(input.value,'WP-001','归一后回写物品码，让用户看见系统认出了什么');
+ assert.match(d.getElementById('itmResults').textContent,/数量：1/);
+});
+test('D2-③：裸 8 位短码（含小写）手输同样查到；普通关键词不误归一',()=>{
+ const {document:d}=setupLink(linkState());
+ const input=d.getElementById('itmSearch');
+ input.value=LINK.fromItemCode('WP-001');d.getElementById('itmSearchBtn').click();
+ assert.equal(input.value,'WP-001');assert.match(d.getElementById('itmResults').textContent,/数量：1/);
+ input.value=LINK.fromItemCode('WP-001').toLowerCase();d.getElementById('itmSearchBtn').click();
+ assert.equal(input.value,'WP-001','小写裸码也归一');assert.match(d.getElementById('itmResults').textContent,/数量：1/);
+ input.value='灯珠';d.getElementById('itmSearchBtn').click();
+ assert.equal(input.value,'灯珠','非短链关键词原样保留');assert.match(d.getElementById('itmSearchStatus').textContent,/找到 1 条/);
+});
+test('D2-③：印刷版全大写短链手输同样查到（冻结规格整条大写）',()=>{
+ const {document:d}=setupLink(linkState());
+ const input=d.getElementById('itmSearch');input.value=LINK.linkFor('WP-001').toUpperCase();d.getElementById('itmSearchBtn').click();
+ assert.equal(input.value,'WP-001');assert.match(d.getElementById('itmResults').textContent,/数量：1/);
+});
+test('D2-③：带 ?to=feishu 的短链手输也可查（query 不印码但手输可能被粘贴进来）',()=>{
+ const {document:d}=setupLink(linkState());
+ const input=d.getElementById('itmSearch');input.value=LINK.linkFor('WP-001')+'?to=feishu';d.getElementById('itmSearchBtn').click();
+ assert.equal(input.value,'WP-001');assert.match(d.getElementById('itmResults').textContent,/数量：1/);
+});
+test('D2-④：扫短链（未建档）触发建档引导并预填物品码',async()=>{
+ const {document:d,page}=setupLink({locations:[{code:'L-A',status:'active'}],containers:[{code:'C-A',loc:'L-A',status:'active',version:2}],items:[]});
+ await page.accept('LOC:L-A');await page.accept('CTN:C-A');
+ d.getElementById('itmCode').value=LINK.linkFor('WP-999');d.getElementById('itmScanBtn').click();await tickN();
+ assert.match(d.getElementById('itmStatus').textContent,/未建档/);
+ const action=d.getElementById('itmStatus').querySelector('button');assert.ok(action,'未建档应提供建档引导');
+ action.click();await tickN();
+ assert.equal(d.getElementById('itmRegisterCode').value,'WP-999');
+ assert.ok(d.getElementById('itmRegister').closest('details').open,'建档区应自动展开');
+});
+test('D2-④：裸 8 位短码（未建档）同样触发建档引导',async()=>{
+ const {document:d,page}=setupLink({locations:[{code:'L-A',status:'active'}],containers:[{code:'C-A',loc:'L-A',status:'active',version:2}],items:[]});
+ await page.accept('LOC:L-A');await page.accept('CTN:C-A');
+ d.getElementById('itmCode').value=LINK.fromItemCode('WP-998');d.getElementById('itmScanBtn').click();await tickN();
+ assert.match(d.getElementById('itmStatus').textContent,/未建档/);
+ d.getElementById('itmStatus').querySelector('button').click();await tickN();
+ assert.equal(d.getElementById('itmRegisterCode').value,'WP-998');
+});
+test('D2-④：扫短链（已建档）正常填入当前步骤，不走引导',async()=>{
+ const {document:d,page}=setupLink(linkState());
+ await page.accept('LOC:L-A');await page.accept('CTN:C-A');
+ d.getElementById('itmCode').value=LINK.linkFor('WP-001').toUpperCase();d.getElementById('itmScanBtn').click();await tickN();
+ assert.deepEqual(page.scan.row().values.map(v=>v.code),['L-A','C-A','WP-001']);
+ assert.match(d.getElementById('itmStatus').textContent,/已填写草稿/);
+ assert.equal(d.getElementById('itmStatus').querySelector('button'),null,'不应出现引导按钮');
+});

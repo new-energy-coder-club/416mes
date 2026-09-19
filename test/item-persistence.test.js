@@ -101,3 +101,54 @@ test('lack of browser lock or real IDB disables command persistence', async t =>
   const memory = P.create({ store: { kind: 'memory' }, getState: f.state, publish() {}, canWrite: () => true });
   await assert.rejects(memory.enqueue(req()), /INDEXEDDB/);
 });
+
+/* ================= A 阶段：acknowledge 放宽服务端回填码（P4） ================= */
+
+test('registerItem 无码命令：服务端回填码后 ACK 放宽通过并落本地', async t => {
+  const f = await setup(t);
+  const request = { schemaVersion: 1, opId: 'reg-auto', kind: 'registerItem', entity: { category: 'TS', name: '示波器' } };
+  await f.client.enqueue(request);
+  const applied = {
+    code: 'reg-auto', kind: 'registerItem', phase: 'APPLIED',
+    request: { schemaVersion: 1, opId: 'reg-auto', kind: 'registerItem', entity: { category: 'TS', name: '示波器', code: 'WP-TS-001' } },
+    before: { items: [] },
+    after: { items: [{ code: 'WP-TS-001', name: '示波器', container: '', status: 'pending', version: 1, lastOpId: 'reg-auto' }] }
+  };
+  await f.client.acknowledge(applied);
+  assert.equal(await f.store.get('outbox', 'reg-auto'), undefined);
+  const row = f.state().items.find(i => i.code === 'WP-TS-001');
+  assert.ok(row, '回填码物品落本地'); assert.equal(row.status, 'pending');
+  assert.equal((await f.store.get('records', ['itemOperations', 'reg-auto'])).value.phase, 'APPLIED');
+});
+test('registerItem 无码命令：回填码与 after 不一致或请求被篡改仍拒收', async t => {
+  const f = await setup(t);
+  const request = { schemaVersion: 1, opId: 'reg-auto', kind: 'registerItem', entity: { category: 'TS', name: '示波器' } };
+  await f.client.enqueue(request);
+  const base = { code: 'reg-auto', kind: 'registerItem', phase: 'APPLIED', before: { items: [] },
+    request: { schemaVersion: 1, opId: 'reg-auto', kind: 'registerItem', entity: { category: 'TS', name: '示波器', code: 'WP-TS-001' } } };
+  // 回填码 !== after.items[0].code
+  await assert.rejects(f.client.acknowledge({ ...base, after: { items: [{ code: 'WP-TS-002', name: '示波器', container: '', status: 'pending', version: 1, lastOpId: 'reg-auto' }] } }), /RESULT_REQUEST_MISMATCH/);
+  // 缺 after
+  await assert.rejects(f.client.acknowledge(base), /RESULT_REQUEST_MISMATCH/);
+  // 请求其余字段被篡改（名称不同）——放宽仅限 entity.code
+  const tampered = structuredClone(base);
+  tampered.request.entity.name = '万用表';
+  tampered.after = { items: [{ code: 'WP-TS-001', name: '万用表', container: '', status: 'pending', version: 1, lastOpId: 'reg-auto' }] };
+  await assert.rejects(f.client.acknowledge(tampered), /RESULT_REQUEST_MISMATCH/);
+  // 非 register 命令不享受放宽
+  const recv = { schemaVersion: 1, opId: 'recv-1', kind: 'receive', itemCode: 'I-P', target: { loc: 'L-A', container: 'C-A' }, expected: { itemVersion: 0, containerVersion: 2 } };
+  await f.client.enqueue(recv);
+  await assert.rejects(f.client.acknowledge({ code: 'recv-1', kind: 'receive', phase: 'APPLIED', request: { ...recv, itemCode: 'I-OTHER' }, after: { items: [] } }), /RESULT_REQUEST_MISMATCH/);
+  // 三次失败不影响合法 ACK 后续落库
+  await f.client.acknowledge({ ...base, after: { items: [{ code: 'WP-TS-001', name: '示波器', container: '', status: 'pending', version: 1, lastOpId: 'reg-auto' }] } });
+  assert.ok(f.state().items.some(i => i.code === 'WP-TS-001'));
+});
+test('registerItem 无码命令 REJECTED（发号后 plan 拒）也能 ACK 出队', async t => {
+  const f = await setup(t);
+  const request = { schemaVersion: 1, opId: 'reg-rej', kind: 'registerItem', entity: { category: 'TS', name: 'x' } };
+  await f.client.enqueue(request);
+  await f.client.acknowledge({ code: 'reg-rej', kind: 'registerItem', phase: 'REJECTED', error: 'CODE_ALREADY_REGISTERED',
+    request: { schemaVersion: 1, opId: 'reg-rej', kind: 'registerItem', entity: { category: 'TS', name: 'x', code: 'WP-TS-001' } } });
+  assert.equal(await f.store.get('outbox', 'reg-rej'), undefined);
+  assert.equal(f.state().items.some(i => i.code === 'WP-TS-001'), false, 'REJECTED 不落物品');
+});

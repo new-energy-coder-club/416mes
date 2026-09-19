@@ -25,6 +25,7 @@ module.exports = async (req, res) => {
       p = {
         prefix: u.searchParams.get('prefix') || '',
         type: u.searchParams.get('type') || '',
+        table: u.searchParams.get('table') || undefined,
         column: u.searchParams.get('column') || undefined,
         typeColumn: u.searchParams.get('typeColumn') || undefined
       };

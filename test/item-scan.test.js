@@ -24,3 +24,19 @@ test('scan: 短链错步骤仍被拒（库位步骤扫物品短链）',()=>{
  s.add('receive');
  assert.throws(()=>s.accept(L.linkFor('WP-001')),/当前请扫描/);
 });
+test('scan: 裸 8 位短码在 ITM 步骤同样解析为物品码（D2 扫码枪只读到 8 位的情形）',()=>{
+ const L=require('../lib/item-link');
+ const s=Scan.create({getState:()=>({locations:[{code:'L-A',status:'active'}],containers:[{code:'C-A',loc:'L-A',status:'active',version:2}],items:[{code:'WP-001',status:'pending',version:1}]}),id:()=> 't'+Math.random()});
+ s.add('receive');s.accept('LOC:L-A');s.accept('CTN:C-A');
+ const r=s.accept(L.fromItemCode('WP-001'));
+ assert.equal(r.complete,true);
+ assert.equal(s.row().values[2].code,'WP-001');
+});
+test('scan: 印刷版全大写短链 URL 在 ITM 步骤解析为物品码（冻结规格整条大写）',()=>{
+ const L=require('../lib/item-link');
+ const s=Scan.create({getState:()=>({locations:[{code:'L-A',status:'active'}],containers:[{code:'C-A',loc:'L-A',status:'active',version:2}],items:[{code:'WP-001',status:'pending',version:1}]}),id:()=> 't'+Math.random()});
+ s.add('receive');s.accept('LOC:L-A');s.accept('CTN:C-A');
+ const r=s.accept(L.linkFor('WP-001').toUpperCase());
+ assert.equal(r.complete,true);
+ assert.equal(s.row().values[2].code,'WP-001');
+});

@@ -478,6 +478,44 @@ for (const legacy of [false, true]) {
   });
 }
 
+test('ITM feishu-trial HTTP: 服务端发号建档（不带码）→ receive → issue 全链 + 短链往返', async t => {
+  const f = await startItemTrialHttp(t, ({ tables, fieldTypes }) => {
+    fieldTypes.trialI.push({ name: '名称', type: 1 }, { name: '规格型号', type: 1 });
+    tables.trialI.fields.push('名称', '规格型号');
+    // 存量污染：WP-uuid / 假分类 / 小写码 / 未分类存量，均不得干扰 TS 序列取号
+    tables.trialI.rows.push({ '物品码': 'WP-f47ac10b-58cc-4372-a567-0e02b2c3d479' });
+    tables.trialI.rows.push({ '物品码': 'WP-DEMO-001' });
+    tables.trialI.rows.push({ '物品码': 'WP-001' });
+    tables.trialI.rows.push({ '物品码': 'wp-ts-004' });
+  });
+  await bootstrapTrialLocationContainer(f);
+  const registered = await trialApplied(f, { schemaVersion: 1, opId: 'auto-register', kind: 'registerItem', entity: { category: 'TS', name: '示波器', spec: '100MHz' } });
+  assert.equal(registered.request.entity.code, 'WP-TS-005', '发号取 max(ts-004)+1，污染不计入');
+  assert.equal(registered.after.items[0].code, 'WP-TS-005');
+  assert.equal(f.tables.trialI.rows.find(r => r['物品码'] === 'WP-TS-005')['名称'], '示波器');
+  // 同 opId 重试不重发号（HTTP 层）
+  const retry = await f.post({ schemaVersion: 1, opId: 'auto-register', kind: 'registerItem', entity: { category: 'TS', name: '示波器', spec: '100MHz' } });
+  assert.equal(retry.status, 200);
+  assert.equal(retry.body.operation.phase, 'APPLIED');
+  assert.equal(retry.body.operation.request.entity.code, 'WP-TS-005');
+  assert.equal(f.tables.trialI.rows.filter(r => r['物品码'] === 'WP-TS-005').length, 1, '重试不产生第二行');
+  // 短链 encode/decode roundtrip
+  const L = require('../lib/item-link');
+  assert.equal(L.toItemCode(L.decode(L.fromItemCode('WP-TS-005'))), 'WP-TS-005');
+  // 发号物品走 receive → issue 全链
+  const incoming = { schemaVersion: 1, opId: 'auto-receive', kind: 'receive', itemCode: 'WP-TS-005', target: { loc: 'L-001', container: 'C-001' }, expected: { itemVersion: 1, containerVersion: 2 } };
+  await trialApplied(f, incoming);
+  assert.equal(f.tables.trialI.rows.find(r => r['物品码'] === 'WP-TS-005')['状态'], 'in_stock');
+  const outgoing = { schemaVersion: 1, opId: 'auto-issue', kind: 'issue', itemCode: 'WP-TS-005', source: incoming.target, expected: { itemVersion: 2, containerVersion: 2 } };
+  await trialApplied(f, outgoing);
+  assert.equal(f.tables.trialI.rows.find(r => r['物品码'] === 'WP-TS-005')['状态'], 'out');
+  // 非法分类 / 非规范手动码在 HTTP 层的错误码
+  const badCat = await f.post({ schemaVersion: 1, opId: 'auto-badcat', kind: 'registerItem', entity: { name: '无分类' } });
+  assert.equal(badCat.status, 400); assert.equal(badCat.body.error, 'BAD_CATEGORY');
+  const nonCanonical = await f.post({ schemaVersion: 1, opId: 'auto-noncanon', kind: 'registerItem', entity: { code: 'WP-TS-5', name: '非规范' } });
+  assert.equal(nonCanonical.status, 400); assert.equal(nonCanonical.body.error, 'NON_CANONICAL_ITEM_CODE');
+});
+
 test('ITM feishu-trial HTTP: REPAIR_REQUIRED blocks apply/retry/new command across fresh runtime', async t => {
   let rejectItemUpdate = false, f;
   f = await startItemTrialHttp(t, options => {
