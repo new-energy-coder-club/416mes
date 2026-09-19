@@ -14,12 +14,13 @@
  * 重放会带上同一个 opId，服务端按「库存流水.操作ID」查重，不会重复记账。
  */
 'use strict';
-const { writeStock, setCors, readBody } = require('../../lib/feishu-api.js');
+const { writeStock, setCors, assertSameOrigin, readBody } = require('../../lib/feishu-api.js');
 
 module.exports = async (req, res) => {
   setCors(res);
   if (req.method === 'OPTIONS') { res.status(204).end(); return; }
   if (req.method !== 'POST') { res.status(405).json({ ok: false, error: 'method not allowed' }); return; }
+  if (!assertSameOrigin(req, res)) return;   /* 2.50.2 同源标记（审计 I-B6） */
   /* 2.50.1（审计 R7）：G3 物料台账只读归档后，页面层已无 MAT 写入口；服务端保留这个
      环境闸给部署方兜底——设 MAT_LEDGER_FROZEN=1 即彻底停写（审计/回放等只读不受影响）。 */
   if (process.env.MAT_LEDGER_FROZEN === '1') { res.status(503).json({ ok: false, error: 'MAT 数量账已冻结（MAT_LEDGER_FROZEN=1），存量只读' }); return; }

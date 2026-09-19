@@ -9,12 +9,13 @@
  * 而不是让整批失败。这样工单记录缺「执行批次」列时其余字段照常同步。
  */
 'use strict';
-const { upsertRecords, setCors, readBody } = require('../../lib/feishu-api.js');
+const { upsertRecords, setCors, assertSameOrigin, readBody } = require('../../lib/feishu-api.js');
 
 module.exports = async (req, res) => {
   setCors(res);
   if (req.method === 'OPTIONS') { res.status(204).end(); return; }
   if (req.method !== 'POST') { res.status(405).json({ ok: false, error: 'method not allowed' }); return; }
+  if (!assertSameOrigin(req, res)) return;   /* 2.50.2 同源标记（审计 I-B6） */
   try {
     const p = JSON.parse((await readBody(req)) || '{}');
     if (!p.table) { res.status(400).json({ ok: false, error: '缺 table' }); return; }

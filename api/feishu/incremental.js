@@ -17,12 +17,13 @@
  * 而 sort 在文本与日期（含系统字段 1002）上都被验证可用。
  */
 'use strict';
-const { probeAllChanges, probeTableChange, pullChangesBySort, censusTable, benchFeishu, syncChanges, setCors, readBody, tenantToken, TABLES } = require('../../lib/feishu-api.js');
+const { probeAllChanges, probeTableChange, pullChangesBySort, censusTable, benchFeishu, syncChanges, setCors, assertSameOrigin, readBody, tenantToken, TABLES } = require('../../lib/feishu-api.js');
 
 module.exports = async (req, res) => {
   setCors(res);
   if (req.method === 'OPTIONS') { res.status(204).end(); return; }
   if (req.method !== 'POST') { res.status(405).json({ ok: false, error: 'method not allowed' }); return; }
+  if (!assertSameOrigin(req, res)) return;   /* 2.50.2 同源标记（审计 I-B6） */
 
   try {
     const p = JSON.parse((await readBody(req)) || '{}');

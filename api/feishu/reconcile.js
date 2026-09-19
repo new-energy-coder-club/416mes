@@ -10,12 +10,13 @@
  *   3. 哪些记录只在一侧？（localOnly = 还没推上去；remoteOnly = 该拉下来）
  */
 'use strict';
-const { reconcile, setCors, readBody } = require('../../lib/feishu-api.js');
+const { reconcile, setCors, assertSameOrigin, readBody } = require('../../lib/feishu-api.js');
 
 module.exports = async (req, res) => {
   setCors(res);
   if (req.method === 'OPTIONS') { res.status(204).end(); return; }
   if (req.method !== 'POST') { res.status(405).json({ ok: false, error: 'method not allowed' }); return; }
+  if (!assertSameOrigin(req, res)) return;   /* 2.50.2 同源标记（审计 I-B6） */
   try {
     const p = JSON.parse((await readBody(req)) || '{}');
     const report = await reconcile(p.state || {});

@@ -1,11 +1,12 @@
 'use strict';
 const { createRuntime } = require('../../lib/item-runtime');
-const { readBody, setCors } = require('../../lib/feishu-api');
+const { readBody, setCors, assertSameOrigin } = require('../../lib/feishu-api');
 function handlerFor(service) {
   return async (req, res) => {
     setCors(res);
     if (req.method === 'OPTIONS') return res.status(204).end();
     if (!['POST', 'GET'].includes(req.method)) return res.status(405).json({ ok: false, error: 'method not allowed' });
+    if (req.method === 'POST' && !assertSameOrigin(req, res)) return;   /* 2.50.2 同源标记（审计 I-B6；GET 只读豁免） */
     try {
       if (req.method === 'GET' && req.query && req.query.action === 'capabilities') return res.status(200).json({ ok: true, mode: service.mode || 'strict', authentication: service.mode === 'feishu-trial' ? 'none' : 'required', concurrency: service.mode === 'feishu-trial' ? 'best-effort-single-operator' : 'strict', notice: '试运行请一次只操作一条，等待结果后再继续；未知结果不要重新提交。' });
       let result;

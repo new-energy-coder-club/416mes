@@ -122,16 +122,28 @@ const server = http.createServer(async (req, res) => {
   try { u = new URL(req.url, 'http://x'); }
   catch (e) { return json(res, 400, { ok: false, error: '非法 URL' }); }
 
-  // 与 vercel.json / setCors 保持一致，让局域网里其它口径（含 file://）也能用
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  // 2.50.2（审计 I-B6）：与 lib/feishu-api.setCors 白名单口径一致——只对已知来源发 CORS 头；
+  // 本机页面与服务器同源，不受影响；file:// 等未知来源不再放行（数据空间隔离本就要求分开用）。
+  const _origin = req.headers.origin;
+  if (_origin && (_origin === 'https://mes.newenergycoder.club' || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(_origin) || /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/.test(_origin) || /^http:\/\/10\.\d+\.\d+\.\d+(:\d+)?$/.test(_origin))) {
+    res.setHeader('Access-Control-Allow-Origin', _origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-416mes-Same-Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  }
   res.setHeader('Cache-Control', 'no-store');
   if (req.method === 'OPTIONS' && !ROUTES[u.pathname]) { res.writeHead(204); return res.end(); }
 
+  /* 2.50.2（审计 I-B6）：本地服务与云端 serverless 同一套同源标记检查——
+     写接口必须带 X-416mes-Same-Origin: 1（页面端 fetch 已统一加），跨站浏览器写入被拦。 */
   const handler = handlers[u.pathname];
   if (handler) {
     try {
+      if (req.method === 'POST' && req.headers.origin) {
+        const sh = (req.headers && req.headers['x-416mes-same-origin']) || '';
+        const originOk = _origin === 'https://mes.newenergycoder.club' || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(_origin) || /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/.test(_origin) || /^http:\/\/10\.\d+\.\d+\.\d+(:\d+)?$/.test(_origin);
+        if (!(originOk && sh === '1')) return json(res, 403, { ok: false, error: '缺少同源标记（X-416mes-Same-Origin），本接口不开放跨站调用' });
+      }
       // 直接调用**云端那一个** handler；req 本身是流，readBody(req) 能正常工作
       await handler(adaptReq(req, u.pathname), adaptRes(res));
     } catch (e) {
