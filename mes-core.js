@@ -331,6 +331,12 @@
    *     （见 validateItemScan），建单就锁死状态会让「先建单后收货」没法做；
    *   · 同一物品码重复 → 拒绝（normalizeItemLines 只报告，这里落实拒绝）。
    */
+  /* G2：物品码不得以「x数字」结尾 —— 旧明细/飞书 DOWN 用 `/^.+?[x×]\d+$/` 分流
+     「物料码x数量」与物品码，物品码若长成 `Ax3` 会被静默误读成物料行 {matCode:'A',qty:3}。 */
+  function badItemCodeSuffix(code) {
+    return /[x×]\d+$/.test(String(code == null ? '' : code).trim());
+  }
+
   function createItemizedOrder(state, opts) {
     var errors = [];
     var type = opts.type;
@@ -339,6 +345,13 @@
     if (!norm.items.length) errors.push('请至少添加一行有效明细（物品码列表）');
     if (norm.duplicates.length) {
       errors.push('同一物品码重复：' + norm.duplicates.join('、') + '（同一物品在同一单中只能出现一次）');
+    }
+    var badSuffix = [];
+    norm.items.forEach(function (l) {
+      l.itemCodes.forEach(function (c) { if (badItemCodeSuffix(c) && badSuffix.indexOf(c) < 0) badSuffix.push(c); });
+    });
+    if (badSuffix.length) {
+      errors.push('物品码 ' + badSuffix.join('、') + ' 以「x数字」结尾，会被旧明细解析误读成「物料码x数量」，请改用其它编码');
     }
     if (!state || !Array.isArray(state.workorders)) errors.push('state.workorders 不可用');
 
@@ -1068,6 +1081,9 @@
     opts = opts || {};
     patch = patch || {};
     if (!order) return { ok: false, error: '工单不存在' };
+    /* G2：物品化工单的计划就是物品码清单本身，没有「数量」可改；
+       要换物品只能「取消 → 重建」，不允许在原地改计划（改码会让已扫进度悬空）。 */
+    if (isItemizedOrder(order)) return { ok: false, error: '工单 ' + order.code + ' 是物品化工单，不允许修改计划；如需调整物品清单，请「取消」后重新建单' };
     if (isCancelled(order)) return { ok: false, error: '工单 ' + order.code + ' 已取消，不能再改计划' };
     var prog = orderProgress(order);
     if (prog.anyExecuted) {
@@ -2103,6 +2119,7 @@
     normalizeItems: normalizeItems,
     mergedCodes: mergedCodes,
     isItemizedOrder: isItemizedOrder,
+    badItemCodeSuffix: badItemCodeSuffix,
     normalizeItemLines: normalizeItemLines,
     itemizedPlannedCodes: itemizedPlannedCodes,
     findItem: findItem,

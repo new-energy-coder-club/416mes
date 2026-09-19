@@ -50,6 +50,13 @@ const G1_BLOCK = HTML.slice(
   HTML.indexOf('/* 统一扫码入口：手输回车'));
 assert.ok(G1_BLOCK.includes('scanWipItemized') && G1_BLOCK.includes('wipItemExecScan'), 'G1 代码块抽取失败');
 
+/* G2 物品盘点块（stocktakeActive/stocktakeItemScan/stocktakeEnd/initItemStocktake 等），
+   紧跟 handleScan 之后；末尾的 initItemStocktake() 会在 vm 装载时跑一次（刷新恢复路径）。 */
+const G2_BLOCK = HTML.slice(
+  HTML.indexOf('/* ================= G2 物品盘点（盘点物品化）'),
+  HTML.indexOf('/* 阶段8：手机「全部」抽屉'));
+assert.ok(G2_BLOCK.includes('stocktakeItemScan') && G2_BLOCK.includes('stocktakeEnd') && G2_BLOCK.includes('initItemStocktake();'), 'G2 代码块抽取失败');
+
 const BTN_GEN = (() => {
   const start = HTML.indexOf("document.getElementById('btnGenWip').addEventListener");
   const end = HTML.indexOf('\n});', start);
@@ -166,6 +173,7 @@ function setup(clientMode = 'applied') {
     fnSrc('scanWip'),
     G1_BLOCK,
     fnSrc('handleScan'),
+    G2_BLOCK,
     fnSrc('fsReleaseWorkorderSerial'),
     BTN_GEN
   ].join('\n;\n');

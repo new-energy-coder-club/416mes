@@ -40,16 +40,30 @@ test('P5-4 每个 sheet 的业务键列都要在预检阶段校验，且校验�
   assert.ok(/const KEYCOLS = \[/.test(IMP), '缺少 KEYCOLS 业务键清单');
   const iKeys = IMP.indexOf('const KEYCOLS');
   const iSnap = IMP.indexOf('takeImportSnapshot()');
-  const iFirstMutate = IMP.indexOf('state.materials = dropNoKey');
+  /* G2：物料台账 sheet 已停用（跳过+警告），第一处改动落在库位表 */
+  const iFirstMutate = IMP.indexOf('state.locations = dropNoKey');
+  assert.ok(iFirstMutate > 0, '找不到第一处 state 改动标记（state.locations = dropNoKey）');
   assert.ok(iKeys < iSnap, '业务键校验必须在拍快照之前');
   assert.ok(iKeys < iFirstMutate, '业务键校验必须在第一次改动 state 之前（要「一个字都不改」地拒绝）');
   assert.ok(iSnap < iFirstMutate, '快照必须在第一次改动之前拍');
   // 拒绝时必须真的 return，不能继续往下走
   assert.ok(/keyProblems\.length\)[\s\S]{0,600}?return;/.test(IMP), '发现业务键问题后没有 return，会继续导入');
-  // 五张主要表都要在清单里
-  for (const s of ['物料台账', '库位', '容器', '人员', '物品', '手册', '工单记录', 'NEC工单', '库存流水']) {
+  // G2：物料台账不再参与业务键预检（整张跳过），其余八张表都要在清单里
+  const kcBlock = IMP.slice(IMP.indexOf('const KEYCOLS'), IMP.indexOf('const keyColInfo'));
+  assert.ok(!kcBlock.includes("['物料台账'"), 'KEYCOLS 仍含已停用的物料台账（KNOWN_SHEETS 保留它是为了给出「已停用」而不是「未知 sheet」提示）');
+  for (const s of ['库位', '容器', '人员', '物品', '手册', '工单记录', 'NEC工单', '库存流水']) {
     assert.ok(IMP.includes("['" + s + "'"), 'KEYCOLS 缺 ' + s);
   }
+});
+
+test('G2 物料台账 sheet：跳过并明确警告，本机物料一个字都不改', () => {
+  assert.ok(/sheet\('物料台账'\)/.test(IMP), '导入里找不到物料台账 sheet 的探测');
+  assert.ok(/物料台账」Excel 模板已停用/.test(IMP), '缺少「物料台账已停用」的警告文案');
+  assert.ok(/importWarnings\.push\('「物料台账」/.test(IMP), '停用警告没有进 importWarnings（用户会看不到）');
+  assert.ok(!/state\.materials = dropNoKey/.test(IMP), '物料台账仍在被 Excel 整表替换');
+  assert.ok(!/if \(!ms\) throw/.test(IMP), '缺物料台账 sheet 仍在抛错中止导入');
+  // 警告必须随结果弹出，不能只收不示
+  assert.ok(/if \(importWarnings\.length\) msg \+=/.test(IMP), 'importWarnings 没有并入结果提示');
 });
 
 test('P5-4 空业务键的行必须被丢弃并告警，且每张表都要过这道滤网', () => {
@@ -57,7 +71,7 @@ test('P5-4 空业务键的行必须被丢弃并告警，且每张表都要过这
   assert.ok(iDef > 0, '缺少 dropNoKey');
   const after = IMP.slice(iDef);
   for (const [label, needle] of [
-    ['物料台账', "dropNoKey(msRows, r => col(r, '物料码')"],
+    /* G2：物料台账已停用（跳过），不再过 dropNoKey —— 它在 KEYCOLS/滤网里都已被显式移除 */
     ['库位', "dropNoKey(bodyRows(ls, codeIdx('库位', '库位码')), r => lcol(r, '库位码', 0)"],
     ['容器', "dropNoKey(bodyRows(cs, codeIdx('容器', '容器码')), r => ccol(r, '容器码', 0)"],
     ['工单记录', "dropNoKey(bodyRows(ws, codeIdx('工单记录', '工单号')), r => wcol(r, '工单号', 0)"],
