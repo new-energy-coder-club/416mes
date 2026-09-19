@@ -128,3 +128,94 @@ test('D2-④：扫短链（已建档）正常填入当前步骤，不走引导',
  assert.match(d.getElementById('itmStatus').textContent,/已填写草稿/);
  assert.equal(d.getElementById('itmStatus').querySelector('button'),null,'不应出现引导按钮');
 });
+/* ================= E1（定稿§三.3 + §三.2 P4/P6）：建档改版 ================= */
+function pick(d,id,value){const sel=d.getElementById(id);for(const o of sel.options){if(o.value===value)o.setAttribute('selected','');else o.removeAttribute('selected');}sel.dispatchEvent(new d.defaultView.Event('change',{bubbles:true}));}
+function setupE1({online=true,appliedCode='WP-TS-001'}={}){
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document}=parseHTML(html);
+ document.defaultView.ItemLink=LINK;
+ const state={locations:[{code:'L-A',status:'active'}],containers:[{code:'C-A',loc:'L-A',status:'active',version:2}],items:[]};
+ let n=0,queued=null,submitted=null;
+ const persistence={async enqueue(r){queued=r;},async saveDraft(){},async recover(){return{drafts:[],commands:[]}}};
+ const client={async submit(c){submitted=c;return{phase:'APPLIED',code:c.id,request:{...c.request,entity:{...c.request.entity,code:appliedCode}},after:{items:[{code:appliedCode,name:c.request.entity.name,status:'pending',version:1,lastOpId:c.id}]}};}};
+ const page=UI.mount({document,state,getState:()=>state,getPersistence:()=>persistence,
+  getCommands:async()=>queued?[{id:queued.opId,op:'itemOperation',request:queued,status:'pending'}]:[],
+  getClient:()=>client,id:()=>'e1-'+(++n),isOnline:()=>online,qrSvg:t=>'QR['+t+']'});
+ return {document,state,page,get queued(){return queued},get submitted(){return submitted}};
+}
+test('E1：分类下拉 8 类且顺序与 item-link CATS 一致；分类/名称必填拦截',async()=>{
+ const s=setupE1(),d=s.document;
+ const values=[...d.getElementById('itmRegisterCat').options].map(o=>o.value).filter(Boolean);
+ assert.deepEqual(values,['JG','DJ','DZ','GZ','TS','GJ','HC','QT'],'分类下拉顺序必须与短码 CATS 一致（P8）');
+ d.getElementById('itmRegisterName').value='示波器';
+ d.getElementById('itmRegister').click();await tickN();
+ assert.match(d.getElementById('itmStatus').textContent,/请先选择物品分类/);
+ assert.equal(s.queued,null,'未选分类不得入队');
+ pick(d,'itmRegisterCat','TS');d.getElementById('itmRegisterName').value='';
+ d.getElementById('itmRegister').click();await tickN();
+ assert.match(d.getElementById('itmStatus').textContent,/请填写物品名称/);
+ assert.equal(s.queued,null,'未填名称不得入队');
+});
+test('E1：在线建档不带码提交 → APPLIED 展示物品码 + 8 位短码 + 二维码预览',async()=>{
+ const s=setupE1(),d=s.document;
+ pick(d,'itmRegisterCat','TS');
+ d.getElementById('itmRegisterName').value='示波器';d.getElementById('itmRegisterSpec').value='100MHz';
+ d.getElementById('itmRegister').click();await tickN(10);
+ assert.equal(s.queued.entity.code,undefined,'在线建档不带 code（服务端发号）');
+ assert.equal(s.queued.entity.category,'TS');
+ assert.ok(s.submitted,'在线应立即提交发号');
+ assert.equal(s.submitted.request.entity.code,undefined,'提交服务端的请求同样不带 code');
+ const box=d.getElementById('itmRegisterResult');
+ assert.match(box.textContent,/已分配物品码：WP-TS-001/);
+ assert.match(box.textContent,new RegExp('短码：'+LINK.fromItemCode('WP-TS-001')));
+ assert.ok(box.querySelector('.itm-qr'),'应有二维码预览容器');
+ assert.match(box.querySelector('.itm-qr').textContent,new RegExp('QR\\['+LINK.linkFor('WP-TS-001').toUpperCase().replace(/[/.]/g,'\\$&')+'\\]'),'二维码内容为冻结规格整条大写短链');
+ assert.match(d.getElementById('itmStatus').textContent,/建档完成：WP-TS-001/);
+});
+test('E1：「去入库」切 receive 行并在物品步骤预填新码',async()=>{
+ const s=setupE1(),d=s.document;
+ pick(d,'itmRegisterCat','TS');d.getElementById('itmRegisterName').value='示波器';
+ d.getElementById('itmRegister').click();await tickN(10);
+ const go=[...d.getElementById('itmRegisterResult').querySelectorAll('button')].find(b=>b.textContent==='去入库');
+ assert.ok(go,'建档完成后应有「去入库」按钮');
+ go.click();await tickN();
+ assert.equal(s.page.scan.row().kind,'receive','应切到入库行');
+ assert.equal(d.getElementById('itmKind').value,'receive','作业类型下拉应切到入库');
+ await s.page.accept('LOC:L-A');await s.page.accept('CTN:C-A');
+ assert.equal(d.getElementById('itmCode').value,'ITM:WP-TS-001','物品步骤应自动预填新码');
+});
+test('E1：离线只入队不提交，提示提交后分配物品码',async()=>{
+ const s=setupE1({online:false}),d=s.document;
+ pick(d,'itmRegisterCat','GJ');d.getElementById('itmRegisterName').value='扳手';
+ d.getElementById('itmRegister').click();await tickN();
+ assert.ok(s.queued,'离线也应入队保存');
+ assert.equal(s.queued.entity.code,undefined);
+ assert.equal(s.submitted,null,'离线不得提交');
+ assert.match(d.getElementById('itmStatus').textContent,/提交后由服务端分配物品码/);
+});
+test('E1：手动码路径保留——填码即带码入队、不走发号提交',async()=>{
+ const s=setupE1(),d=s.document;
+ pick(d,'itmRegisterCat','TS');
+ d.getElementById('itmRegisterName').value='现场扫到的码';d.getElementById('itmRegisterCode').value='WP-999';
+ d.getElementById('itmRegister').click();await tickN();
+ assert.equal(s.queued.entity.code,'WP-999','手动码原样带上（规范形校验在服务端）');
+ assert.equal(s.submitted,null,'手动码只入队，待在待处理区提交');
+ assert.match(d.getElementById('itmStatus').textContent,/手动码/);
+});
+test('E1（P6）：pending 卡对无码 registerItem 显示「物品建档·分类·待发号」',async()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const command={id:'reg-auto-1',status:'pending',request:{schemaVersion:1,opId:'reg-auto-1',kind:'registerItem',entity:{category:'TS',name:'示波器'}}};
+ const page=UI.mount({document:d,getState:()=>({}),id:()=>'id',getPersistence:()=>null,getCommands:async()=>[command]});
+ await page.pending();
+ const card=d.getElementById('itmPending').querySelector('article');
+ assert.match(card.textContent,/物品建档 · TS · 待发号/,'无码建档卡应明示待发号而不是待核实');
+ assert.doesNotMatch(card.textContent,/待核实$/);
+});
+test('E1：errZh 覆盖发号/手动码四类新错误码',async()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const cases=[['SERIAL_EXHAUSTED','序号已用尽'],['NON_CANONICAL_ITEM_CODE','写法不规范'],['DUPLICATE_SHORTLINK_IDENTITY','短链身份冲突'],['BAD_CATEGORY','分类无效']];
+ const commands=cases.map(([code],i)=>({id:'err-'+i,status:'pending',request:{schemaVersion:1,opId:'err-'+i,kind:'receive',itemCode:'I-P',error:code}}));
+ const page=UI.mount({document:d,getState:()=>({}),id:()=>'id',getPersistence:()=>null,getCommands:async()=>commands});
+ await page.pending();
+ const text=d.getElementById('itmPending').textContent;
+ for(const [code,zh] of cases){assert.ok(text.includes(zh),'应有中文文案：'+code);assert.ok(text.includes(code),'保留英文错误码便于排查：'+code);}
+});

@@ -1073,6 +1073,11 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
 #tab-item-work details{border-top:1px solid var(--line);padding:8px 0}
 #tab-item-work summary{min-height:44px;padding:12px 0;cursor:pointer;font-weight:600}
 #tab-item-work .itm-detail-body{display:grid;gap:10px;padding:8px 0}
+/* E1：建档结果区（分配到的物品码 + 短码 + 二维码预览 + 去入库）；空时不占位 */
+#tab-item-work .itm-register-result{display:grid;gap:6px;padding:12px;border:1px dashed var(--line);border-radius:8px;background:#f6fbf4}
+#tab-item-work .itm-register-result:empty{display:none}
+#tab-item-work .itm-register-result .itm-qr svg{width:132px;height:132px}
+#tab-item-work .itm-advanced summary{font-weight:400;min-height:0;padding:4px 0;color:var(--text-sub)}
 #tab-item-work pre{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;font-size:12px}
 @media(max-width:600px){
   :is(#tab-items,#tab-item-work) .panel{padding:12px}
@@ -1190,7 +1195,10 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
     <div class="panel"><h3>4 · 待处理</h3><p class="hint">仅保存不会更新库存。提交或查询原命令后，以确认结果为准；不重复新建相同作业。</p><div id="itmPending" class="itm-cards"><p class="hint">正在读取本机待处理记录…</p></div></div>
     <div class="panel">
       <h3>管理与复核</h3>
-      <details><summary>建档 · 库位 / 容器 / 物品</summary><div class="itm-detail-body"><label class="itm-control" for="itmRegisterType">建档类型<select class="field" id="itmRegisterType"><option value="registerItem">物品</option><option value="registerLocation">库位</option><option value="registerContainer">容器</option></select></label><label class="itm-control" for="itmRegisterCode">编码（可选，留空自动生成；扫到的实物码可直接沿用）<input class="field" id="itmRegisterCode" placeholder="如 WP-001"></label><label class="itm-control" for="itmRegisterName">名称 / 说明<input class="field" id="itmRegisterName" placeholder="名称/说明"></label><button class="btn" id="itmRegister">生成唯一码并申请建档</button><p class="hint">先核实是否已有档案；远端确认前不打印正式标签。</p></div></details>
+      <!-- E1 建档改版（定稿§三.3）：物品建档主流程 = 选分类 → 名称必填 → 在线提交服务端发号（不带码）
+           → APPLIED 展示物品码 + 8 位短码 + 二维码预览 + 「去入库」。手动码降级为高级选项（§三.2 P3：
+           不规范形服务端拒收，且无短链二维码）。分类下拉与 MAT_CATS / lib/item-link.js CATS 顺序一致（P8 测试锁）。 -->
+      <details id="itmRegisterDetails"><summary>建档 · 库位 / 容器 / 物品</summary><div class="itm-detail-body"><label class="itm-control" for="itmRegisterType">建档类型<select class="field" id="itmRegisterType"><option value="registerItem">物品</option><option value="registerLocation">库位</option><option value="registerContainer">容器</option></select></label><label class="itm-control" id="itmRegisterCatWrap" for="itmRegisterCat">物品分类（必选，决定物品码前缀 WP-分类-序号）<select class="field" id="itmRegisterCat"><option value="">请选择分类…</option><option value="JG">JG 机构件</option><option value="DJ">DJ 电机驱动</option><option value="DZ">DZ 电子件</option><option value="GZ">GZ 贵重件</option><option value="TS">TS 调试设备</option><option value="GJ">GJ 工具</option><option value="HC">HC 耗材</option><option value="QT">QT 其他</option></select></label><label class="itm-control" for="itmRegisterName">名称（必填）/ 说明<input class="field" id="itmRegisterName" placeholder="名称/说明"></label><label class="itm-control" id="itmRegisterSpecWrap" for="itmRegisterSpec">规格型号（可选）<input class="field" id="itmRegisterSpec" placeholder="如 100MHz 示波器"></label><details class="itm-advanced" id="itmRegisterAdvanced"><summary>高级：手动指定编码（留空由服务端按分类发号；不规范码没有短链二维码）</summary><label class="itm-control" for="itmRegisterCode">编码（扫到的实物码可直接沿用；须规范形如 WP-TS-001）<input class="field" id="itmRegisterCode" placeholder="留空自动发号"></label></details><button class="btn" id="itmRegister">生成物品码并申请建档</button><div id="itmRegisterResult" class="itm-register-result" aria-live="polite"></div><p class="hint">先核实是否已有档案；远端确认前不打印正式标签。物品建档在线提交后由服务端按分类发号，并同步生成 8 位短码与二维码预览；离线时先存本机，提交后分配物品码。</p></div></details>
       <details><summary>核实启用 · 旧库位 / 容器</summary><div class="itm-detail-body"><p class="hint">先核实实物及归属，仅生成待提交命令，不直接启用。</p><label class="itm-control" for="itmAdminLoc">库位码<input class="field" id="itmAdminLoc" placeholder="填写库位原始编码"></label><label class="itm-control" for="itmAdminContainer">容器码（启用容器时填写）<input class="field" id="itmAdminContainer" placeholder="填写容器原始编码"></label><div class="itm-toolbar"><button class="btn" id="itmActivateLoc">核实启用库位</button><button class="btn" id="itmActivateContainer">核实启用容器</button></div></div></details>
       <details><summary>退役 · 不再使用的物品</summary><div class="itm-detail-body"><p class="hint">仅待入库或已出库物品可申请；在库物品不可直接退役。暂不支持停用库位。</p><label class="itm-control" for="itmRetireCode">物品码<input class="field" id="itmRetireCode" placeholder="待退役物品码"></label><label class="itm-control" for="itmRetireReason">退役原因<input class="field" id="itmRetireReason" placeholder="说明退役原因"></label><button class="btn" id="itmRetire">申请退役</button></div></details>
       <details><summary>导入命令 · 只读复核</summary><div id="itmRecoveryReview" class="itm-detail-body" aria-live="polite"></div></details>
@@ -9097,7 +9105,9 @@ function mountItemPage() {
       await localStore.transaction(['records','transactions','syncMeta'], tx => ITEM_PERSIST.writeSnapshot(tx, next));
       state = next;
     }); },
-    id: () => crypto.randomUUID(), getClient: () => window.ItemClient.create({ persistence: itmPersistence, fetch: window.fetch.bind(window) }), getCommands: async () => itmPersistence ? (await itmPersistence.recover()).commands : [] });
+    id: () => crypto.randomUUID(), getClient: () => window.ItemClient.create({ persistence: itmPersistence, fetch: window.fetch.bind(window) }), getCommands: async () => itmPersistence ? (await itmPersistence.recover()).commands : [],
+    /* E1：建档在线发号需要知道真源是否可达（离线只入队不提交）；二维码预览复用本页 qrSvg */
+    isOnline: () => fsOnline, qrSvg: text => qrSvg(text) });
   itemPage.render(); itemPage.pending().catch(e => log('ITM读取待提交失败：' + e.message));
 }
 load(); restoreSyncUiState(); renderDataStoreHint(); renderLedger(); renderRes(); refreshMatDatalist(); refreshMemberDatalist(); renderNec(); renderOperators(); renderTxns(); renderWip(); renderCtxBar(); renderStatusBar();
