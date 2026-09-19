@@ -600,6 +600,9 @@
 
   /* ================= 库存变动（唯一写入口） ================= */
 
+  /* 📦 G3 封存：页面层已不再调用，仅为历史数据与回放审计保留，新功能禁止调用。
+     （物料台账已降级为只读历史视图；盘点/工单/调整全部物品化，数量账写路径
+     仅服务存量数据回放与账本校验。） */
   /**
    * 库存数量的唯一修改入口：先改数量，再写流水，二者不可分离。
    * mode 'delta'：在现有库存上增减；mode 'set'：直接设置为目标值（盘点用）。
@@ -694,6 +697,8 @@
     return { ok: errors.length === 0, errors: errors, aggregated: aggregated, sign: sign, progress: prog, merged: mergedCodes(normalizeItems(order.items).items) };
   }
 
+  /* 📦 G3 封存：页面层已不再调用（旧 MAT 单执行入口已移除），仅为历史数据与
+     回放审计保留，新功能禁止调用。物品化工单执行走 buildItemExecCommands。 */
   /**
    * 执行工单（可多次调用以支持部分执行）：
    * 校验 → 逐物料走 applyStockChange → 累计执行数量 → 追加执行批次 → 更新状态。
@@ -1023,6 +1028,8 @@
     return { ok: true, order: order, cancelInfo: order.cancelInfo };
   }
 
+  /* 📦 G3 封存：页面层已不再调用（旧 MAT 单冲销入口已移除），仅为历史数据与
+     回放审计保留，新功能禁止调用。 */
   /**
    * 冲销工单：把已执行的数量按原方向反向写回库存，并关闭工单。
    * 保留 execQty / execBatches 作为执行历史，另记 reverseInfo 作为冲销凭证。
@@ -1063,6 +1070,8 @@
     return { ok: true, order: order, applied: applied, reverseInfo: order.reverseInfo };
   }
 
+  /* 📦 G3 封存：页面层已不再调用（旧 MAT 单「编辑计划」入口已移除），仅为历史数据
+     与回放审计保留，新功能禁止调用。物品化工单不允许改计划（取消后重建）。 */
   /**
    * 修改工单计划（明细 / 数量 / 日期）。
    *
@@ -1198,6 +1207,8 @@
     return { ok: true, value: n };
   }
 
+  /* 📦 G3 封存：页面层已不再调用（账本修数面板与 MAT 盘点写入口均已移除），仅为
+     历史数据与回放审计保留，新功能禁止调用。 */
   /**
    * 提交盘点：实盘数量 → 库存 → 差异流水（走统一写入口）。
    * @returns {{ok:boolean, error?:string, delta?:number, before?:number, balance?:number, txn?:object}}
@@ -1223,6 +1234,8 @@
 
   /* ================= 手工调整 ================= */
 
+  /* 📦 G3 封存：页面层已不再调用（台账单元格编辑与手工调整入口已移除），仅为
+     历史数据与回放审计保留，新功能禁止调用。 */
   function applyManualAdjust(state, matCode, rawQty, opts) {
     opts = opts || {};
     var parsed = parseStocktakeInput(rawQty);
@@ -1362,6 +1375,8 @@
    *   txnFixes: [{ seq, matCode, from, to }] 余量列需要改的行
    *   qtyFixes: [{ code, from, to, delta }]  库存数量与账本不符、需要触发收敛的物料
    */
+  /* 📦 G3 封存：页面层已不再调用（账本修数面板已移除），仅为历史数据与回放审计
+     保留，新功能禁止调用。 */
   function ledgerRepairPlan(state) {
     var txns = ((state && state.transactions) || []).slice().sort(function (a, b) {
       return (Number(a.seq) || 0) - (Number(b.seq) || 0);
@@ -1435,6 +1450,8 @@
     return legacy.concat(seqd);
   }
 
+  /* 📦 G3 封存：仅为历史数据与回放审计保留，新功能禁止调用。
+     （回放校验按钮仍只读调用本函数做账本核对；它本身不写任何数据。） */
   /**
    * 回放校验：从首条余量反推期初，逐条重算链式余量并与记录比对。
    * @returns {{ok:boolean, materials:number, transactions:number, compared:number, mismatches:Array}}

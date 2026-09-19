@@ -89,14 +89,13 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
   <div id="dash">
     <div class="section-title">📊 运营看板（本设备实时数据）</div>
     <div class="tiles" id="dashTiles"></div>
-    <div class="lowlist" id="lowList" style="display:none"></div>
   </div>
 
   <div class="section-title">📦 416MES 单机作业端</div>
   <div class="grid">
     <a class="card c-blue" href="index.html#ledger">
-      <div class="icon">📋</div><h3>物料台账</h3>
-      <p>主数据维护：编码不变、属性可变。支持 Excel 导入导出、闲鱼 XY 编号登记。</p>
+      <div class="icon">📋</div><h3>物料台账·历史</h3>
+      <p>历史台账只读视图：存量物料数据照常展示，数量账已封存；新物品请到「物品」页建档。</p>
       <span class="go">进入 →</span>
     </a>
     <a class="card c-green" href="index.html#label">
@@ -157,8 +156,6 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
       var totalVal = mats.reduce(function(a, m){ return a + (m.qty || 0) * (m.cost || 0); }, 0);
       var lastBackup = +(localStorage.getItem('mes416_last_backup') || 0);
       var days = lastBackup ? Math.floor((Date.now() - lastBackup) / 864e5) : 99;
-      var lows = mats.filter(function(m){ return (m.minQty || 0) > 0 && m.qty < m.minQty; });
-      var negs = mats.filter(function(m){ return m.qty < 0; });
       chipMes.className = 'chip ' + (days > 7 ? 'bad' : 'ok');
       chipMes.innerHTML = '<span class="dot"></span><span class="t">在管物料 ' + mats.length +
         ' 项 · 库存总值 ¥' + totalVal.toFixed(0) + ' · 待执行工单 ' + wips.length +
@@ -170,19 +167,13 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
         { n: '¥' + totalVal.toFixed(0), l: '库存总值', w: false },
         { n: wips.length, l: '待执行工单', w: wips.length > 0 },
         { n: (s.transactions || []).length, l: '库存流水', w: false },
-        { n: lows.length + negs.length, l: '库存预警', w: (lows.length + negs.length) > 0 },
         { n: lastBackup ? days + ' 天前' : '从未', l: '上次备份', w: days > 7 }
       ];
       document.getElementById('dashTiles').innerHTML = tiles.map(function(t){
         return '<div class="tile' + (t.w ? ' warn' : '') + '"><div class="num">' + t.n + '</div><div class="lbl">' + t.l + '</div></div>';
       }).join('');
-      if (lows.length || negs.length) {
-        var ll = document.getElementById('lowList');
-        ll.style.display = 'block';
-        ll.innerHTML = '<h4>⚠️ 库存预警（' + (lows.length + negs.length) + ' 项，需补货）</h4>' +
-          lows.map(function(m){ return '<div class="item"><span>' + m.code + ' ' + (m.name || '') + '</span><span><span class="q">' + m.qty + '</span> / 安全 ' + m.minQty + '<a href="index.html#ledger?code=' + encodeURIComponent(m.code) + '">去补货 →</a></span></div>'; }).join('') +
-          negs.map(function(m){ return '<div class="item"><span>' + m.code + ' ' + (m.name || '') + '（负库存）</span><span><span class="q">' + m.qty + '</span><a href="index.html#ledger?code=' + encodeURIComponent(m.code) + '">去核查 →</a></span></div>'; }).join('');
-      }
+      /* G3：低库存/负库存预警卡片已移除 —— MAT 数量账封存，minQty 不再预警。
+         台账页本身已是「物料台账·历史」只读视图。 */
     } else {
       chipMes.className = 'chip ok';
       chipMes.innerHTML = '<span class="dot"></span><span class="t">本地址 localStorage 快照（本设备暂无台账数据）· 服务在线 ≠ 业务数据已同步</span>';

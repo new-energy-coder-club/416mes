@@ -43,11 +43,12 @@ test('P4-1 物料 upsert 绝不能带绝对 qty —— 入队前与提交前两�
     '提交前的剥除必须在 fsPost 之前');
 });
 
-test('P4-1 裁决要把 qty 的改动作为库存直写提交，而不是靠 upsert 落地', () => {
+test('P4-1→G3 裁决的 qty 改动只落地本地，不再库存直写飞书（数量账封存）', () => {
   const g = fnSrc('fsResolveGroup');
   assert.ok(/r\.stockWrites/.test(g), 'fsResolveGroup 没有处理 applyMerge 产出的 stockWrites');
-  assert.ok(/fsPushStock\(w\.matCode/.test(g), 'stockWrites 必须走库存直写（不然账本里没有流水）');
-  assert.ok(/needsStocktake/.test(g), '缺基线的情况必须提示走盘点，而不是硬猜');
+  assert.ok(!/fsPushStock\(/.test(g), 'G3：qty 冲突裁决不得再走库存直写（页面层已无 fsPushStock）');
+  assert.ok(/数量账封存/.test(g), '丢弃库存直写必须给出说明日志');
+  assert.ok(/needsStocktake/.test(g), '缺基线的情况必须提示，而不是硬猜');
   assert.ok(/strippedQty/.test(g), '被拦下的绝对 qty 要如实报出来');
 });
 

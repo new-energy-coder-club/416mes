@@ -88,18 +88,15 @@ test('index.html 内联脚本：不得调用未定义的大写工具函数（T/N
   assert.deepEqual([...new Set(suspicious)], [], '调用了未定义的短工具函数：' + suspicious.join(', '));
 });
 
-test('B4 账本修数：按钮、函数、纯逻辑三处必须齐全且接线正确', () => {
+test('G3 账本修数：按钮、函数、面板已随 MAT 写路径封存移除', () => {
   const fs = require('node:fs');
   const path = require('node:path');
   const h = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-  assert.ok(/id="btnLedgerRepair"/.test(h), '缺少账本修数按钮');
-  assert.ok(/async function fsLedgerRepair\(/.test(h), '缺少 fsLedgerRepair 实现');
-  assert.ok(/getElementById\('btnLedgerRepair'\)\.addEventListener\('click'/.test(h), '按钮没接线');
-  // 必须走纯函数算方案，而不是在 UI 里各算一遍
-  assert.ok(/CORE\.ledgerRepairPlan\(state\)/.test(h), '必须用 CORE.ledgerRepairPlan 算方案');
-  // 两道安全闸：闸门开启时拒绝、执行前要确认
-  assert.ok(/if \(fsBulkHold\(\)\)/.test(h), '批量对账闸门开启时必须拒绝修数');
-  assert.ok(/if \(!confirm\(lines\.join/.test(h), '执行前必须二次确认');
-  // delta 绝不能被改（只能改 balance）
-  assert.ok(/balance: bySeq\[t\.seq\]/.test(h) && !/delta: bySeq/.test(h), '只能改余量列，不能动 delta');
+  assert.ok(!/id="btnLedgerRepair"/.test(h), '账本修数按钮必须移除');
+  assert.ok(!/async function fsLedgerRepair\(/.test(h), 'fsLedgerRepair 实现必须删除');
+  assert.ok(!/getElementById\('btnLedgerRepair'\)\.addEventListener\('click'/.test(h),
+    '按钮接线必须删除');
+  // mes-core 的纯函数保留（供历史数据与回放审计），但页面层不得再调用
+  assert.ok(!/CORE\.ledgerRepairPlan\(state\)/.test(h), '页面层不得再调用 ledgerRepairPlan');
+  assert.ok(!/CORE\.applyStocktake\(/.test(h), '页面层不得再调用 applyStocktake');
 });

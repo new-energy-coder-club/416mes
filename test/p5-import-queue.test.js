@@ -133,7 +133,7 @@ test('P5-1「待人工处理」的条目不能再被自动重试', () => {
   const flush = region('async function fsFlushQueueInner', 'async function fsBoot').src;
   assert.ok(/item\.status === 'needs_attention'\)\s*\{\s*held\+\+;\s*continue;/.test(flush),
     '冲刷没有跳过 needs_attention → 会无限重试一个已知不会成功的请求，还占着串行链');
-  const push = region('async function fsPush(item)', 'function fsPushStock').src;
+  const push = region('async function fsPush(item)', '/* G3：fsPushStock').src;
   assert.ok(/needs_attention/.test(push), 'fsPush 里再次触发同一条目时没有检查它是否已判待人工');
 });
 

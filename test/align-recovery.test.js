@@ -150,10 +150,12 @@ test('阶段3：库存流水必须有独立页签，且不得再寄生在物料�
   const ledgerStart = HTML.indexOf('id="tab-ledger"');
   const ledger = HTML.slice(ledgerStart, HTML.indexOf('</section>', ledgerStart));
   assert.ok(!ledger.includes('id="txnTable"'), 'txnTable 不得再留在台账页');
-  /* 独立页必须保留三个工具与表格 id（有测试/深链依赖） */
+  /* 独立页必须保留三个工具与表格 id（有测试/深链依赖）。
+     G3：「账本修数」按钮已随 MAT 写路径封存移除（页面层不再有库存写入口）。 */
   const txnSec = HTML.slice(HTML.indexOf('id="tab-txn"'), HTML.indexOf('</section>', HTML.indexOf('id="tab-txn"')));
-  ['txnTable', 'txnSummary', 'btnAuditReplay', 'btnLedgerRepair', 'btnAuditExport'].forEach(id =>
+  ['txnTable', 'txnSummary', 'btnAuditReplay', 'btnAuditExport'].forEach(id =>
     assert.ok(txnSec.includes('id="' + id + '"'), '#tab-txn 必须包含 #' + id));
+  assert.ok(!txnSec.includes('id="btnLedgerRepair"'), '账本修数按钮已移除（G3 封存 MAT 写路径）');
 });
 
 test('阶段3：流水渲染不得再用 slice(0,50) 截断，必须有筛选与加载更多', () => {
@@ -435,11 +437,12 @@ test('阶段5：已执行工单不得直接删除，必须先冲销（入口与�
     '同号重复工单不得走普通删除（会连飞书唯一记录一起删）');
 });
 
-test('阶段5：冲销预览必须只列已执行数量，并给出冲销后库存', () => {
+test('G3：冲销预览与 doReverse 已随 MAT 写路径一并移除（旧单只读，无库存回退入口）', () => {
   const s = fnSrc('showWipDetail');
-  assert.match(s, /filter\(it => it\.executed > 0\)/, '只列已执行的项，未执行的不该被冲销');
-  assert.match(s, /冲销后/, '必须给出冲销后库存，让用户看清影响');
-  assert.match(s, /确认冲销/, '必须二次确认');
+  assert.ok(!/const doReverse/.test(s), 'doReverse 死代码必须删除');
+  assert.ok(!/showReversePreview/.test(s), '冲销预览函数必须删除');
+  assert.ok(!/btnWipReverse/.test(s), '冲销按钮接线必须删除（按钮早已不渲染）');
+  assert.ok(!/fsPushStock/.test(s), '详情页不得再有库存直写调用');
 });
 
 test('阶段5：删除/取消/冲销后都必须回到列表并清掉当前对象条', () => {

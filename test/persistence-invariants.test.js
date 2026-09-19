@@ -107,11 +107,13 @@ test('推送成功要把业务键记进 __syncedKeys；删除成功要摘掉', (
   assert.ok(/filter\(k => !gone\.has\(String\(k\)\)\)/.test(HTML), 'delete 成功后没有从 __syncedKeys 摘掉');
 });
 
-test('手工改库存：必须先本地算账落盘，再 await 网络', () => {
-  const i = HTML.indexOf("const r = CORE.applyManualAdjust(state, m.code, v, { reason: reason || '（未填）' });");
-  assert.ok(i > 0, '找不到手工改数量的处理块');
-  const pushIdx = HTML.indexOf("await fsPushRecord('materials', [m]);", i);
-  assert.ok(pushIdx > i, 'applyManualAdjust 必须在 await fsPushRecord 之前（否则网络挂住时改动只在内存里）');
-  const region = HTML.slice(i, pushIdx);
-  assert.ok(/save\(\); renderLedger\(\); renderTxns\(\);/.test(region), '算账之后、网络之前没有落盘渲染');
+test('G3 手工改库存入口已移除：台账只读，页面层不再有 applyManualAdjust / fsPushStock 调用', () => {
+  /* 原不变式（先本地算账落盘、再 await 网络）保护的是「台账单元格改数量」写入口；
+     G3 该入口已随物料台账只读化整体移除，这里钉住新现实：页面层零库存写调用。 */
+  assert.ok(HTML.indexOf('function fsPushStock(') < 0, 'fsPushStock 函数本体必须已删除');
+  const code = HTML.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
+  assert.ok(!/CORE\.applyManualAdjust\(/.test(code), '页面层不得再调用 applyManualAdjust');
+  assert.ok(!/fsPushStock\(/.test(code), '页面层不得再调用 fsPushStock');
+  assert.ok(!/id="btnAddMat"/.test(HTML) && !/id="btnDelMat"/.test(HTML),
+    '台账新增/删除入口必须已移除');
 });
