@@ -64,6 +64,13 @@
     return null;
   }
 
+  /** 唯一物品（state.items，G1 物品化工单的操作对象） */
+  function findItem(state, code) {
+    var list = (state && state.items) || [];
+    for (var i = 0; i < list.length; i++) if (list[i] && list[i].code === code) return list[i];
+    return null;
+  }
+
   function isOrderExecuted(order) {
     return !!order && BLOCKED_STATUSES.indexOf(order.status) >= 0;
   }
@@ -88,6 +95,7 @@
    * 兼容 Phase 1 之前「已执行但无 execQty」的旧数据：视为按计划全额执行。
    */
   function orderProgress(order) {
+    if (isItemizedOrder(order)) return itemizedOrderProgress(order);
     var planned = normalizeItems(order && order.items).items;
     var exec = executedMap(order);
     var hasExecRecord = Object.keys(exec).length > 0;
@@ -166,6 +174,104 @@
     return (normalized || []).filter(function (e) { return e.lines > 1; }).map(function (e) { return e.matCode; });
   }
 
+  /* ================= 物品化工单（G1：按唯一物品码逐件执行） =================
+   *
+   * 与「物料 × 数量」的旧形态并存，靠数据形态区分：
+   *   旧形态  items=[{matCode, qty}]          execQty=[{matCode, qty}]
+   *   物品化  items=[{itemCodes:[码…]}]       execItems=[已 APPLIED 的物品码]
+   * 物品化执行的是「唯一物品」的位置变更（issue/receive），由物品操作协议落地；
+   * 这里只记工单进度，**绝不**经过 applyStockChange / state.transactions ——
+   * 物品不是物料数量，混进库存流水会把两套账都污染。
+   */
+
+  /**
+   * 物品化工单判别：显式 itemized:true，或明细首行就是物品码行（itemCodes）。
+   * 物品化行没有 matCode/qty —— 凡是按 matCode 处理的旧逻辑（normalizeItems、
+   * canonicalOrder 旧分支）都会把它们静默丢光，所以判别必须先于一切归一化。
+   */
+  function isItemizedOrder(order) {
+    if (!order) return false;
+    if (order.itemized === true) return true;
+    var items = order.items;
+    return !!(Array.isArray(items) && items.length && items[0] && Array.isArray(items[0].itemCodes));
+  }
+
+  /**
+   * 物品化明细归一化：
+   *   · 无效行（没有 itemCodes / 清空后一个码都不剩）→ dropped，不静默保留；
+   *   · 同一物品码在整单出现第二次 → duplicates。物品是唯一的，同码两件在同一单里
+   *     没有业务意义，还会把「已扫 / 未扫」判错 —— 所以重复必须让调用方**拒绝**，
+   *     而不是像物料那样合并数量。
+   * 不做跨行合并：每一行是有业务含义的分组（同一批 / 同一托），行结构原样保留。
+   * @returns {{items: Array<{itemCodes:string[]}>, dropped: Array, duplicates: string[]}}
+   */
+  function normalizeItemLines(items) {
+    var lines = [], dropped = [], dups = [];
+    var seen = Object.create(null), dupSeen = Object.create(null);
+    (items || []).forEach(function (it, idx) {
+      var raw = (it && Array.isArray(it.itemCodes)) ? it.itemCodes : null;
+      if (!raw) { dropped.push({ raw: it, index: idx, reason: '缺少物品码列表' }); return; }
+      var codes = [];
+      raw.forEach(function (c) {
+        var s = String(c == null ? '' : c).trim();
+        if (s) codes.push(s);
+      });
+      if (!codes.length) { dropped.push({ raw: it, index: idx, reason: '物品码列表为空' }); return; }
+      codes.forEach(function (s) {
+        if (seen[s]) { if (!dupSeen[s]) { dupSeen[s] = true; dups.push(s); } }
+        else seen[s] = true;
+      });
+      lines.push({ itemCodes: codes });
+    });
+    return { items: lines, dropped: dropped, duplicates: dups };
+  }
+
+  /** 物品化工单的全部计划码（跨行拍平，保持出现顺序） */
+  function itemizedPlannedCodes(order) {
+    var out = [];
+    normalizeItemLines(order && order.items).items.forEach(function (l) {
+      l.itemCodes.forEach(function (c) { out.push(c); });
+    });
+    return out;
+  }
+
+  function codeSet(list) {
+    var set = Object.create(null);
+    (list || []).forEach(function (c) { set[String(c)] = true; });
+    return set;
+  }
+
+  /**
+   * 物品化进度：plannedTotal = Σ 各行 itemCodes.length；executedTotal = 已 APPLIED 的
+   * 计划码个数（= 良构数据下的 execItems.length；只数属于本单的码，脏数据不会把
+   * 进度推出 100%）。兼容「已执行但无 execItems」的旧数据：视为全扫完。
+   */
+  function itemizedOrderProgress(order) {
+    var lines = normalizeItemLines(order && order.items).items;
+    var execSet = codeSet(order && order.execItems);
+    var legacyDone = !!order && order.status === STATUS.DONE && Object.keys(execSet).length === 0;
+
+    var plannedTotal = 0, executedTotal = 0;
+    var items = lines.map(function (l) {
+      var planned = l.itemCodes.length;
+      var executed = legacyDone ? planned : l.itemCodes.filter(function (c) { return execSet[c]; }).length;
+      plannedTotal += planned;
+      executedTotal += executed;
+      return { itemCodes: l.itemCodes.slice(), planned: planned, executed: executed, remaining: planned - executed };
+    });
+
+    return {
+      items: items,
+      itemized: true,
+      plannedTotal: plannedTotal,
+      executedTotal: executedTotal,
+      remainingTotal: plannedTotal - executedTotal,
+      anyExecuted: executedTotal > 0,
+      fullyExecuted: plannedTotal > 0 && executedTotal >= plannedTotal,
+      percent: plannedTotal > 0 ? Math.round(executedTotal / plannedTotal * 100) : 0
+    };
+  }
+
   /* ================= 工单创建 ================= */
 
   /**
@@ -174,6 +280,11 @@
    */
   function createOrder(state, opts) {
     opts = opts || {};
+    /* 物品化分支：判别必须看原始 opts.items —— 物品化行没有 matCode，
+       一旦先进 normalizeItems 会被全部丢弃，连「这是物品化单」都判不出来。 */
+    if (opts.itemized === true || (Array.isArray(opts.items) && opts.items.length && opts.items[0] && Array.isArray(opts.items[0].itemCodes))) {
+      return createItemizedOrder(state, opts);
+    }
     var type = opts.type;
     var errors = [];
     if (!type) errors.push('缺少工单类型');
@@ -212,6 +323,54 @@
     return { ok: true, errors: [], order: order, merged: mergedCodes(norm.items), dropped: norm.dropped };
   }
 
+  /**
+   * 创建物品化工单：明细是物品码行（itemCodes），不是「物料 × 数量」。
+   * 校验规则：
+   *   · 物品必须已建档（state.items 里找得到）—— 扫码执行的对象必须真实存在；
+   *   · **不校验在库状态**：建单时物品可以在任何状态，方向匹配是扫码那一刻的事
+   *     （见 validateItemScan），建单就锁死状态会让「先建单后收货」没法做；
+   *   · 同一物品码重复 → 拒绝（normalizeItemLines 只报告，这里落实拒绝）。
+   */
+  function createItemizedOrder(state, opts) {
+    var errors = [];
+    var type = opts.type;
+    if (!type) errors.push('缺少工单类型');
+    var norm = normalizeItemLines(opts.items);
+    if (!norm.items.length) errors.push('请至少添加一行有效明细（物品码列表）');
+    if (norm.duplicates.length) {
+      errors.push('同一物品码重复：' + norm.duplicates.join('、') + '（同一物品在同一单中只能出现一次）');
+    }
+    if (!state || !Array.isArray(state.workorders)) errors.push('state.workorders 不可用');
+
+    var missing = [];
+    norm.items.forEach(function (l) {
+      l.itemCodes.forEach(function (c) { if (!findItem(state, c)) missing.push(c); });
+    });
+    if (missing.length) errors.push('物品未建档：' + missing.join('、'));
+
+    if (errors.length) return { ok: false, errors: errors, dropped: norm.dropped, duplicates: norm.duplicates };
+
+    var order = {
+      code: opts.code,
+      type: type,
+      date: opts.date || '',
+      itemized: true,                              // 判别位：物品化工单
+      items: norm.items.map(function (l) { return { itemCodes: l.itemCodes.slice() }; }),
+      status: '未执行',
+      execTime: '',
+      execQty: [],                                 // 物品化单恒为空（旧列占位，保持字段形状一致）
+      execItems: [],                               // 已 APPLIED 的物品码
+      execBatches: []
+    };
+    /* B10 闸门同旧形态：同一工单号不能建两张单 */
+    if (opts.code && state.workorders.some(function (w) { return w && w.code === opts.code; })) {
+      return { ok: false, errors: ['工单号已存在：' + opts.code + '（同一工单号不能建两张单）'],
+        dropped: norm.dropped, duplicates: norm.duplicates };
+    }
+    state.workorders.push(order);
+    return { ok: true, errors: [], order: order, duplicates: [], dropped: norm.dropped };
+  }
+
   /* ================= 工单同键重复：诊断与安全收敛 ================= */
 
   /** 深拷贝 JSON 业务数据（工单对象只含可序列化字段） */
@@ -233,6 +392,25 @@
    */
   function canonicalOrder(order) {
     order = order || {};
+    /* P0：物品化单必须按物品化形态规范化 —— 物品化行没有 matCode，
+       走下面的 normalizeItems 会被全部丢光，于是两张「同号不同码」的物品化单
+       都规范化成 items:[]，被误判成内容全同而允许收敛删单。 */
+    if (isItemizedOrder(order)) {
+      /* 行结构只是录入时的分组；飞书明细列是扁平 token 流，上行/下行后行边界丢失。
+         身份比较必须落在「扁平排序后的码集合」上，否则同一张单按单行/多行录入
+         会被误判内容不同（或更糟：被误判全同）。 */
+      var lines = [{ itemCodes: itemizedPlannedCodes(order).sort() }];
+      var execItems = Object.keys(codeSet(order.execItems)).sort();
+      return {
+        code: String(order.code || '').trim(),
+        type: order.type || '', date: order.date || '', status: order.status || '未执行',
+        itemized: true,
+        items: lines, execTime: order.execTime || '', execItems: execItems,
+        execBatches: cloneJson(order.execBatches || []),
+        reverseInfo: order.reverseInfo ? cloneJson(order.reverseInfo) : null,
+        cancelInfo: order.cancelInfo ? cloneJson(order.cancelInfo) : null
+      };
+    }
     var items = normalizeItems(order.items).items.map(function (e) {
       return { matCode: e.matCode, qty: e.qty };
     }).sort(function (a, b) { return a.matCode.localeCompare(b.matCode); });
@@ -554,11 +732,265 @@
     };
   }
 
+  /* ================= 物品化工单：扫码校验与执行命令（G1） ================= */
+
+  /**
+   * 物品当前位置（与 UniqueItems.currentPosition 同规则：物品 → 容器 → 库位）。
+   * 这里是非抛出版本：解析不出来就返回 null 位，由调用方决定怎么报错 ——
+   * mes-core 不依赖 unique-items.js，保持纯逻辑可独立加载。
+   */
+  function itemPosition(state, itemCode) {
+    var item = findItem(state, itemCode);
+    if (!item) return { item: null, container: null, location: null };
+    if ((item.status || 'unknown') !== 'in_stock' || !item.container) {
+      return { item: item, container: null, location: null };
+    }
+    var container = null, location = null;
+    ((state && state.containers) || []).forEach(function (r) { if (r && r.code === item.container) container = r; });
+    if (container) {
+      ((state && state.locations) || []).forEach(function (r) { if (r && r.code === container.loc) location = r; });
+    }
+    return { item: item, container: container, location: location };
+  }
+
+  /**
+   * 扫码校验（物品化）：属于本单 / 未扫过 / 物品状态与工单方向匹配。
+   * 方向规则：出库 LL/JH 要求物品在库（in_stock）；
+   *           入库 BH/TL 要求物品待入或已出（pending | out）。
+   * @returns {{ok:boolean, error?:string, code?:string, item?:object}}
+   */
+  function validateItemScan(state, order, code) {
+    if (!order) return { ok: false, error: '工单不存在' };
+    if (!isItemizedOrder(order)) return { ok: false, error: '工单 ' + (order.code || '') + ' 不是物品化工单' };
+    if (isCancelled(order)) return { ok: false, error: '工单 ' + order.code + ' 已取消，不能扫码执行' };
+    if (isFullyExecuted(order)) return { ok: false, error: '工单 ' + order.code + ' 已执行完毕' };
+    var c = String(code == null ? '' : code).trim();
+    if (!c) return { ok: false, error: '物品码为空' };
+    if (itemizedPlannedCodes(order).indexOf(c) < 0) {
+      return { ok: false, error: '物品 ' + c + ' 不属于工单 ' + (order.code || '') };
+    }
+    if (codeSet(order.execItems)[c]) {
+      return { ok: false, error: '物品 ' + c + ' 已扫过，不能重复执行' };
+    }
+    var item = findItem(state, c);
+    if (!item) return { ok: false, error: '物品未建档：' + c };
+    var st = item.status || 'unknown';
+    if (isOutbound(order.type)) {
+      if (st !== 'in_stock') {
+        return { ok: false, error: '物品 ' + c + ' 当前状态「' + st + '」，' + (WIP_NAMES[order.type] || order.type) + '（出库）要求在库（in_stock）' };
+      }
+    } else if (st !== 'pending' && st !== 'out') {
+      return { ok: false, error: '物品 ' + c + ' 当前状态「' + st + '」，' + (WIP_NAMES[order.type] || order.type) + '（入库）要求待入或已出（pending | out）' };
+    }
+    return { ok: true, code: c, item: item };
+  }
+
+  /**
+   * 把「已扫码的一批物品」变成物品操作命令（只生成计划，不改任何状态、不碰库存）。
+   *   LL/JH（出库）→ issue：位置**不扫**，按 itemPosition（U.currentPosition 同规则）
+   *     从档案取当前位置作为 source；
+   *   BH/TL（入库）→ receive：必须给 opts.target = {loc, container}（操作人选择的入库目标）。
+   * ops 与 commands 一一对应，是写进 execBatches 的留痕：{opId,itemCode,fromLoc,fromContainer}。
+   *   fromLoc/fromContainer 一律记录「冲销时要用到的位置」：
+   *   LL/JH 是执行前位置（冲销 receive 回原位）；BH/TL 是 receive 的目标（冲销 issue 由此取出）。
+   * @returns {{ok:boolean, errors:string[], commands:Array, ops:Array}}
+   */
+  function buildItemExecCommands(state, order, codes, opts) {
+    opts = opts || {};
+    var errors = [], commands = [], ops = [];
+    if (!order) return { ok: false, errors: ['工单不存在'], commands: [], ops: [] };
+    if (!isItemizedOrder(order)) return { ok: false, errors: ['工单 ' + (order.code || '') + ' 不是物品化工单'], commands: [], ops: [] };
+    var outbound = isOutbound(order.type);
+    var target = opts.target || null;
+    if (!outbound) {
+      if (!target || !target.loc || !target.container) {
+        return { ok: false, errors: [(WIP_NAMES[order.type] || order.type) + '（入库）必须指定目标库位与容器（opts.target）'], commands: [], ops: [] };
+      }
+      /* 目标必须真实存在，否则命令发到操作协议那里也会被拒，不如在这里就报清楚 */
+      var tloc = null, tctn = null;
+      ((state && state.locations) || []).forEach(function (r) { if (r && r.code === target.loc) tloc = r; });
+      ((state && state.containers) || []).forEach(function (r) { if (r && r.code === target.container) tctn = r; });
+      if (!tloc) errors.push('目标库位未建档：' + target.loc);
+      if (!tctn) errors.push('目标容器未建档：' + target.container);
+    }
+    (codes || []).forEach(function (raw, idx) {
+      var v = validateItemScan(state, order, raw);
+      if (!v.ok) { errors.push(v.error); return; }
+      var c = v.code;
+      var opId = typeof opts.opIdFor === 'function' ? opts.opIdFor(c, idx) : (String(order.code || 'ITEM') + '-' + c);
+      if (outbound) {
+        var pos = itemPosition(state, c);
+        if (!pos.container || !pos.location) {
+          errors.push('物品 ' + c + ' 标记在库但位置无法解析（容器或库位缺失）');
+          return;
+        }
+        commands.push({ opId: opId, kind: 'issue', itemCode: c, source: { loc: pos.location.code, container: pos.container.code } });
+        ops.push({ opId: opId, itemCode: c, fromLoc: pos.location.code, fromContainer: pos.container.code });
+      } else {
+        var tl = String(target.loc), tc = String(target.container);
+        commands.push({ opId: opId, kind: 'receive', itemCode: c, target: { loc: tl, container: tc } });
+        ops.push({ opId: opId, itemCode: c, fromLoc: tl, fromContainer: tc });
+      }
+    });
+    return { ok: errors.length === 0, errors: errors, commands: commands, ops: ops };
+  }
+
+  /**
+   * 物品操作回执落账：只有 phase==='APPLIED' 的码才进 execItems / execBatches / status；
+   * REJECTED（或缺回执）原样退回给调用方展示，进度不变。
+   * 幂等：opId 已在历史批次里出现过、或码已在 execItems 里的回执直接忽略 ——
+   * 超时重试收回的重复回执不能把进度数两遍。
+   *
+   * 铁律：物品化执行**不碰** applyStockChange / state.transactions / 物料库存数量。
+   * 物品的位置变化由物品操作协议负责，库存台账（物料 × 数量）与唯一物品是两套账。
+   *
+   * @param {Array<{opId:string, itemCode:string, phase:string, fromLoc?:string, fromContainer?:string, error?:string}>} results
+   */
+  function applyItemExecResult(state, order, results, opts) {
+    opts = opts || {};
+    if (!order) return { ok: false, error: '工单不存在' };
+    if (!isItemizedOrder(order)) return { ok: false, error: '工单 ' + (order.code || '') + ' 不是物品化工单' };
+    if (isCancelled(order)) return { ok: false, error: '工单 ' + order.code + ' 已取消' };
+    var planned = itemizedPlannedCodes(order);
+    var execSet = codeSet(order.execItems);
+    var opSeen = Object.create(null);
+    ((order.execBatches) || []).forEach(function (b) {
+      ((b && b.ops) || []).forEach(function (o) { if (o && o.opId) opSeen[o.opId] = true; });
+    });
+
+    var applied = [], rejected = [];
+    (results || []).forEach(function (r) {
+      if (!r) return;
+      var c = String(r.itemCode == null ? '' : r.itemCode).trim();
+      var opId = String(r.opId == null ? '' : r.opId);
+      if (r.phase !== 'APPLIED') {
+        rejected.push({ opId: opId, itemCode: c, error: r.error || ('未应用：' + (r.phase || '无阶段')) });
+        return;
+      }
+      if (!c || planned.indexOf(c) < 0) { rejected.push({ opId: opId, itemCode: c, error: '物品不属于本单' }); return; }
+      if (execSet[c]) { rejected.push({ opId: opId, itemCode: c, error: '该码已入账，忽略重复回执' }); return; }
+      if (opId && opSeen[opId]) { rejected.push({ opId: opId, itemCode: c, error: '该操作已入账，忽略重复回执' }); return; }
+      applied.push({ opId: opId, itemCode: c, fromLoc: r.fromLoc || '', fromContainer: r.fromContainer || '' });
+      execSet[c] = true;
+      if (opId) opSeen[opId] = true;
+    });
+    if (!applied.length) return { ok: false, error: '没有可入账的 APPLIED 结果', applied: [], rejected: rejected };
+
+    var now = opts.now ? new Date(opts.now) : new Date();
+    var execTime = now.toLocaleString();
+    order.execItems = (Array.isArray(order.execItems) ? order.execItems : [])
+      .concat(applied.map(function (a) { return a.itemCode; }));
+    order.execTime = execTime;
+    order.execBatches = (order.execBatches || []).concat([{
+      at: execTime,
+      operator: opts.operator != null ? opts.operator : ((state && state.operator) || ''),
+      itemCodes: applied.map(function (a) { return a.itemCode; }),
+      ops: applied.map(function (a) {
+        return { opId: a.opId, itemCode: a.itemCode, fromLoc: a.fromLoc, fromContainer: a.fromContainer };
+      })
+    }]);
+
+    var prog = orderProgress(order);
+    order.status = prog.fullyExecuted ? STATUS.DONE : STATUS.PARTIAL;
+    return {
+      ok: true, applied: applied, rejected: rejected, execTime: execTime,
+      status: order.status, progress: prog, partial: !prog.fullyExecuted
+    };
+  }
+
+  /**
+   * 物品化冲销计划：按 execBatches 留痕的 fromLoc/fromContainer 逐件反向。
+   *   LL/JH 执行是 issue（出库）→ 冲销 receive 回原位（target = 留痕位置）；
+   *   BH/TL 执行是 receive（入库）→ 冲销 issue 从留痕位置取出（source = 留痕位置）。
+   * 只生成计划，不改任何状态；回执由调用方按物品操作协议收回后交 applyItemReverseResult。
+   */
+  function buildItemReverseCommands(state, order, opts) {
+    opts = opts || {};
+    if (!order) return { ok: false, errors: ['工单不存在'], commands: [] };
+    if (!isItemizedOrder(order)) return { ok: false, errors: ['工单 ' + (order.code || '') + ' 不是物品化工单'], commands: [] };
+    if (isCancelled(order)) return { ok: false, errors: ['工单 ' + order.code + ' 已取消，无需冲销'], commands: [] };
+    var prog = orderProgress(order);
+    if (!prog.anyExecuted) return { ok: false, errors: ['工单尚未执行任何物品，无需冲销；可直接「取消」'], commands: [] };
+
+    var outbound = isOutbound(order.type);
+    var commands = [], errors = [];
+    ((order.execBatches) || []).forEach(function (b) {
+      ((b && b.ops) || []).forEach(function (o) {
+        if (!o || !o.itemCode) return;
+        var loc = o.fromLoc || '', container = o.fromContainer || '';
+        if (!loc || !container) {
+          errors.push('物品 ' + o.itemCode + ' 缺少执行时的位置留痕，无法生成反向命令');
+          return;
+        }
+        var opId = typeof opts.opIdFor === 'function'
+          ? opts.opIdFor(o.itemCode, o.opId)
+          : ('REV-' + (o.opId || (String(order.code || 'ITEM') + '-' + o.itemCode)));
+        if (outbound) {
+          commands.push({ opId: opId, kind: 'receive', itemCode: o.itemCode, target: { loc: loc, container: container }, reverseOf: o.opId || '' });
+        } else {
+          commands.push({ opId: opId, kind: 'issue', itemCode: o.itemCode, source: { loc: loc, container: container }, reverseOf: o.opId || '' });
+        }
+      });
+    });
+    return { ok: errors.length === 0, errors: errors, commands: commands };
+  }
+
+  /**
+   * 冲销回执落账：全部反向命令都 APPLIED 才关单（已取消 + reverseInfo 留痕）。
+   * G1 不支持部分冲销 —— 与旧形态 reverseOrder「全量反向后关单」同一语义；
+   * 有未完成的反向操作时原样报出 pending，工单保持原状态。
+   * 同样**不碰**库存与流水：反向的位置变化已由物品操作协议落地。
+   *
+   * @param {Array<{opId:string, phase:string, error?:string}>} results 按执行回执的 opId 对应
+   */
+  function applyItemReverseResult(state, order, results, opts) {
+    opts = opts || {};
+    if (!order) return { ok: false, error: '工单不存在' };
+    if (!isItemizedOrder(order)) return { ok: false, error: '工单 ' + (order.code || '') + ' 不是物品化工单' };
+    if (isCancelled(order)) return { ok: false, error: '工单 ' + order.code + ' 已取消，无需冲销' };
+    var prog = orderProgress(order);
+    if (!prog.anyExecuted) return { ok: false, error: '工单尚未执行任何物品，无需冲销；可直接「取消」' };
+
+    var byOp = Object.create(null);
+    (results || []).forEach(function (r) {
+      if (!r) return;
+      if (r.opId != null) byOp[String(r.opId)] = r;
+      /* 冲销命令的 opId 是「REV-原opId」，回执按新 opId 回来；
+         reverseOf 把它对回执行时的原始 opId，两种键都索引上 */
+      if (r.reverseOf != null && r.reverseOf !== '') byOp[String(r.reverseOf)] = r;
+    });
+    var done = [], pending = [];
+    ((order.execBatches) || []).forEach(function (b) {
+      ((b && b.ops) || []).forEach(function (o) {
+        if (!o || !o.itemCode) return;
+        var r = byOp[String(o.opId || '')] || byOp['REV-' + String(o.opId || '')];
+        if (r && r.phase === 'APPLIED') done.push(o.itemCode);
+        else pending.push({ opId: o.opId || '', itemCode: o.itemCode, error: r ? (r.error || ('未应用：' + (r.phase || '无阶段'))) : '缺少回执' });
+      });
+    });
+    if (pending.length) {
+      return { ok: false, error: '尚有 ' + pending.length + ' 件物品未完成反向操作，不能关单', pending: pending, applied: done };
+    }
+
+    var now = opts.now ? new Date(opts.now) : new Date();
+    var at = now.toLocaleString();
+    order.reverseInfo = {
+      at: at,
+      operator: opts.operator != null ? opts.operator : ((state && state.operator) || ''),
+      reason: opts.reason || ('冲销 ' + order.code),
+      itemCodes: done.slice()
+    };
+    order.reversedAt = at;
+    order.status = STATUS.CANCELLED;
+    return { ok: true, order: order, applied: done, reverseInfo: order.reverseInfo };
+  }
+
   /* ================= 工单取消与冲销 ================= */
 
   /**
    * 取消工单：仅允许「未执行任何数量」的工单（待执行）。
    * 已执行过（含部分执行）的工单必须先「冲销」，避免库存与状态脱节。
+   * 物品化工单同样适用：execItems 为空（一件未扫）即可直接取消。
    */
   function cancelOrder(state, order, opts) {
     opts = opts || {};
@@ -708,12 +1140,19 @@
   /** 工单完整历史追溯：创建 → 各次执行批次 → 取消/冲销 */
   function orderHistory(order) {
     if (!order) return [];
-    var hist = [{ kind: 'create', at: order.date || '', operator: '', text: '创建工单（' + (WIP_NAMES[order.type] || order.type) + '），计划 ' + normalizeItems(order.items).items.length + ' 项' }];
+    var plannedDesc = isItemizedOrder(order)
+      ? itemizedPlannedCodes(order).length + ' 件物品'
+      : normalizeItems(order.items).items.length + ' 项';
+    var hist = [{ kind: 'create', at: order.date || '', operator: '', text: '创建工单（' + (WIP_NAMES[order.type] || order.type) + '），计划 ' + plannedDesc }];
     ((order.execBatches) || []).forEach(function (b, i) {
+      var text = Array.isArray(b.itemCodes)
+        ? '第 ' + (i + 1) + ' 次执行：扫码 ' + b.itemCodes.length + ' 件（' + b.itemCodes.join('，') + '）'
+        : '第 ' + (i + 1) + ' 次执行：' + (b.items || []).map(function (x) { return x.matCode + ' ' + (x.delta > 0 ? '+' : '') + x.delta; }).join('，');
       hist.push({
         kind: 'execute', at: b.at || '', operator: b.operator || '', batch: i + 1,
         items: b.items || [],
-        text: '第 ' + (i + 1) + ' 次执行：' + (b.items || []).map(function (x) { return x.matCode + ' ' + (x.delta > 0 ? '+' : '') + x.delta; }).join('，')
+        itemCodes: b.itemCodes,
+        text: text
       });
     });
     /* 计划修改也要进历史：只改 items 不记录的话，事后没人能说清
@@ -1663,6 +2102,16 @@
     isOrderExecuted: isOrderExecuted,
     normalizeItems: normalizeItems,
     mergedCodes: mergedCodes,
+    isItemizedOrder: isItemizedOrder,
+    normalizeItemLines: normalizeItemLines,
+    itemizedPlannedCodes: itemizedPlannedCodes,
+    findItem: findItem,
+    itemPosition: itemPosition,
+    validateItemScan: validateItemScan,
+    buildItemExecCommands: buildItemExecCommands,
+    applyItemExecResult: applyItemExecResult,
+    buildItemReverseCommands: buildItemReverseCommands,
+    applyItemReverseResult: applyItemReverseResult,
     createOrder: createOrder,
     canonicalOrder: canonicalOrder,
     workorderDuplicateGroups: workorderDuplicateGroups,
