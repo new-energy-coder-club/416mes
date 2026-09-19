@@ -365,3 +365,16 @@ test('conflicted entity detail renders read-only card with conflict info instead
  assert.match(box,/云端观察值/,'必须显示云端观察值供人工比对');
  assert.doesNotMatch(d.getElementById('itmSearchStatus').textContent,/查询失败/,'只读查询不得被冲突守卫拦成失败');
 });
+
+test('manual item code is canonicalized before enqueue (wp-ts-999 → WP-TS-999, shortlink intact)',async()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const LINK=require('../lib/item-link');d.defaultView.ItemLink=LINK;
+ let queued=null;
+ const page=UI.mount({document:d,getState:()=>({locations:[],containers:[],items:[]}),getPersistence:()=>({async enqueue(r){queued=r;},async saveDraft(){},async recover(){return{drafts:[],commands:[]}}}),getCommands:async()=>[],id:()=>'c1',isOnline:()=>false,qrSvg:()=>''});
+ pick(d,'itmRegisterCat','TS');
+ d.getElementById('itmRegisterName').value='遥控器';
+ d.getElementById('itmRegisterCode').value='wp-ts-777';
+ d.getElementById('itmRegister').click();await tickN(4);
+ assert.equal(queued.entity.code,'WP-TS-777','入队前规范形化，服务端必收且短链可用');
+ assert.match(d.getElementById('itmRegisterResult').textContent,/已规范为标准写法/);
+});
