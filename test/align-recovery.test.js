@@ -400,12 +400,11 @@ test('流水仍不得被普通本地删除通道处理（账本凭证不能被�
 
 /* ================= 阶段5：工单生命周期与上下文 ================= */
 
-test('阶段5：只有未执行且未取消的工单才给「编辑计划」入口', () => {
+test('G1：「编辑计划」入口从工单详情下线（旧 MAT 单只读裁剪；物品化单取消后重建）', () => {
   const s = fnSrc('showWipDetail');
-  assert.match(s, /btnWipEditPlan/, '详情里必须有编辑计划入口');
-  const guard = s.slice(s.indexOf('btnWipEditPlan') - 120, s.indexOf('btnWipEditPlan') + 40);
-  assert.match(guard, /!p\.anyExecuted/, '已执行过就不该给入口（计划是冲销依据）');
-  assert.match(guard, /isCancelled/, '已取消不该给入口');
+  /* G1 迁移策略：旧 MAT 单隐藏「编辑计划」；物品化单本来就没有数量计划编辑器。
+     showPlanEditor/savePlanEdit 源码保留（下方测试仍钉住其安全性），但详情不再给入口。 */
+  assert.ok(!/id="btnWipEditPlan"/.test(s), 'G1 起详情不再渲染编辑计划入口');
 });
 
 test('阶段5：计划编辑器不得提供修改工单号的控件', () => {
