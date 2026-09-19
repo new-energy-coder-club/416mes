@@ -48,3 +48,14 @@ test('scan: 行已填齐后再扫给明确指引而不是「当前请扫描已�
  assert.throws(()=>s.accept('LOC:L-A'),/本行已填齐/,'填齐后扫其他类型也指向确认按钮');
  assert.deepEqual(s.accept('ITM:WP-001'),{duplicate:true},'重扫同码按重复忽略，不得当作待填步骤');
 });
+
+test('scan: 命令终态后 forget(opId) 移除已完成行，同码立即可再操作',()=>{
+ const s=Scan.create({getState:()=>({locations:[{code:'L-A',status:'active'}],containers:[{code:'C-A',loc:'L-A',status:'active',version:1}],items:[{code:'WP-001',status:'pending',version:0}]}),id:()=>'t'});
+ s.add('receive');
+ s.accept('LOC:L-A');s.accept('CTN:C-A');s.accept('ITM:WP-001');
+ const q=s.lock();
+ assert.equal(s.forget(q.opId),true,'按 opId 移除已完成行');
+ assert.equal(s.snapshot().rows.length,1,'会话空后自动开新行');
+ assert.equal(s.row().values.length,0,'新行从零开始，同码可重新走全流程');
+ assert.equal(s.forget('不存在的opId'),false);
+});
