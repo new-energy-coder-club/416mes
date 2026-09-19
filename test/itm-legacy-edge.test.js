@@ -52,11 +52,11 @@ test('A2 receive: 目标容器未定位(loc空) 在CTN步被拒', () => {
   const r = outcome(() => s.accept('CTN:C-B'));
   assert.equal(r.ok, false); assert.match(r.error, /容器与库位归属不符/);
 });
-test('A3 receive: unknown旧物品(WP-001) 在ITM步被拒', () => {
+test('A3 receive: unknown旧物品(WP-001) 直接放行（核实已并入入库）', () => {
   const st = state(), s = scanOf(st, 'receive');
   s.accept('LOC:W01-G01'); s.accept('CTN:C-A');
   const r = outcome(() => s.accept('ITM:WP-001'));
-  assert.equal(r.ok, false); assert.match(r.error, /尚待核实|不能重复入库|不允许入库/);   // 修复后拆分文案
+  assert.equal(r.ok, true); assert.equal(r.result.complete, true);
 });
 test('A4 verifyLegacy: WP-001 扫旧loc(W01-G01) 扫码层全通过', () => {
   const st = state(), s = scanOf(st, 'verifyLegacy');
@@ -120,9 +120,11 @@ test('B5 plan verifyLegacy 非admin操作员 → FORBIDDEN(与loc无关先被权
   const r = outcome(() => U.plan(st, baseReq('verifyLegacy', { itemCode: 'WP-001', target: { loc: 'W01-G01', container: 'C-A' }, expected: { itemVersion: 0, containerVersion: 1 } }), OPERATOR));
   assert.equal(r.error, 'FORBIDDEN');
 });
-test('B6 plan receive/issue WP-001(unknown) → INVALID_TRANSITION', () => {
+test('B6 plan receive WP-001(unknown) → 直接入库且 before 留旧 loc；issue 仍拒', () => {
   const st = state();
-  assert.equal(outcome(() => U.plan(st, baseReq('receive', { itemCode: 'WP-001', target: { loc: 'W01-G01', container: 'C-A' }, expected: { itemVersion: 0, containerVersion: 1 } }), OPERATOR)).error, 'INVALID_TRANSITION');
+  const p = U.plan(st, baseReq('receive', { itemCode: 'WP-001', target: { loc: 'W01-G01', container: 'C-A' }, expected: { itemVersion: 0, containerVersion: 1 } }), OPERATOR);
+  assert.equal(p.after.items[0].status, 'in_stock');
+  assert.equal(p.before.items[0].loc, 'W01-G01', '旧 loc 线索留 before 供审计');
   assert.equal(outcome(() => U.plan(st, baseReq('issue', { itemCode: 'WP-001', source: { loc: 'W01-G01', container: 'C-A' }, expected: { itemVersion: 0, containerVersion: 1 } }), OPERATOR)).error, 'INVALID_TRANSITION');
 });
 test('B7 plan activateContainer C-OLD(旧loc=W02-G01) 目标W01-G01 → LEGACY_LOCATION_CONFLICT；目标=旧loc才放行', () => {
@@ -158,15 +160,14 @@ function setupUI(st) {
   return { document, page };
 }
 const tick = async (n = 8) => { for (let i = 0; i < n; i++) await new Promise(r => setImmediate(r)); };
-test('C1 UI receive扫WP-001 → 给出「切换旧物品核实」引导按钮', async () => {
+test('C1 UI receive扫WP-001 → 直接入库成功（旧物品核实已并入）', async () => {
   const st = state(), { document: d, page } = setupUI(st);
   await page.accept('LOC:W01-G01'); await page.accept('CTN:C-A');
   d.getElementById('itmCode').value = 'ITM:WP-001'; d.getElementById('itmScanBtn').click(); await tick();
-  assert.match(d.getElementById('itmStatus').textContent, /尚待核实|重复入库/);
+  assert.match(d.getElementById('itmStatus').textContent, /已填写草稿|已填齐/);
+  assert.equal(page.scan.row().values.length, 3);
   const btn = d.getElementById('itmStatus').querySelector('button');
-  assert.ok(btn, '应有引导按钮'); assert.match(btn.textContent, /旧物品核实/);
-  btn.click(); await tick();
-  assert.equal(page.scan.row().kind, 'verifyLegacy');
+  assert.equal(btn, null, '不再提供切换引导');
 });
 test('C2 修复后：UI receive扫未建档WP-999 → 中文提示 + 建档引导按钮并带入该码', async () => {
   const st = state(), { document: d, page } = setupUI(st);

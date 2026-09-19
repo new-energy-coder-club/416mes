@@ -27,7 +27,8 @@ test('ITM receive plan is immutable intent, qty absent, no MAT accounting', () =
   assert.throws(() => U.plan(st, { ...receive(), qty: 1 }, actor), { code: 'ITM_HAS_NO_QTY' });
 });
 test('ITM illegal states, relationships, disabled location and stale versions fail', () => {
-  for (const status of ['unknown', 'in_stock', 'retired', 'bad']) {
+  /* 2.58.0 Phase5：unknown 并入入库（旧物品核实合并）；retired/in_stock/bad 仍拒绝 */
+  for (const status of ['in_stock', 'retired', 'bad']) {
     const st = fixture(); st.items[0].status = status;
     assert.throws(() => U.plan(st, receive(), actor));
   }

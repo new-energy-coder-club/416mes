@@ -39,15 +39,14 @@ test('guided activate: unknown container uses current row LOC as target and resu
  assert.equal(s.queued&&s.queued.kind,'activateContainer');assert.equal(s.queued&&s.queued.target.loc,'L-A');assert.equal(s.submitted,1);
  assert.deepEqual(page.scan.row().values.map(v=>v.code),['L-A','C-OLD']);
 });
-test('guided verify: unknown item on receive offers switching to verifyLegacy row',async()=>{
+test('guided verify 并入入库：unknown 物品直接入库成功（旧物品核实入口已移除）',async()=>{
  const s=setupGuided();s.state.items.push({code:'WP-OLD',name:'旧物品'});
- s.state.containers[0].status='active';   // 先把容器置为可用，专注验证物品引导
+ s.state.containers[0].status='active';
  await s.page.accept('LOC:L-A');await s.page.accept('CTN:C-OLD');
  s.document.getElementById('itmCode').value='ITM:WP-OLD';s.document.getElementById('itmScanBtn').click();await tickN();
- assert.match(s.document.getElementById('itmStatus').textContent,/尚待核实|重复入库/);
- const action=s.document.getElementById('itmStatus').querySelector('button');assert.ok(action,'旧物品应提供切换引导');
- action.click();await tickN();
- assert.equal(s.page.scan.row().kind,'verifyLegacy');assert.match(s.document.getElementById('itmStep').textContent,/旧物品/);
+ assert.match(s.document.getElementById('itmStatus').textContent,/已填齐（草稿未提交|已填写草稿/);
+ assert.equal(s.page.scan.row().values.length,3,'unknown 物品三步填齐');
+ assert.equal(s.document.getElementById('itmStatus').querySelector('button'),null,'不再提供切换引导');
 });
 test('empty fill shows explicit guidance instead of silent failure',async()=>{const {document:d}=setup();d.getElementById('itmCode').value='';d.getElementById('itmScanBtn').click();await new Promise(r=>setImmediate(r));assert.match(d.getElementById('itmStatus').textContent,/相机扫码|确定填入|手动输入/);});
 test('unregistered ITM code offers register guidance with prefilled code',async()=>{
