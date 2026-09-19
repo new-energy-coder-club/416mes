@@ -8,7 +8,7 @@ test('batch duplicate is rejected and upstream reset clears descendants',()=>{co
 test('failed unpersisted intention can retry same ID but rescan allocates new ID',()=>{const {scan}=setup();scan.add('receive');['LOC:L-A','CTN:C-A','ITM:I-P'].forEach(x=>scan.accept(x));const original=scan.lock();scan.unlock();assert.equal(scan.request().opId,original.opId);scan.reset();['LOC:L-B','CTN:C-B','ITM:I-P'].forEach(x=>scan.accept(x));assert.notEqual(scan.lock().opId,original.opId);assert.throws(()=>scan.reset(),/锁定/);});
 test('bare WP item barcode accepted only at ITM step, EAN never inferred',()=>{const {scan,state}=setup();state.items.push({code:'WP-001',status:'pending',version:0});scan.add('receive');assert.throws(()=>scan.accept('WP-001'),/前缀/);scan.accept('LOC:L-A');scan.accept('CTN:C-A');assert.throws(()=>scan.accept('6901234567890'),/前缀/);scan.accept('WP-001');assert.equal(scan.request().itemCode,'WP-001');});
 test('conflict arriving after scans blocks confirmation for every related entity',()=>{for(const key of ['locations:L-A','containers:C-A','items:I-P']){const {scan,state}=setup();scan.add('receive');['LOC:L-A','CTN:C-A','ITM:I-P'].forEach(x=>scan.accept(x));state.__itmConflicts={[key]:{reason:'external-edit'}};assert.throws(()=>scan.lock(),e=>e.code==='UNRESOLVED_ENTITY_CONFLICT');assert.equal(scan.row().locked,false);}});
-test('issue validates source and new receive rejects already in stock',()=>{const {scan}=setup();scan.add('issue');scan.accept('LOC:L-B');scan.accept('CTN:C-B');assert.throws(()=>scan.accept('ITM:I-A'),/来源/);scan.add('receive');scan.accept('LOC:L-A');scan.accept('CTN:C-A');assert.throws(()=>scan.accept('ITM:I-A'),/重复入库/);});
+test('issue 物品驱动：直接扫物品，来源从现状派生；不在库拒绝',()=>{const {scan,state}=setup();scan.add('issue');assert.throws(()=>scan.accept('ITM:I-P'),/不在库/);scan.accept('ITM:I-A');const q=scan.request();assert.deepEqual(q.source,{loc:'L-A',container:'C-A'});assert.equal(q.expected.itemVersion,3);assert.equal(q.expected.containerVersion,2);});
 test('scan: 短链二维码在ITM步骤解析为物品码（离线本地解码）',()=>{
  const L=require('../lib/item-link');
  const s=Scan.create({getState:()=>({locations:[{code:'L-A',status:'active'}],containers:[{code:'C-A',loc:'L-A',status:'active',version:2}],items:[{code:'WP-001',status:'pending',version:1}]}),id:()=> 't'+Math.random()});
@@ -52,10 +52,9 @@ test('scan: 行已填齐后再扫给明确指引而不是「当前请扫描已�
 test('scan: 锁定行不参与批次防重（自动恢复的已完成行不再拦同码）',()=>{
  const s=Scan.create({getState:()=>({locations:[{code:'L-A',status:'active'}],containers:[{code:'C-A',loc:'L-A',status:'active',version:1}],items:[{code:'WP-001',status:'in_stock',container:'C-A',version:1}]}),id:()=>'t'});
  s.add('issue');
- s.accept('LOC:L-A');s.accept('CTN:C-A');s.accept('ITM:WP-001');
+ s.accept('ITM:WP-001');
  s.lock();                                   // 行锁定（已提交）
  s.add('issue');                             // 新行再扫同码
- s.accept('LOC:L-A');s.accept('CTN:C-A');
  const r=s.accept('ITM:WP-001');             // 旧逻辑在此抛「批次已包含此物品」
  assert.equal(r.complete,true,'锁定行的物品不拦新行');
 });

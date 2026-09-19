@@ -70,11 +70,10 @@ test('A5 verifyLegacy: WP-001 实物在W02-G01 扫码层也放行(冲突留给pl
   const r = outcome(() => s.accept('ITM:WP-001'));
   assert.equal(r.ok, true); assert.equal(r.result.complete, true);
 });
-test('A6 issue: WP-001(unknown) 在ITM步被拒', () => {
+test('A6 issue: WP-001(unknown) 物品驱动下直接在 ITM 步被拒（不在库）', () => {
   const st = state(), s = scanOf(st, 'issue');
-  s.accept('LOC:W01-G01'); s.accept('CTN:C-A');
   const r = outcome(() => s.accept('ITM:WP-001'));
-  assert.equal(r.ok, false); assert.match(r.error, /状态或来源容器不符/);
+  assert.equal(r.ok, false); assert.match(r.error, /不在库/);
 });
 test('A7 receive: 完全未建档裸码 WP-999 → NOT_FOUND 原始英文错误', () => {
   const st = state(), s = scanOf(st, 'receive');
