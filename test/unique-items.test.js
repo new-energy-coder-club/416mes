@@ -125,3 +125,32 @@ test('activateLocation still rejects retired/disabled locations', () => {
     assert.throws(() => U.plan(st, { schemaVersion: 1, opId: 'x', kind: 'activateLocation', locationCode: 'L-R', expected: { locationStatus: status } }, { id: 'a', roles: ['admin'] }), e => e.code === 'STATE_CONFLICT');
   }
 });
+
+/* ================= 2.48.0：服务端快照冲突不得拦截核实启用操作本身 ================= */
+test('activateLocation proceeds despite server-location-unverified conflict marker (op IS the credential)', () => {
+  const st = { locations: [{ code: 'L-X', status: 'active' }], containers: [], items: [] };
+  U.migrate(st);
+  st.__itmConflicts = { 'locations:L-X': { reason: 'server-location-unverified' } };
+  const admin = { id: 'a', roles: ['admin'] };
+  const p = U.plan(st, { schemaVersion: 1, opId: 'op-1', kind: 'activateLocation', locationCode: 'L-X', expected: { locationStatus: 'unknown' } }, admin);
+  assert.equal(p.after.locations[0].status, 'active');
+  assert.equal(st.__itmConflicts['locations:L-X'].reason, 'server-location-unverified', 'plan 不得改写快照的冲突表');
+});
+test('activateContainer re-confirmation tolerates own server conflict and bumps version as new credential', () => {
+  const st = { locations: [{ code: 'L-A', status: 'active' }], containers: [{ code: 'C-X', loc: 'L-A', status: 'active', version: 1, lastOpId: 'historic-no-log' }], items: [] };
+  U.migrate(st);
+  st.__itmConflicts = { 'containers:C-X': { reason: 'server-snapshot-unverified' } };
+  const admin = { id: 'a', roles: ['admin'] };
+  const p = U.plan(st, { schemaVersion: 1, opId: 'op-2', kind: 'activateContainer', containerCode: 'C-X', target: { loc: 'L-A' }, expected: { containerVersion: 1 } }, admin);
+  assert.equal(p.after.containers[0].status, 'active');
+  assert.equal(p.after.containers[0].version, 2, '重确认版本 +1，lastOpId 指向本操作即新凭据');
+  assert.equal(p.after.containers[0].lastOpId, 'op-2');
+  assert.equal(st.__itmConflicts['containers:C-X'].reason, 'server-snapshot-unverified', '冲突标记计划后还原');
+});
+test('receive through unverified-active location stays blocked (guard only exempted for activate*)', () => {
+  const st = { locations: [{ code: 'L-X', status: 'active' }], containers: [{ code: 'C-X', loc: 'L-X', status: 'active', version: 3, lastOpId: 'op-9' }], items: [{ code: 'I-P', status: 'pending', container: '', version: 0, lastOpId: '' }] };
+  U.migrate(st);
+  st.__itmConflicts = { 'locations:L-X': { reason: 'server-location-unverified' } };
+  const admin = { id: 'a', roles: ['admin'] };
+  assert.throws(() => U.plan(st, { schemaVersion: 1, opId: 'op-3', kind: 'receive', itemCode: 'I-P', target: { loc: 'L-X', container: 'C-X' }, expected: { itemVersion: 0, containerVersion: 3 } }, admin), e => e.code === 'UNRESOLVED_ENTITY_CONFLICT', '入库仍被无凭据库位拦住——必须先现场核实启用');
+});
