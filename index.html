@@ -1058,12 +1058,15 @@ body.cols-compact .col-secondary{display:none}
   /* 顶部「旧工作台」跳转是次要入口，降级为浅色小按钮 */
   #tab-scan>p.hint{font-size:12.5px;}
   #tab-scan>p.hint .btn{background:var(--surface);color:var(--color-primary);
-    box-shadow:none;font-weight:500;min-height:36px;}
+    box-shadow:none;font-weight:500;min-height:44px;}
   /* 批次3（页面清单 P1·nec）：9 个裸输入全部 <40px 且带行内定宽 ——
      手机端压掉行内宽、纵排、44px */
   #tab-nec .form-row{flex-direction:column;align-items:stretch;gap:8px;}
   #tab-nec .form-row input,#tab-nec .form-row select{width:100%!important;min-height:44px;font-size:16px;}
   #tab-nec .form-row>label{font-weight:600;}
+  /* 批次5b：漏网的裸控件 —— nec 看板筛选条 + res 批量建档面板（g*） */
+  #necFilter{min-height:44px;font-size:16px;}
+  #tab-res .form-row input,#tab-res .form-row select{min-height:44px;font-size:16px;}
   /* 批次3（页面清单 P1·register）：details 的 summary 触达面 48px。
      用 padding 达成，不用 display:flex —— 那会吃掉折叠三角（阶段11 踩过） */
   #tab-register details>summary{min-height:48px;font-size:15px;padding-block:13px;}
@@ -1214,7 +1217,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
      否则搜索框仍是 12–14px，iOS 聚焦时会自动放大整页。
      阶段11 之前这些字号写在各控件的 inline style 上（inline 优先级最高），
      根本没法用 CSS 覆盖 —— 迁到 class 之后这个既有问题才修得掉。 */
-  .field,.field--md,.field--sm,.field--xs,.field--inv{font-size:16px;min-height:44px;}
+  .field,.field--md,.field--sm,.field--xs{font-size:16px;min-height:44px;}   /* .field--inv 死引用已清（全站无定义无用法） */
   /* 工单执行的汇总栏在手机上纵向堆叠 */
   .exec-summary{flex-direction:column;align-items:flex-start;gap:4px;}
   /* 当前对象条：chip 与按钮都是可点元素，手机上必须达到 44px 触控目标；
@@ -8655,7 +8658,7 @@ function renderHealthPanel() {
     (HEALTH.errors.length ? '<br>最近异常：<code>' + esc(HEALTH.errors[0].where + '：' + HEALTH.errors[0].msg).slice(0, 120) + '</code>' : '') +
     '</div>' +
     '<div class="toolbar mt-6">' +
-    '<label class="hint">同步频率 <select id="pollIntervalSel" style="font-size:13px">' +
+    '<label class="hint">同步频率 <select class="field" id="pollIntervalSel">' +
     POLL_CHOICES.map(c => '<option value="' + c.ms + '"' + (c.ms === pollActiveMs() ? ' selected' : '') + '>' + c.label + '</option>').join('') +
     '</select></label>' +
     '<button class="btn small ghost" id="btnHealthRefresh">刷新</button>' +
