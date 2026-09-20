@@ -430,7 +430,14 @@ table.grid tr:hover td{background:#f7fafd;}
 .res-row-actions{display:flex;gap:6px;flex-wrap:wrap}
 @media (max-width:560px){
   .res-type{flex:1;padding:6px 8px;font-size:12px}
+  /* 批次3（页面清单 P0·res）：类型条实测 31px，是 res 页唯一 <44 的触达面 */
+  .res-type{min-height:44px;font-size:14px}
   .res-row-actions .btn{flex:1}
+  /* 批次3（页面清单 P0·res）：行内 4 个等权操作在卡态太密 → 2×2；
+     「作废删除」独占一行并改危险描边（红=危险语义一致） */
+  .res-row-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .res-row-actions .btn[data-res-del]{grid-column:1/-1;color:var(--danger-fg);
+    border-color:var(--danger-fg);background:#fff;}
 }
 /* ---------- 阶段2（修订）：同步与状态独立页 ---------- */
 .sync-grid{display:grid;gap:10px}
@@ -853,6 +860,11 @@ body.cols-compact .col-secondary{display:none}
    决策前不做，避免留下失效且有风险的 CSS。 */
 /* 标签打印页 */
 .typebar{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;}
+/* 批次3（页面清单 P0·label）：类型条是「选哪种标签」的第一步操作，
+   手机上 8 个按钮实测只有 33px —— 两列等分 + 44px。 */
+@media screen and (max-width:767px){
+  .typebar button{min-height:44px;flex:1 1 calc(50% - 8px);font-size:14px;}
+}
 .typebar button{border:1px solid var(--line);background:#fff;border-radius:5px;padding:6px 14px;cursor:pointer;}
 .typebar button.on{color:#fff;font-weight:bold;}
 .label-layout{display:flex;gap:16px;align-items:flex-start;}
@@ -995,6 +1007,37 @@ body.cols-compact .col-secondary{display:none}
 .form-row input[type=number]{width:90px;}
 /* 扫码页 */
 .scan-input{width:100%;font-size:18px;padding:12px;border:2px solid var(--blue);border-radius:8px;letter-spacing:1px;}
+.scan-hint>summary{cursor:pointer;}
+.scan-hint__more{color:var(--text-muted);font-weight:400;font-size:12px;}
+/* 批次3（页面清单 P0·scan）：手机首屏层级倒挂 —— 劝退提示 + 5 行前缀教学把
+   扫码输入框和摄像头按钮压到首屏底部。用 flex order 纯 CSS 重排（id 全不动）：
+   输入框(1) → 摄像头(2) → 结果卡(3) → 盘点区(4/5) → 说明(6)。 */
+@media screen and (max-width:767px){
+  #tab-scan .panel{display:flex;flex-direction:column;}
+  #tab-scan .panel>h2{order:0;}
+  #scanInput{order:1;}
+  #btnCam{order:2;}
+  #scanResult{order:3;}
+  #stocktakeBanner{order:4;}
+  #tab-scan .panel>label{order:5;display:flex!important;min-height:48px;align-items:center;
+    padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-md);font-size:15px!important;}
+  #tab-scan .panel>label input[type=checkbox]{width:22px;height:22px;flex:none;}
+  /* 批次3（页面清单横切）：卡态表里的勾选框同步放大 */
+  .grid-dense input[type=checkbox]{width:22px;height:22px;}
+  .scan-hint{order:6;}
+  /* 顶部「旧工作台」跳转是次要入口，降级为浅色小按钮 */
+  #tab-scan>p.hint{font-size:12.5px;}
+  #tab-scan>p.hint .btn{background:var(--surface);color:var(--color-primary);
+    box-shadow:none;font-weight:500;min-height:36px;}
+  /* 批次3（页面清单 P1·nec）：9 个裸输入全部 <40px 且带行内定宽 ——
+     手机端压掉行内宽、纵排、44px */
+  #tab-nec .form-row{flex-direction:column;align-items:stretch;gap:8px;}
+  #tab-nec .form-row input,#tab-nec .form-row select{width:100%!important;min-height:44px;font-size:16px;}
+  #tab-nec .form-row>label{font-weight:600;}
+  /* 批次3（页面清单 P1·register）：details 的 summary 触达面 48px。
+     用 padding 达成，不用 display:flex —— 那会吃掉折叠三角（阶段11 踩过） */
+  #tab-register details>summary{min-height:48px;font-size:15px;padding-block:13px;}
+}
 .scan-result{margin-top:12px;}
 /* ============================================================
    06 RESPONSIVE（阶段23 · §7.5）：摄像头识别后结果全屏卡
@@ -1166,7 +1209,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   .grid-dense td input[type=number],
   .grid-dense td input[type=date],
   .grid-dense td select{font-size:16px;border:1px solid var(--line);
-    border-radius:var(--r-md);padding:6px 8px;width:100%;min-height:40px;}
+    border-radius:var(--r-md);padding:6px 8px;width:100%;min-height:44px;}  /* 批次3：40→44（移动规范） */
   /* 卡片态下危险格的左侧竖条没有意义，去掉避免视觉噪音 */
   .grid-dense td.cell-qty-risk{background:transparent;}
   .grid-dense td.cell-qty-risk::after{display:none;}
@@ -1816,12 +1859,12 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
     <p class="page-purpose"><span>七种机读串：MAT / LOC / CTN / WIP / NEC / ITM / MAN</span><span class="impact impact--none">查询只读</span><span class="impact impact--confirm">WIP 确认后改库存</span></p>
     <div class="panel">
       <h2>扫码 / 手输机读串</h2>
-      <p class="hint" style="margin:0 0 8px">支持 7 种前缀：
+      <details class="hint scan-hint" style="margin:0 0 8px"><summary><b>支持 7 种前缀</b>：MAT / LOC / CTN / WIP / NEC / ITM / MAN<span class="scan-hint__more">（点开看说明）</span></summary>
         <b>MAT:</b> 物料 · <b>LOC:</b> 库位（含模块区 <b>M-01</b>）· <b>CTN:</b> 容器 ·
         <b>WIP:</b> 库存工单 · <b>NEC:</b> NEC 任务 · <b>ITM:</b> 物品 · <b>MAN:</b> 手册
         <br><b>库存影响：</b>MAT / LOC / CTN / NEC / ITM / MAN 为<b>只读查询</b>；只有 <b>WIP</b> 工单在点「确认执行」后才增减库存。
         <br>不写前缀也能扫：系统会按「库存工单 → NEC 任务 → 物品 → 手册 → 物料」顺序自动识别。
-      </p>
+      </details>
       <input class="scan-input" id="scanInput" placeholder="扫描或输入，如 MAT:GJ-SD-001 / WIP:LL20260909007，回车确认" autofocus>
       <button class="btn ghost mt-8" id="btnCam">📷 摄像头扫码</button>
       <div id="camOverlay" class="cam-overlay" role="dialog" aria-modal="true" aria-label="摄像头扫码">
