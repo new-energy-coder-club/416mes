@@ -16,8 +16,6 @@
 .mes-load{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;
   background:#0E1A55;transition:opacity .26s ease;cursor:pointer;}
 .mes-load--hide{opacity:0;pointer-events:none;}
-.mes-load--tab{background:rgba(14,26,85,.82);}
-.mes-load.mes-load--tab .loader{scale:2.2;}   /* (0,3,0) —— 必须高过后面的 .mes-load .loader */
 .mes-load__stage{display:flex;flex-direction:column;align-items:center;gap:56px;}
 .mes-load__cap{color:#B9C7DD;font-size:13px;letter-spacing:2px;}
 .mes-load .loader{scale:3;height:50px;width:40px;}
@@ -1372,10 +1370,11 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
 <button type="button" id="btnNavAll" class="nav-all" aria-expanded="false" aria-controls="mainTabs">☰ 全部</button>
 <main>
   <!-- ========== 业务关系条（阶段4）：可折叠，回答「模块之间怎么连、哪一步会改库存」 ========== -->
-  <div class="flow-map flow-map--guide" id="flowMap" aria-label="全局流程导航">
-    <div class="flow-map__title">全局流程 · 高亮为当前所在环节，点击节点可跳转</div>
+  <!-- 可折叠：桌面（≥1024px）默认展开，手机默认收起；手动切换后不再随窗口变化 -->
+  <details class="flow-map flow-map--guide" id="flowMap" aria-label="全局流程导航">
+    <summary class="flow-map__title">全局流程 · 高亮为当前所在环节，点击节点可跳转</summary>
     <div class="flow-map__body" id="flowMapBody"></div>
-  </div>
+  </details>
   <!-- ========== 当前对象条（阶段10）：跨页上下文与返回来源 ========== -->
   <div class="ctx-bar" id="ctxBar" hidden></div>
   <!-- ========== 台账 ========== -->
@@ -2995,6 +2994,17 @@ function renderFlowMap() {
   });
 }
 renderFlowMap();
+
+/* flowMap 可折叠：桌面默认开、手机默认收；用户手动切换过后不再随窗口宽度变化 */
+(function () {
+  const fm = document.getElementById('flowMap');
+  if (!fm) return;
+  let manual = false;
+  fm.querySelector('summary').addEventListener('click', () => { manual = true; });
+  const apply = () => { if (!manual) fm.open = innerWidth >= 1024; };
+  apply();
+  window.addEventListener('resize', apply);
+})();
 
 /* ---------- 页签切换 ---------- */
 document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('click', () => {
@@ -10126,41 +10136,5 @@ renderScanLog();
 })();
 </script>
 
-<script>
-/* 页签切换缓冲（用户指定）：同一个塔形 loader 的轻量版（半透明罩 + 2.2 倍塔）。
-   最短展示 800ms 让塔形动画可读；点当前页签不触发；点击罩层立即跳过。 */
-(function () {
-  var TOWER = '<div class="box box-1"><div class="side-left"></div><div class="side-right"></div><div class="side-top"></div></div>' +
-    '<div class="box box-2"><div class="side-left"></div><div class="side-right"></div><div class="side-top"></div></div>' +
-    '<div class="box box-3"><div class="side-left"></div><div class="side-right"></div><div class="side-top"></div></div>' +
-    '<div class="box box-4"><div class="side-left"></div><div class="side-right"></div><div class="side-top"></div></div>';
-  /* ⚠ 必须挂在 #mainTabs 的**捕获阶段**：本脚本注册在最后，若直接挂在按钮上，
-     现有切页逻辑会先跑、先把 .on 移到新按钮 —— 于是「是否当前页签」永远判不出来，
-     罩层一次都不会播（实测抓到过）。捕获阶段先于目标上的监听器执行，此时 .on 还在旧页签上。 */
-  document.getElementById('mainTabs').addEventListener('click', function (e) {
-    var b = e.target && e.target.closest ? e.target.closest('button[data-tab]') : null;
-    if (!b || b.classList.contains('on')) return;   // 已在当前页签，不切不播
-      var el = document.createElement('div');
-      el.className = 'mes-load mes-load--tab';
-      el.setAttribute('role', 'status');
-      el.innerHTML = '<div class="mes-load__stage"><div class="loader">' + TOWER +
-        '</div><div class="mes-load__cap">切换中</div></div>';
-      document.body.appendChild(el);
-      var t0 = performance.now(), hideTimer = null, removed = false;
-      function done(immediate) {
-        if (removed) return;
-        if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
-        var wait = immediate === true ? 0 : Math.max(0, 800 - (performance.now() - t0));
-        hideTimer = setTimeout(function () {
-          hideTimer = null;
-          el.classList.add('mes-load--hide');
-          setTimeout(function () { removed = true; if (el.parentNode) el.parentNode.removeChild(el); }, 350);
-        }, wait);
-      }
-      setTimeout(function () { done(false); }, 0);
-      el.addEventListener('click', function () { done(true); });   // 点击 = 立即跳过
-    }, true);   // ← 捕获阶段
-})();
-</script>
 </body>
 </html>
