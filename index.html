@@ -262,7 +262,8 @@ table.grid tr:hover td{background:#f7fafd;}
 .flow-map>summary{cursor:pointer;padding:9px 14px;font-size:13px;color:var(--text-sub);background:var(--surface-2)}
 .flow-map--guide{margin:0 0 14px}
 .flow-map__title{padding:8px 14px;font-size:12px;color:var(--text-muted);background:var(--surface-2);border-bottom:1px solid var(--line)}
-.flow-node--here{border-color:var(--cyan-ink);background:var(--cyan-ink);color:#fff;font-weight:700;cursor:default}
+.flow-node--here{border-color:#15803d;background:#22c55e;color:#052e12;font-weight:700;cursor:default;box-shadow:0 0 0 3px rgba(34,197,94,.25)}
+.flow-node--here::before{content:'✓ ';font-weight:700}
 .flow-node--jump{cursor:pointer}
 .flow-node--next::after{content:' ⟶ 下一步';font-size:11px;color:var(--text-muted)}
 .flow-map__body{padding:12px 14px;display:flex;flex-direction:column;gap:8px}
@@ -1170,7 +1171,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   <!-- ========== 台账 ========== -->
   <section class="tab" id="tab-items">
     <div class="panel">
-      <p class="itm-eyebrow">试运行 / 先核实再操作</p>
+      <p class="itm-eyebrow">唯一物品 · 扫码作业</p>
       <h2>库位、容器与物品查询</h2>
       <p class="hint">查询不改变库存。物品位置由容器归属派生；旧定位仅是历史线索。</p>
       <label for="itmSearch">编码 / 名称 / 规格 / 说明</label>
@@ -1182,11 +1183,9 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   </section>
   <section class="tab" id="tab-item-work">
     <div class="panel">
-      <p class="itm-eyebrow">试运行 / 先核实再操作</p>
+      <p class="itm-eyebrow">唯一物品 · 扫码作业</p>
       <h2>唯一物品作业</h2>
       <div id="itmConflictBanner" class="notice notice--warn" role="alert" hidden></div>
-      <p class="hint">先核实实物，再填写草稿。保存命令不代表完成，请勿据此发放实物；在待处理区主动提交后核对结果。</p>
-      <div class="notice notice--warn" id="itmModeNotice">试运行：一次只提交一条命令，等结果出来再继续；结果未知时只查询、不重发。操作记录暂记为 trial-unverified。</div>
       <h3>1 · 选择作业</h3>
       <div class="itm-toolbar"><label class="itm-control" for="itmKind">作业类型<select class="field" id="itmKind" aria-label="动作"><option value="receive">入库</option><option value="issue">出库</option><option value="transfer">换箱</option><option value="moveContainer">容器移库</option><option value="placeContainer">容器定位</option></select></label><button class="btn" id="itmNewRow">按所选类型新建行</button></div>
       <h3>2 · 按步骤填写并确认</h3>
