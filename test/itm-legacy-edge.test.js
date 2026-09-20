@@ -215,3 +215,30 @@ test('B11 plan placeContainer: 已绑定容器拒绝并提示移库', () => {
     e => e.code === 'ALREADY_PLACED'
   );
 });
+
+/* ================= 2.63.0 Phase D：实体级分桶 ================= */
+test('D1 entityKeysOf: 命令派生实体键集（含 source/target/entity/无码发号桶）', () => {
+  const k1 = U.entityKeysOf({ kind: 'receive', itemCode: 'WP-1', target: { loc: 'L-A', container: 'C-1' } });
+  assert.ok(k1.has('items:WP-1') && k1.has('locations:L-A') && k1.has('containers:C-1'));
+  const k2 = U.entityKeysOf({ kind: 'placeContainer', containerCode: 'C-2', target: { loc: 'L-A' } });
+  assert.ok(k2.has('containers:C-2') && k2.has('locations:L-A'));
+  const k3 = U.entityKeysOf({ kind: 'registerItem', entity: { category: 'TS', name: 'x' } });
+  assert.ok(k3.has('register:TS'), '无码发号归分类桶');
+  const k4 = U.entityKeysOf({ kind: 'activateLocation', locationCode: 'L-A' });
+  assert.ok(k4.has('locations:L-A'));
+});
+test('D2 trial 协调器：不同实体可并行，同实体互斥，REPAIR_REQUIRED 全局屏障', async () => {
+  const st = { locations: [{ code: 'L-A', status: 'active' }], containers: [{ code: 'C-A', loc: 'L-A', status: 'active', version: 1 }], items: [{ code: 'I-1', status: 'pending', container: '', version: 0 }, { code: 'I-2', status: 'pending', container: '', version: 0 }], itemOperations: [] };
+  U.migrate(st);
+  const coord = require('../lib/item-trial-coordinator').create({ allOperations: async () => st.itemOperations });
+  const mk = (opId, itemCode) => ({ opId, request: { schemaVersion: 1, opId, kind: 'verifyLegacy', itemCode, target: { loc: 'L-A', container: 'C-A' }, expected: {} } });
+  // verifyLegacy 用于占位 PREPARED 行（不需要真跑 plan——直接造行）
+  st.itemOperations.push({ code: 'op-1', kind: 'receive', phase: 'PREPARED', request: { kind: 'receive', itemCode: 'I-1' } });
+  const r1 = await coord.claim({ opId: 'op-2', request: { kind: 'receive', itemCode: 'I-2' } });
+  assert.equal(r1.acquired, true, '不同实体（I-2 vs I-1）可并行');
+  const r2 = await coord.claim({ opId: 'op-3', request: { kind: 'receive', itemCode: 'I-1' } });
+  assert.equal(r2.acquired, false, '同实体（I-1）互斥');
+  st.itemOperations.push({ code: 'op-r', kind: 'receive', phase: 'REPAIR_REQUIRED', request: { kind: 'receive', itemCode: 'I-9' } });
+  const r3 = await coord.claim({ opId: 'op-4', request: { kind: 'receive', itemCode: 'I-2' } });
+  assert.equal(r3.acquired, false, 'REPAIR_REQUIRED 保持全局屏障');
+});
