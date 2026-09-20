@@ -9726,6 +9726,12 @@ function fsSerialize(key, fn) {
 
 /** 队列条目的可读描述（告警用） */
 function fsDescribeItem(x) {
+  if (x.op === 'itemOperation') {
+    /* 物品操作命令：用 kind/phase 描述（它没有 matCode，旧描述只会显示「（无物料码）」） */
+    var b = x.body || x.cmd || x;
+    return '物品操作（' + (b.kind || x.kind || '未知') + ' · ' + (b.phase || x.phase || '待提交') +
+      '）· opId ' + String(x.id || '').slice(0, 8);
+  }
   if (x.op === 'upsert' || x.op === 'delete') {
     return x.table + ' ' + JSON.stringify((x.records || x.keys || []).map(r => (r && r.code) || r));
   }
@@ -10002,10 +10008,16 @@ async function fsQueuePanelHtml() {
   const rows = q.map((x, i) => {
     const st = x.status === 'needs_attention' ? '<b class="text-danger">待人工处理</b>'
       : (x.tries ? '<span style="color:#e8a020">已失败 ' + x.tries + ' 次</span>' : '待提交');
+    /* 物品操作（ITM 命令）：冲刷有意跳过（有专属提交入口）、放弃被安全护栏拦下 ——
+       放两个永远无效的按钮只会让人以为是 bug。给去向说明。 */
+    var isItm = (x.op || 'stock') === 'itemOperation';
+    var actions = isItm
+      ? '<span class="hint">到「物品作业」页 · 待处理区 提交或恢复</span>'
+      : '<button class="btn small ghost" data-qretry="' + esc(x.id) + '">重试</button> ' +
+        '<button class="btn small ghost" data-qgiveup="' + esc(x.id) + '">放弃并导出</button>';
     return '<tr><td>' + (i + 1) + '</td><td>' + esc(fsDescribeItem(x)) + '</td><td>' + st + '</td>' +
       '<td class="hint">' + esc(String(x.lastError || '').slice(0, 90)) + '</td>' +
-      '<td><button class="btn small ghost" data-qretry="' + esc(x.id) + '">重试</button> ' +
-      '<button class="btn small ghost" data-qgiveup="' + esc(x.id) + '">放弃并导出</button></td></tr>';
+      '<td>' + actions + '</td></tr>';
   }).join('');
   return {
     need: need.length, total: q.length,
@@ -10046,7 +10058,13 @@ async function fsOpenQueuePanel() {
     if (!it) { await fsOpenQueuePanel(); return; }
     if (!confirm('放弃这条同步操作？\n\n' + fsDescribeItem(it) + '\n\n' +
       '放弃后**不会再提交到飞书**，本机账目也不会自动回退。会先把原始内容导出成 JSON 留底。')) return;
-    await fsGiveUpItem(b.dataset.qgiveup);
+    try {
+      await fsGiveUpItem(b.dataset.qgiveup);
+    } catch (e) {
+      /* 物品操作等护栏会主动拒绝放弃 —— 如实告知，绝不静默失败（实测反馈） */
+      toast('⚠️ 这条不能放弃：' + (e && e.message ? e.message : e), 'warn');
+      await fsOpenQueuePanel(); return;
+    }
     await fsOpenQueuePanel();
   }));
 }
