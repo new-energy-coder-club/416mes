@@ -2385,6 +2385,22 @@ async function initLocalStore() {
     itmTabLease = await ITEM_PERSIST.acquireTab(navigator.locks);
     // Browsers without Web Locks retain legacy saves, but cannot submit ITM commands.
     itmReadOnlyTab = !!navigator.locks && !itmTabLease.acquired;
+    /* 2.62.0 Phase C：落败标签定时探测接管——对方关闭后自动获得写权，无需手动刷新 */
+    if (itmReadOnlyTab && navigator.locks && navigator.locks.query) {
+      (function pollTakeover() {
+        navigator.locks.query({ name: 'mes416-state-writer' }).then(q => {
+          if (!q.held) {
+            navigator.locks.request('mes416-state-writer', { ifAvailable: true }).then(l => {
+              if (l) { itmTabLease = l; itmReadOnlyTab = false;
+                try { const n = document.getElementById('itmModeNotice'); if (n) n.remove(); } catch (e) { }
+                showPersistentNotice('✅ 已接管写权限（原写标签已关闭），本标签恢复可写。');
+                renderLedger(); renderTxns(); renderNec(); renderMembers(); renderOperators(); renderWip(); refreshMatDatalist(); refreshMemberDatalist(); refreshItemCodeDatalist(); renderSyncTab();
+              } else setTimeout(pollTakeover, 10000);
+            }).catch(() => setTimeout(pollTakeover, 10000));
+          } else setTimeout(pollTakeover, 10000);
+        }).catch(() => setTimeout(pollTakeover, 10000));
+      })();
+    }
     if (itmReadOnlyTab) showPersistentNotice('另一个标签正在编辑。本标签只读，请关闭后重新打开；ITM作业已禁用。');
     localStore = STORE.createIndexedDbStore({ dbName: 'mes416-state' });
     await localStore.open();

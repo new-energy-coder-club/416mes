@@ -58,6 +58,7 @@ const ROUTES = {
   '/api/feishu/schema': './api/feishu/schema.js',
   '/api/feishu/nextcode': './api/feishu/nextcode.js',
   '/api/feishu/stock': './api/feishu/stock.js',
+  '/api/feishu/schema-options': './api/feishu/schema-options.js',
   '/api/feishu/upsert': './api/feishu/upsert.js',
   '/api/feishu/delete': './api/feishu/delete.js',
   '/api/feishu/item-operation': './api/feishu/item-operation.js',
