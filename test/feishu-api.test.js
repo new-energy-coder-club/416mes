@@ -551,7 +551,7 @@ test('ITM feishu-trial HTTP: REPAIR_REQUIRED blocks apply/retry/new command acro
     assert.equal(retry.body.operation.phase, 'REPAIR_REQUIRED');
     const blocked = await f.post({ ...command, opId: 'new-receive-' + fresh });
     assert.equal(blocked.status, 409);
-    assert.equal(blocked.body.error, 'UNRESOLVED_OPERATION_BARRIER');
+    assert.match(blocked.body.error, /^UNRESOLVED_OPERATION_BARRIER/, '屏障语义不变（可附带头一条未决命令信息）');
     assert.equal(f.writes().length, writesAfterFailure, 'removing the fault never grants permission to reapply');
   }
   assert.equal(f.tables.trialO.rows.filter(r => r['操作ID'] === command.opId).length, 1);
