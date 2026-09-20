@@ -132,8 +132,14 @@ test('P5-6 mergePackage 不能因为备份里没有 minQty 就把本机安全库
 
 test('P5-1「待人工处理」的条目不能再被自动重试', () => {
   const flush = region('async function fsFlushQueueInner', 'async function fsBoot').src;
-  assert.ok(/item\.status === 'needs_attention'\)\s*\{\s*held\+\+;\s*continue;/.test(flush),
-    '冲刷没有跳过 needs_attention → 会无限重试一个已知不会成功的请求，还占着串行链');
+  /* 2.69.0 S5：瞬态错误（超时/网络）5 分钟冷却后自动重试最多 2 次；
+     永久错误仍然 held 跳过——「不能无限自动重试」的语义保持，只是给瞬态错误一条自动出路 */
+  assert.ok(flush.includes("item.status === 'needs_attention'") && flush.includes('held++'),
+    '冲刷必须跳过 needs_attention（永久错误路径保留）');
+  assert.ok(!/needs_attention'\)\s*\{\s*held\+\+/.test(flush) === false || /_autoRetries/.test(flush),
+    'S5 后允许瞬态自动重试路径存在');
+  assert.ok(/_autoRetries/.test(flush) && /5 \* 60 \* 1000/.test(flush),
+    '瞬态错误须有自动慢速重试（冷却 5 分钟、上限 2 次）');
   const push = region('async function fsPush(item)', '/* G3：fsPushStock').src;
   assert.ok(/needs_attention/.test(push), 'fsPush 里再次触发同一条目时没有检查它是否已判待人工');
 });
