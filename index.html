@@ -6970,7 +6970,7 @@ function renderStatusBar() {
   const set = (id, txt, warn) => { const el = document.getElementById(id); if (!el) return; el.textContent = txt; el.className = warn ? 'sb-warn' : ''; };
   set('sbCount', counts[act] || '');
   set('sbSpace', '本机数据空间 ' + (state.deviceId || '—') + (typeof localStore !== 'undefined' && localStore ? ' · IndexedDB 已启用' : ' · 仅 localStorage'));
-  set('sbSync', (typeof fsOnline !== 'undefined' && fsOnline) ? '飞书真源已连接' : '离线模式（仅本机）', !(typeof fsOnline !== 'undefined' && fsOnline));
+  set('sbSync', fsConnecting ? '正在连接飞书…' : (fsOnline ? '飞书真源已连接' : '离线模式（仅本机）'), !fsOnline);
   const q = (typeof fsQueue === 'function') ? (fsQueue() || []) : [];
   set('sbQueue', q.length ? ('待上传 ' + q.length + ' 条') : '待上传 0 条', q.length > 0);
 }
@@ -7109,6 +7109,7 @@ const FS_QUEUE_LS = 'mes416_fs_queue';
    api. 随时可能被重新指向别处，留着就是个"哪天悄悄写到别的后端"的隐患。 */
 const FS_FALLBACK_BASE = 'https://mes.newenergycoder.club';
 let fsOnline = false;      // 真源服务（feishu-server / 隧道）可用
+let fsConnecting = true;   // 首屏到 fsBoot 返回之间 = 正在连接（此间不能谎报「离线」）
 let cloudOnline = false;   // Vercel 只读接口可用
 let fsBase = '';   // 真源服务基地址：同源优先，其次隧道域名
 /* 写接口基地址必须跟着「当前可用的那条读通路」走。
@@ -7209,9 +7210,12 @@ function fsQueueSave(q) {
 /* 顶部状态按优先级统一渲染：真源服务 > 云端只读 > 离线。
    两条通路（fsBoot 与 cloudSync）各自的成败都会调用它，因此最终显示与谁先返回无关。 */
 function refreshStatusHint() {
+  /* 三态：连接中 ≠ 离线。首屏全量拉取要 30s+，此间若谎报「离线模式」，
+     用户会以为断网了（实测反馈）。琥珀色=进行时，如实呈现。 */
+  if (fsConnecting) { fsStatusHint('正在连接飞书 · 数据加载中', false); return; }
   if (fsOnline) fsStatusHint('飞书真源已连接', true);
   else if (cloudOnline) fsStatusHint('已连接飞书云端（只读同步）', true);
-  else fsStatusHint('离线模式 · 本机数据', false);
+  else fsStatusHint('离线模式 · 本机数据（连不上飞书，改动稍后自动补传）', false);
 }
 function fsStatusHint(msg, ok) {
   const el = document.querySelector('header .sub');
@@ -7883,7 +7887,10 @@ function dataConsistencyHtml() {
   /* 2.62.0 重构：总览条——先给结论，再看明细 */
   const okT = SYNC_TABLES.filter(k => rep.tables[k] && rep.tables[k].diff === 0).length;
   const badT = SYNC_TABLES.filter(k => rep.tables[k] && rep.tables[k].diff !== 0).length;
-  html += '<div class="sync-overview"><span class="so-item ok">✓ 一致 ' + okT + ' 表</span>' +
+  /* ⚠ 原写法是 `html += …`，但此函数里 html 在后面 return 处才拼 —— 对账接口通了之后
+     这里第一次被走到就 ReferenceError（「html is not defined」）。
+     改成先存变量、在 return 处拼接（总览条仍在最前）。 */
+  const overview = '<div class="sync-overview"><span class="so-item ok">✓ 一致 ' + okT + ' 表</span>' +
     (badT ? '<span class="so-item bad">⚠ ' + badT + ' 表不一致</span>' : '') + '</div>';
   const rows = SYNC_TABLES.filter(k => rep.tables[k]).map(k => {
     const t = rep.tables[k];
@@ -7955,7 +7962,7 @@ function dataConsistencyHtml() {
       ((rep.tables[k].localOnlyCount || 0) || (rep.tables[k].remoteOnlyCount || 0))).length;
   return '<div class="mb-6">' + (bad
     ? '⚠️ <b>数据不一致：' + bad + ' 张表本地与飞书条数不同</b>'
-    : '✅ <b>8 张表数据条数全部一致（本地 ↔ 飞书）</b>') + '</div>' +
+    : '✅ <b>8 张表数据条数全部一致（本地 ↔ 飞书）</b>') + '</div>' + overview +
     '<table class="grid" style="max-width:520px;margin-bottom:8px"><thead><tr>' +
     '<th>表</th><th style="text-align:right">本地</th><th style="text-align:right">飞书</th><th>状态</th>' +
     '</tr></thead><tbody>' + rows.map(r => r.row).join('') + '</tbody></table>' +
@@ -10194,9 +10201,10 @@ async function fsFlushQueueInner() {
 }
 
 async function fsBoot() {
+  fsConnecting = true; refreshStatusHint();   // 重试路径也要回到「连接中」
   try {
     const remote = await fsPullState();
-    fsOnline = true;
+    fsOnline = true; fsConnecting = false;
     const stat = fsMerge(remote);
     save(); renderLedger(); renderTxns(); renderOperators(); renderMembers(); renderWip();
     await fsFlushQueue();          // 网络恢复后先把积压的写入补上
@@ -10210,7 +10218,7 @@ async function fsBoot() {
     if (!state.__healthHidden) renderHealthPanel();   // 全量同步完刷新面板（否则停在启动那一刻的空状态）
     await fsPreloadTransactions();                    // Phase 5：预热 IDB 流水，导出即取即用
   } catch (e) {
-    fsOnline = false; refreshStatusHint();
+    fsOnline = false; fsConnecting = false; refreshStatusHint();
     // 真源服务（feishu-server / 隧道）不可达时，退回云端接口 —— 同一份飞书数据。
     // 放在这里而不是页面加载时无条件调用，是为了避免每次打开都把 8 张表拉两遍。
     cloudSync({ silent: true });
