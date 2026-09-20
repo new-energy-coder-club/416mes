@@ -240,12 +240,12 @@ footer{border-top:1px solid rgba(142,162,216,.2);padding:18px 0 26px;text-align:
 </script>
 
 <script>
-/* 首屏 loader 收起：window.load 后收起，保留 550ms 最短展示让塔形动画可读；
+/* 首屏 loader 收起：window.load 后收起，且至少展示 4s（用户指定，顺便罩住资源加载）；
    兜底 6 秒内必须让开（防卡死）；点击罩层可立即跳过。 */
 (function () {
   var el = document.getElementById('appLoader');
   if (!el) return;
-  var MIN = 550, t0 = performance.now();
+  var MIN = 4000, t0 = performance.now();   // 用户指定：延长到 4s，罩住资源加载
   var hideTimer = null, removed = false;
   function hide(immediate) {
     if (removed) return;
@@ -261,7 +261,7 @@ footer{border-top:1px solid rgba(142,162,216,.2);padding:18px 0 26px;text-align:
   }
   window.addEventListener('load', function () { hide(false); });
   el.addEventListener('click', function () { hide(true); });   // 点击 = 立即跳过
-  setTimeout(function () { hide(false); }, 6000);   // 兜底：无论如何 6 秒内必须让开
+  setTimeout(function () { hide(false); }, 10000);   // 兜底：无论如何 10 秒内必须让开
 })();
 </script>
 </body>
