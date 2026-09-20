@@ -7885,19 +7885,24 @@ function dataConsistencyHtml() {
     ? '<div class="hint ' + (cls || '') + '"><code>' + arr.map(x => esc(String(x))).join('</code>、<code>') + '</code></div>'
     : '';
   /* 2.62.0 重构：总览条——先给结论，再看明细 */
-  const okT = SYNC_TABLES.filter(k => rep.tables[k] && rep.tables[k].diff === 0).length;
-  const badT = SYNC_TABLES.filter(k => rep.tables[k] && rep.tables[k].diff !== 0).length;
   /* ⚠ 原写法是 `html += …`，但此函数里 html 在后面 return 处才拼 —— 对账接口通了之后
      这里第一次被走到就 ReferenceError（「html is not defined」）。
      改成先存变量、在 return 处拼接（总览条仍在最前）。 */
-  const overview = '<div class="sync-overview"><span class="so-item ok">✓ 一致 ' + okT + ' 表</span>' +
-    (badT ? '<span class="so-item bad">⚠ ' + badT + ' 表不一致</span>' : '') + '</div>';
+  /* 口径修正（用户实测反馈）：总览条原先用 rep.tables[k].diff —— 但 reconcile 报告里
+     根本没有 diff 字段（undefined !== 0 恒真）→ 9 张表全被算成「不一致」。
+     与明细行同一套事实：仅本地 0 + 仅飞书 0 + 内容差异 0 = 一致。 */
+  const isConsistent = t => t && !t.localOnlyCount && !t.remoteOnlyCount && !t.diffCount;
+  const okT2 = SYNC_TABLES.filter(k => isConsistent(rep.tables[k])).length;
+  const overview = '<div class="sync-overview"><span class="so-item ok">✓ 一致 ' + okT2 + ' 表</span>' +
+    (SYNC_TABLES.length - okT2 ? '<span class="so-item bad">⚠ ' + (SYNC_TABLES.length - okT2) + ' 表不一致</span>' : '') + '</div>';
   const rows = SYNC_TABLES.filter(k => rep.tables[k]).map(k => {
     const t = rep.tables[k];
     const L = t.localRecords, R = t.feishuRecords;
     const diff = L - R;
-    const mark = diff === 0 ? '<b style="color:#2d9d4f">✓ 一致</b>'
-      : (diff > 0 ? '<b style="color:#e8a020">本地多 ' + diff + '</b>' : '<b class="text-danger">飞书多 ' + (-diff) + '</b>');
+    const mark = (diff === 0 && !t.diffCount) ? '<b style="color:#2d9d4f">✓ 一致</b>'
+      : (diff > 0 ? '<b style="color:#e8a020">本地多 ' + diff + '</b>'
+      : (diff < 0 ? '<b class="text-danger">飞书多 ' + (-diff) + '</b>'
+      : '<b style="color:#e8a020">内容差异 ' + (t.diffCount || 0) + ' 处</b>'));
     let detail = '';
     if (t.localOnlyCount) {
       const actions = (t.localOnly || []).map(rawKey => {

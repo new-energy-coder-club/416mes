@@ -219,9 +219,10 @@ test('B11 plan placeContainer: 已绑定容器拒绝并提示移库', () => {
 /* ================= 2.63.0 Phase D：实体级分桶 ================= */
 test('D1 entityKeysOf: 命令派生实体键集（含 source/target/entity/无码发号桶）', () => {
   const k1 = U.entityKeysOf({ kind: 'receive', itemCode: 'WP-1', target: { loc: 'L-A', container: 'C-1' } });
-  assert.ok(k1.has('items:WP-1') && k1.has('locations:L-A') && k1.has('containers:C-1'));
+  assert.ok(k1.has('items:WP-1') && k1.has('containers:C-1'), '收发键=物品+容器');
+  assert.ok(!k1.has('locations:L-A'), 'LOC 不在收发键集（P1-3 精细化）');
   const k2 = U.entityKeysOf({ kind: 'placeContainer', containerCode: 'C-2', target: { loc: 'L-A' } });
-  assert.ok(k2.has('containers:C-2') && k2.has('locations:L-A'));
+  assert.ok(k2.has('containers:C-2') && k2.has('locations:L-A'), '容器操作保留 LOC 键');
   const k3 = U.entityKeysOf({ kind: 'registerItem', entity: { category: 'TS', name: 'x' } });
   assert.ok(k3.has('register:TS'), '无码发号归分类桶');
   const k4 = U.entityKeysOf({ kind: 'activateLocation', locationCode: 'L-A' });
