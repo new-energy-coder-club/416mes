@@ -10201,7 +10201,7 @@ async function fsFlushQueueInner() {
 }
 
 async function fsBoot() {
-  fsConnecting = true; refreshStatusHint();   // 重试路径也要回到「连接中」
+  fsConnecting = true; refreshStatusHint(); renderStatusBar();   // 重试路径也要回到「连接中」
   try {
     const remote = await fsPullState();
     fsOnline = true; fsConnecting = false;
@@ -10217,8 +10217,10 @@ async function fsBoot() {
     fsStartPolling();              // Phase 2：10 秒探测一次，只有变了才拉内容
     if (!state.__healthHidden) renderHealthPanel();   // 全量同步完刷新面板（否则停在启动那一刻的空状态）
     await fsPreloadTransactions();                    // Phase 5：预热 IDB 流水，导出即取即用
+    renderStatusBar();   /* 状态条 sbSync 此前只会停在「正在连接飞书…」——
+                            连接状态变化只刷了头部（refreshStatusHint），漏了状态条 */
   } catch (e) {
-    fsOnline = false; fsConnecting = false; refreshStatusHint();
+    fsOnline = false; fsConnecting = false; refreshStatusHint(); renderStatusBar();
     // 真源服务（feishu-server / 隧道）不可达时，退回云端接口 —— 同一份飞书数据。
     // 放在这里而不是页面加载时无条件调用，是为了避免每次打开都把 8 张表拉两遍。
     cloudSync({ silent: true });
