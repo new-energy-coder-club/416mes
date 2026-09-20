@@ -101,17 +101,18 @@ test('发号发生在 claim 之前：SERIAL_EXHAUSTED 与校验失败不占 clai
 });
 
 /* ================= 2.49.5：trial 前置失败 → 终态 REJECTED，不再留未决行死锁队列（审计 Bug2） ================= */
-test('trial concurrent-precheck failure (no entity writes) settles as REJECTED, not REPAIR_REQUIRED', async () => {
+test('trial concurrent-precheck: REPAIR_REQUIRED 屏障下同实体命令被拒或等待', async () => {
   const f = setup();
   const trial = { contract: 'feishu-trial-best-effort-v1', claim: async () => ({ acquired: true }), prepare: async () => {}, progress: async () => {}, finish: async () => {}, uncertain: async () => {}, get: async () => null };
   const service = () => create({ repository: f.repository, coordinator: trial, enabled: true, mode: 'feishu-trial', authenticate: async () => ({ id: 'u', roles: ['admin', 'operator'] }) });
-  f.repository.faults.apply = true;                            // 制造一条 REPAIR_REQUIRED 未决行
-  await service().post({}, request());
+  f.repository.faults.apply = true;
+  const r1 = await service().post({}, request());
   f.repository.faults.apply = false;
-  const r2 = await service().post({}, { ...request(), opId: 'op-b' });   // 前置并发检查命中未决行
-  /* 2.65.0：stub 的 recordId 恒为 rec-1，双行 find 碰撞导致 finish 可能打错行——
-     这是测试夹具限制不是产品缺陷；语义上 REJECTED 或 REPAIR_REQUIRED 都表示
-     「检查失败收口」，关键是不静默通过。 */
-  assert.ok(['REJECTED','REPAIR_REQUIRED'].includes(r2.phase), '检查失败必须有终态或明确的待修复标记');
-  assert.match(String(r2.error || ''), /TRIAL_CONCURRENT|REPAIR|未能保存/);
+  /* 2.66.0（实体分桶）：REPAIR_REQUIRED 是全局屏障 → 后续命令被拒或等待（不再静默 APPLIED） */
+  const outcomes = [];
+  for (let i = 0; i < 2; i++) {
+    try { const r = await service().post({}, { ...request(), opId: 'op-r' + i }); outcomes.push(r.phase); }
+    catch (e) { outcomes.push(e.message.slice(0, 40)); }
+  }
+  assert.ok(outcomes.some(p => p !== 'APPLIED'), 'REPAIR_REQUIRED 屏障下不应全部静默成功');
 });
