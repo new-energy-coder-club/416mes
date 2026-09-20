@@ -925,8 +925,10 @@ body.stocktake-on .stocktake-banner{display:block}
    后者因为该容器同时成了纵向滚动容器而失效；横向 sticky 的滚动口正是这个容器。
    两列宽度写死，left 偏移才是确定的（否则 sticky 列会重叠或露缝）。 */
 @media screen and (min-width:561px){
-  #matTable th:nth-child(1),#matTable td:nth-child(1){position:sticky;left:0;z-index:2;width:28px;min-width:28px;max-width:28px;}
-  #matTable th:nth-child(2),#matTable td:nth-child(2){position:sticky;left:28px;z-index:2;width:112px;min-width:112px;max-width:112px;}
+  /* 阶段31c：你的重构把复选框列去掉了（历史只读）—— 粘性列改为按内容锚定，
+     物料码列不再被 28px 旧宽度挤成竖排（用户实测截图：PJ-LD001 竖排换行） */
+  #matTable th:nth-child(1),#matTable td:nth-child(1){position:sticky;left:0;z-index:2;width:112px;min-width:112px;}
+  #matTable th:nth-child(2),#matTable td:nth-child(2){position:sticky;left:112px;z-index:2;width:86px;min-width:86px;}
   #matTable thead th:nth-child(1),#matTable thead th:nth-child(2){z-index:4;background:var(--surface-2);}
   #matTable tbody td:nth-child(1),#matTable tbody td:nth-child(2){background:var(--surface);}
   #matTable tbody tr.row-neg td:nth-child(1),#matTable tbody tr.row-neg td:nth-child(2){background:#fdecea;}
@@ -10225,7 +10227,21 @@ async function fsFlushQueueInner() {
        日志上看起来"安安静静"，实际在无限重试一个已知不会成功的请求
        （典型：物料码在飞书台账里不存在、缺单选选项）。它会一直占着串行链，
        拖慢后面所有正常条目的提交。现在只有人点「重试」才会重新排队。 */
-    if (item.status === 'needs_attention') { held++; continue; }
+    if (item.status === 'needs_attention') {
+      /* 2.69.0 S5（并发方案）：瞬态错误的自动慢速重试——超时/网络类失败在
+         5 分钟冷却后自动回到队列（最多 2 次），不再要求用户手动点重试。
+         永久错误（物料不存在、缺选项等）保持人工处理。 */
+      const transientErr = /超时|timeout|网络|ECONNREFUSED|fetch failed|502|503/i.test(String(item.lastError || ''));
+      const cooled = Date.now() - Number(item.lastAttemptAt || 0) > 5 * 60 * 1000;
+      if (transientErr && cooled && (item._autoRetries || 0) < 2) {
+        item.status = 'pending';
+        item._autoRetries = (item._autoRetries || 0) + 1;
+        try { if (ob) await ob.put(item); else fsOutbox().put(item); } catch (e) { }
+        log('🔄 自动重试瞬态错误（第 ' + item._autoRetries + ' 次）：' + fsDescribeItem(item));
+        continue;   // 本轮先跳过，下一轮冲刷按 pending 处理
+      }
+      held++; continue;
+    }
     /* 2.49.5（审计 B3）：ITM 命令（op:'itemOperation'）与 MAT 条目共用同一 outbox store，
        但普通冲刷对它只会 fsExecItem 抛错 → fsQueueFail 每轮 tries+1——
        用户还没提交的命令被冲刷循环悄悄推成「需人工核验」，角标/面板/日志全被污染。
