@@ -1067,6 +1067,25 @@ body.cols-compact .col-secondary{display:none}
   /* 批次3（页面清单 P1·register）：details 的 summary 触达面 48px。
      用 padding 达成，不用 display:flex —— 那会吃掉折叠三角（阶段11 踩过） */
   #tab-register details>summary{min-height:48px;font-size:15px;padding-block:13px;}
+  /* ===== 批次5（页面清单 P2 收尾）===== */
+  /* ② wip 筛选栏：4 控件一行 → 2×2 */
+  #tab-wip .toolbar:has(#wipSearch){display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);}
+  #tab-wip .toolbar:has(#wipSearch) #wipSearch{grid-column:1/-1;width:100%;}
+  #tab-wip .toolbar:has(#wipSearch) .field{min-height:44px;font-size:16px;}
+  /* ③ txn：日期分隔符不占位、双日期两列、清除按钮整行 */
+  #tab-txn .toolbar:has(#txnDateFrom){display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);}
+  #tab-txn .toolbar:has(#txnDateFrom) #txnSearch{grid-column:1/-1;width:100%;}
+  #tab-txn .toolbar:has(#txnDateFrom) .txn-date-sep{display:none;}
+  #tab-txn .toolbar:has(#txnDateFrom) #btnTxnClearFilter{grid-column:1/-1;width:100%;}
+  #tab-txn .toolbar:has(#txnDateFrom) .field{min-height:44px;font-size:16px;min-width:0;}
+  /* ④ design/sync 裸控件补高 */
+  #tab-design .toolbar select,#tab-design .toolbar input{min-height:44px;font-size:16px;max-width:100%;}
+  /* ⑤ item-work 段标题随滚动钉住 */
+  #tab-item-work h3{position:sticky;top:0;background:var(--surface);padding-block:6px;z-index:1;}
+}
+/* ① ledger 卡态隐藏次要列（「显示全部列」按钮承担展开职责） */
+@media screen and (max-width:560px){
+  #matTable td.col-secondary,#matTable th.col-secondary{display:none;}
 }
 .scan-result{margin-top:12px;}
 /* ============================================================
@@ -1481,7 +1500,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <div class="toolbar">
         <input type="search" id="txnSearch" class="field field--sm" placeholder="🔍 筛选：物料码 / 类型 / 操作人 / 关联单 / 原因" style="min-width:240px">
         <input type="date" id="txnDateFrom" class="field field--sm" title="起始日期" aria-label="流水起始日期">
-        <span class="hint">—</span>
+        <span class="hint txn-date-sep">—</span>
         <input type="date" id="txnDateTo" class="field field--sm" title="结束日期" aria-label="流水结束日期">
         <button class="btn small ghost" id="btnTxnClearFilter">清除筛选</button>
       </div>
@@ -1511,7 +1530,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <input class="field field--md field--w260" type="text" id="memberSearch" placeholder="🔍 搜索：编号/姓名/学号/部门/职务/标签/电话">
         <button class="btn" id="btnAddMember">+ 新增人员</button>
         <span class="spacer"></span>
-        <button class="btn warn small" id="btnDelMember">删除勾选行</button>
+        <button class="btn danger small" id="btnDelMember">删除勾选行</button>  <!-- warn→danger：删除属危险语义 -->
       </div>
       <div class="toolbar mt-6" id="memberTagBar"></div>
       <div class="table-scroll">
