@@ -60,3 +60,12 @@ FEISHU_TABLES=<nine-table-json-with-itemOperations>
 ```
 
 不读取/复制真实环境。新表由用户创建不等于schema、ACL或生产协调已验证。不要把旧网页回滚当作恢复关键字段普通写权限。
+
+## 2.64.0 部署边界与可选项（Phase D）
+- 实体级分桶：trial 协调器对 PREPARED 行按实体键集相交互斥（unique-items.entityKeysOf），
+  不同物品/容器可并行；REPAIR_REQUIRED 仍全局屏障；写前 TRIAL_PRECONDITION_CHANGED 重计划不变。
+- 最小身份（可选）：Vercel 环境变量 ITM_OPERATOR_TOKENS = JSON（token→{id,roles}）。
+  配置后 POST 必须带 X-416MES-Token，操作人记真实 id，register*/retire/activate* 的
+  admin 校验激活；未配置则保持 trial-unverified（现状兼容）。
+  前端在浏览器控制台执行 localStorage.setItem('mes416_itm_token','<token>') 一次性录入。
+- 边界：共享 token 防误不防恶意；正式多用户走飞书 OAuth+持久协调器（长期方案）。
