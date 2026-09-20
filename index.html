@@ -9529,7 +9529,7 @@ async function runReconcile() {
         return o;
       });
     });
-    const r = await fetch(RECONCILE_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const r = await fetch(RECONCILE_API, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-416mes-Same-Origin': '1' }, body: JSON.stringify(body) });   /* 补同源标记：后端 api/feishu/reconcile 的 assertSameOrigin 要求，与其它三个 POST 一致 */
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || ('HTTP ' + r.status));
     _lastReport = d.report;
