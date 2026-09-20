@@ -54,7 +54,7 @@
    01 TOKENS —— 旧变量（迁移期保留，值不动，保证零视觉变化）
    阶段 3 起才把 --green/--amber/--red 等逐步指向下方新语义色。
    ============================================================ */
-:root{--blue:#1f6fd6;--green:#2d9d4f;--amber:#e8a020;--red:#d33a2c;--ink:#222;--line:#d8dce2;--bg:#f4f6f9;}
+:root{--blue:#1f6fd6;--green:#2d9d4f;--amber:#e8a020;--red:#d33a2c;--ink:#2B3648;--line:#E2E8F0;--bg:#EFF3F9;}
 /* ============================================================
    01 TOKENS（新增层）—— 只引入新名字，不被任何现存规则引用，
    因此本层为纯新增、不产生任何视觉变化。对比度实测见 ui优化.md §7.1。
@@ -74,13 +74,19 @@
   --ink-strong:#16233A;          /* 15.72:1 */
   --text-sub:#4A5A73;            /* 7.00:1 */
   --text-muted:#667085;          /* 4.97:1 */
-  --line-strong:#B8C0CC;
+  --line-strong:#C4CEDC;         /* 1.5px 描边加深一档 */
   --surface:#FFFFFF;
-  --surface-2:#EEF2F7;
-  --surface-hover:#F7FAFD;
+  --surface-2:#F0F4FA;           /* 卡片内嵌区块底 */
+  --surface-3:#E5ECF5;           /* 更深的嵌套底（表头/摘要条） */
+  --surface-hover:#F4F8FD;
   /* 交互 */
   --color-primary:#1F6FD6;       /* 4.88:1 */
+  --primary:var(--color-primary);/* 修现网 bug：移动导航引用了未定义的 --primary */
   --primary-hover:#1A5FBC;
+  --primary-active:#154E9C;
+  --primary-bright:#2E80E8;      /* 渐变顶色 */
+  --primary-050:#EAF2FD;         /* 选中/tonal 浅底 */
+  --primary-100:#D7E6FB;
   --cyan-ink:#0077B6;            /* 浅底青文字 4.87:1；亮青 #00B0F0 浅底仅约 2.5:1，只用于深底 */
   --focus-ring:0 0 0 3px rgba(0,119,182,.28);
   /* 状态语义五档（深字浅底，全部 ≥4.5:1，实测值见注释） */
@@ -93,16 +99,26 @@
   --accent-warn:#e8a020;  --accent-info:#6b7fd7;  --accent-danger:#d33a2c;  --accent-ok:#2d9d4f;
   /* 尺寸阶梯 */
   --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px;
-  --r-sm:4px; --r-md:6px; --r-lg:10px;
-  --shadow-1:0 1px 2px rgba(14,26,85,.06);
-  --shadow-2:0 4px 12px rgba(14,26,85,.12);
+  --sp-7:32px; --sp-8:40px;
+  --r-sm:6px; --r-md:10px; --r-lg:14px; --r-xl:20px; --r-pill:999px;   /* 全面放大一档：手机的「软」 */
+  --shadow-1:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.08);
+  --shadow-2:0 6px 16px rgba(16,24,40,.10),0 2px 4px rgba(16,24,40,.06);
+  --shadow-3:0 16px 36px rgba(16,24,40,.16),0 4px 10px rgba(16,24,40,.08);
+  /* 专用投影：主按钮彩色光晕（「一眼高级」核心）、底栏上投 */
+  --shadow-btn:0 4px 12px rgba(31,111,214,.30);
+  --shadow-btn-danger:0 4px 12px rgba(169,35,35,.28);
+  --shadow-nav:0 -2px 16px rgba(16,24,40,.10);
   /* 字体与字号 */
   --font-ui:"Microsoft YaHei","PingFang SC",sans-serif;
   --font-mono:"Cascadia Mono",Consolas,"Courier New",monospace;
-  --fs-11:11px; --fs-12:12px; --fs-13:13px; --fs-14:14px; --fs-16:16px;
+  --fs-11:11px; --fs-12:12px; --fs-13:13px; --fs-14:14px; --fs-15:15px; --fs-16:16px;
+  --fs-17:17px; --fs-18:18px; --fs-24:24px;
   --fs-20:20px; --fs-page:22px; --fs-data:28px;
   /* 层级 */
   --z-nav:10; --z-modal:50; --z-overlay:99; --z-toast:120;
+  /* 动效 */
+  --ease-out:cubic-bezier(.2,.8,.3,1);
+  --press-t:.1s;
   /* ⚠ 冻结：--lfs 不在此定义（由 JS 在运行期设置），且禁止改名或改语义。
      .label .bar/.code/.attr/.pdate 用 calc(... * var(--lfs,1)) 缩放；
      fitCodes()/fitAttrs() 通过 getComputedStyle(...).getPropertyValue('--lfs') 读取。 */
@@ -196,60 +212,73 @@ section.tab.on{display:block;}
   background:var(--cyan-ink);margin-right:8px;vertical-align:-2px;}
 /* 阶段15（§4.5）：主按钮 32px 高、small 28px —— 纵向 padding 归零 + flex 居中，
    让 min-height 成为真正的约束（否则 padding 会把高度顶到 37px，规格落不了地） */
-.btn{display:inline-flex;align-items:center;justify-content:center;min-height:32px;
-  border:1px solid var(--color-primary);color:#fff;border-radius:var(--r-md);
-  padding:0 14px;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;
-  text-decoration:none;
-  background:linear-gradient(0deg,var(--primary-hover),var(--color-primary));
-  box-shadow:var(--shadow-1),inset 0 -2px 0 rgba(14,26,85,.18);
-  transition:transform .12s ease,box-shadow .12s ease,background .12s ease;}
-/* 按钮翻新（子代理提案）：立体感借 Uiverse/adamgiebl 但重度收敛
-   （原案 perspective 200px/15°→36° 在密集表格里晃眼 → 400px/6°→9°）。
-   hover 限 hover 能力设备（防移动端粘滞 hover）；.small 不参与 3D。 */
+/* ============================================================
+   按钮体系（设计系统重构 B2）：主 / soft / ghost / danger / small
+   主键=品牌蓝纵向微渐变 + 彩色投影 + 顶光 + 底影（可按压的「键」感）；
+   按压 = 下沉 1px + 收影。**去掉**上一轮的 rotateX 晃动（那是「丑」的来源）。
+   hover 限 hover 能力设备（防移动端粘滞 hover）；按压反馈走 :active。
+   ============================================================ */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  min-height:40px;padding:0 18px;border:1px solid transparent;
+  border-radius:var(--r-md);font-size:14px;font-weight:600;font-family:inherit;
+  color:#fff;cursor:pointer;text-decoration:none;-webkit-tap-highlight-color:transparent;
+  user-select:none;touch-action:manipulation;
+  background:linear-gradient(180deg,var(--primary-bright) 0%,var(--color-primary) 55%,#1C66C2 100%);
+  box-shadow:var(--shadow-btn),inset 0 1px 0 rgba(255,255,255,.22),inset 0 -2px 0 rgba(14,26,85,.20);
+  transition:transform var(--press-t) var(--ease-out),box-shadow .15s ease,
+             background .15s ease,filter .15s ease,border-color .15s ease;}
 @media screen and (hover:hover){
-  .btn:not(.small):not(:disabled):hover{
-    background:linear-gradient(0deg,#174f9e,var(--primary-hover));
-    box-shadow:var(--shadow-2),inset 0 -2px 0 rgba(14,26,85,.22);
-    transform:perspective(400px) rotateX(6deg) translateY(-1px);}
-  .btn.small:not(:disabled):hover{box-shadow:var(--shadow-2),inset 0 -2px 0 rgba(14,26,85,.22);}
+  .btn:not(:disabled):hover{filter:brightness(1.06);transform:translateY(-1px);
+    box-shadow:0 6px 16px rgba(31,111,214,.36),inset 0 1px 0 rgba(255,255,255,.22),inset 0 -2px 0 rgba(14,26,85,.20);}
 }
 @media screen{
-  .btn:not(.small):not(:disabled):active{
-    transform:perspective(400px) rotateX(9deg) translateY(1px);
-    box-shadow:var(--shadow-1),inset 0 -1px 0 rgba(14,26,85,.25);}
-  .btn.small:not(:disabled):active{
-    transform:translateY(1px);
-    box-shadow:inset 0 -1px 0 rgba(14,26,85,.2);}
+  .btn:not(:disabled):active{transform:translateY(1px);filter:brightness(.97);
+    box-shadow:0 1px 3px rgba(31,111,214,.24),inset 0 1px 0 rgba(255,255,255,.12),inset 0 -1px 0 rgba(14,26,85,.22);}
 }
+/* 图标位：内联 SVG 自动归一（不依赖 HTML 改动，有图标即生效） */
+.btn>svg{width:17px;height:17px;flex:none;margin-left:-3px;}
+/* ghost：白底 + 加强描边 + 蓝字；hover 进浅蓝底 */
 .btn.ghost{background:var(--surface);color:var(--color-primary);
-  box-shadow:none;font-weight:500;}
+  border-color:var(--line-strong);box-shadow:var(--shadow-1);font-weight:600;}
 @media screen and (hover:hover){
-  .btn.ghost:not(:disabled):hover{background:var(--surface-hover);
-    border-color:var(--primary-hover);color:var(--primary-hover);
-    box-shadow:var(--shadow-1);transform:none;}
+  .btn.ghost:not(:disabled):hover{background:var(--primary-050);filter:none;
+    border-color:var(--color-primary);color:var(--primary-hover);
+    box-shadow:var(--shadow-1);transform:translateY(-1px);}
 }
 @media screen{
-  .btn.ghost:not(:disabled):active{background:var(--surface-2);transform:translateY(1px);}
+  .btn.ghost:not(:disabled):active{background:var(--primary-100);filter:none;
+    transform:translateY(1px);box-shadow:none;}
 }
-.btn.warn{border-color:var(--red);background:var(--red);}
-.btn.small{padding:0 10px;font-size:12px;min-height:28px;}
-/* 阶段15（§4.5）：danger 实底，**仅**用于删除 / 清空 / 冲销 / 取消 */
-.btn.danger{border-color:var(--danger-fg);
-  background:linear-gradient(0deg,#8c1d1d,var(--danger-fg));color:#fff;
-  box-shadow:var(--shadow-1),inset 0 -2px 0 rgba(0,0,0,.28);}
+/* soft（新增·tonal）：浅蓝底深蓝字，介于主键与 ghost 之间的第二层级 */
+.btn.soft{background:var(--primary-050);color:var(--primary-active);
+  border-color:transparent;box-shadow:none;font-weight:600;}
 @media screen and (hover:hover){
-  .btn.danger:not(:disabled):hover{
-    background:linear-gradient(0deg,#7a1818,#971f1f);
-    box-shadow:var(--shadow-2),inset 0 -2px 0 rgba(0,0,0,.3);
-    transform:perspective(400px) rotateX(6deg) translateY(-1px);}
+  .btn.soft:not(:disabled):hover{background:var(--primary-100);filter:none;
+    transform:translateY(-1px);box-shadow:var(--shadow-1);}
 }
-/* 阶段15（§4.5）按钮规格：主按钮 32px、small 28px（高度用 min-height + 居中，
-   与 .btn.small 的既有内边距兼容，不改变文字基线） */
-
+@media screen{
+  .btn.soft:not(:disabled):active{background:#C4DCF9;filter:none;
+    transform:translateY(1px);box-shadow:none;}
+}
+/* warn：琥珀语义 = 注意 */
+.btn.warn{border-color:transparent;color:#fff;
+  background:linear-gradient(180deg,#F0AE3A,var(--amber) 60%,#D18E15);
+  box-shadow:0 4px 12px rgba(232,160,32,.30),inset 0 1px 0 rgba(255,255,255,.25),inset 0 -2px 0 rgba(120,70,0,.20);}
+/* danger：实红 —— 仅删除/清空/冲销/取消 */
+.btn.danger{border-color:transparent;color:#fff;
+  background:linear-gradient(180deg,#C43636,var(--danger-fg) 60%,#931F1F);
+  box-shadow:var(--shadow-btn-danger),inset 0 1px 0 rgba(255,255,255,.20),inset 0 -2px 0 rgba(0,0,0,.25);}
+@media screen and (hover:hover){
+  .btn.danger:not(:disabled):hover{filter:brightness(1.07);transform:translateY(-1px);
+    box-shadow:0 6px 16px rgba(169,35,35,.34),inset 0 1px 0 rgba(255,255,255,.20),inset 0 -2px 0 rgba(0,0,0,.25);}
+}
+/* small：桌面 32px；手机由 06 RESPONSIVE 提到 44px（既有规则保留） */
+.btn.small{min-height:32px;padding:0 12px;font-size:13px;font-weight:600;border-radius:var(--r-sm);}
+/* 全宽工具类（新增，供手机主动作） */
+.btn--block{width:100%;}
 .btn:disabled{opacity:.45;cursor:not-allowed;}
 @media screen{
-  /* 防 hover 变换残留在禁用按钮上（部分浏览器 disabled 仍触发 :hover） */
-  .btn:disabled{transform:none;box-shadow:none;}
+  .btn:disabled{transform:none;box-shadow:none;filter:none;}
 }
 /* 批次4（组件提案 §1.6 · .btn--download）：文字 + 右侧深色图标块，
    hover 时图标块 0.3s 滑动铺满。绿改用 --done-fg 系（导出=产出完成物）。
@@ -768,26 +797,38 @@ body.stocktake-on .stocktake-banner{display:block}
    一次性的列宽（如某列 70px）仍保留内联 —— 那是该列的个体属性，为每个宽度
    造一个只用一次的 class 并不能提升可维护性，反而让 CSS 变噪音。
    ============================================================ */
-.field{border:1.5px solid var(--line-strong);border-radius:var(--r-lg);padding:8px 12px;
-  font-size:14px;font-family:inherit;background:var(--surface);color:var(--ink-strong);
-  transition:border-color .15s ease;}
+.field{min-height:44px;padding:0 14px;border:1.5px solid var(--line-strong);
+  border-radius:var(--r-md);font-size:15px;font-family:inherit;
+  background:var(--surface);color:var(--ink-strong);
+  box-shadow:inset 0 1px 2px rgba(16,24,40,.05);
+  transition:border-color .15s ease,box-shadow .15s ease,background .15s ease;}
 @media screen{
-  /* 借 Uiverse/R1SH4BH81 的 focus 蓝边（#2d79f3 → 本项目 --cyan-ink）；
-     不加 box-shadow：全局 :focus-visible 已有 3px 焦点环，双层会糊 */
-  .field:focus{border-color:var(--cyan-ink);}
-  /* 批次4（组件提案 §2.3 · .field-wrap）：左图标输入行（限 scan/items 两个高频点位）；
-     focus-within 让图标随焦点变色 */
+  /* 设计系统 B2：focus = 蓝边 + 淡蓝光晕（不再叠全局 3px 焦点环的硬朗感） */
+  .field:focus{border-color:var(--color-primary);
+    box-shadow:0 0 0 3px rgba(31,111,214,.14),inset 0 1px 2px rgba(16,24,40,.05);}
+  /* 填充款（新增）：灰底无边框 —— 表单密集页更安静 */
+  .field--fill{background:var(--surface-2);border-color:transparent;box-shadow:none;}
+  .field--fill:focus{background:var(--surface);border-color:var(--color-primary);
+    box-shadow:0 0 0 3px rgba(31,111,214,.14);}
+  /* 左图标输入行（scan/items 高频点位）；focus-within 图标随焦点变色 */
   .field-wrap{position:relative;display:flex;align-items:center;max-width:100%;}
-  .field-wrap>.field,.field-wrap>.scan-input{padding-left:38px;width:100%;flex:1;}
-  .field-wrap__icon{position:absolute;left:12px;width:16px;height:16px;
+  .field-wrap>.field,.field-wrap>.scan-input{padding-left:42px;width:100%;flex:1;}
+  .field-wrap__icon{position:absolute;left:13px;width:18px;height:18px;
     color:var(--text-muted);pointer-events:none;transition:color .15s ease;}
   .field-wrap:focus-within>.field,.field-wrap:focus-within>.scan-input{
-    border-color:var(--cyan-ink);}
-  .field-wrap:focus-within>.field-wrap__icon{color:var(--cyan-ink);}
+    border-color:var(--color-primary);
+    box-shadow:0 0 0 3px rgba(31,111,214,.14);}
+  .field-wrap:focus-within>.field-wrap__icon{color:var(--color-primary);}
+  /* select 自定义下拉箭头（appearance 不改高度与触达面） */
+  select.field{appearance:none;-webkit-appearance:none;padding-right:38px;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%234A5A73' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 12px center;background-size:16px;}
 }
-.field--md{padding:6px 10px;font-size:13px;border-radius:5px}
-.field--sm{padding:3px 8px;font-size:13px;border-radius:5px}
-.field--xs{padding:2px 8px;font-size:13px;border-radius:4px;border:none;background:var(--surface-2)}
+/* 尺寸变体：md 给工具栏；sm/xs 是表格内紧凑件，触达面由卡片态接管 */
+.field--md{min-height:38px;padding:0 12px;font-size:14px;border-radius:var(--r-sm);}
+.field--sm{min-height:32px;padding:0 10px;font-size:13px;border-radius:var(--r-sm);}
+.field--xs{min-height:28px;padding:0 8px;font-size:13px;border-radius:var(--r-sm);
+  border-width:1px;background:var(--surface-2);}
 .field--w200{width:200px}
 .field--w220{width:220px}
 .field--w240{width:240px}
@@ -1034,7 +1075,15 @@ body.cols-compact .col-secondary{display:none}
 .form-row input,.form-row select{border:1px solid var(--line);border-radius:4px;padding:5px 8px;font-size:13px;}
 .form-row input[type=number]{width:90px;}
 /* 扫码页 */
-.scan-input{width:100%;font-size:18px;padding:12px;border:2px solid var(--blue);border-radius:8px;letter-spacing:1px;}
+.scan-input{width:100%;font-size:18px;font-family:var(--font-mono);letter-spacing:.5px;
+  min-height:52px;padding:0 14px;border:2px solid var(--color-primary);border-radius:var(--r-lg);
+  background:var(--surface);color:var(--ink-strong);
+  box-shadow:var(--shadow-1),inset 0 1px 2px rgba(16,24,40,.05);
+  transition:border-color .15s ease,box-shadow .15s ease;}
+@media screen{
+  .scan-input:focus{border-color:var(--cyan-ink);
+    box-shadow:0 0 0 4px rgba(31,111,214,.16);}
+}
 .scan-hint>summary{cursor:pointer;}
 .scan-hint__more{color:var(--text-muted);font-weight:400;font-size:12px;}
 /* 批次3（页面清单 P0·scan）：手机首屏层级倒挂 —— 劝退提示 + 5 行前缀教学把
@@ -1195,14 +1244,15 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   header h1{font-size:17px;}
   main{padding:12px 12px 16px;}
   /* 扫码输入区：大输入 + 全宽摄像头按钮 */
-  .scan-input{font-size:16px;padding:12px;min-height:48px;}
+  .scan-input{font-size:16px;min-height:52px;}   /* 等宽字体继承基类 */
   #btnCam{width:100%;min-height:48px;font-size:15px;margin-top:10px;}
   .scan-status{font-size:13.5px;margin:-12px -12px 10px;}
   .kv{font-size:13.5px;line-height:1.75;}
   .kv b{min-width:64px;}
   /* 触控目标与字号 */
   /* 阶段15（§4.5）：手机 ≥44px、关键确认 48px */
-  .btn{min-height:44px;}
+  .btn{min-height:46px;}
+  .btn.small{min-height:44px;}   /* 手机触达面只升不降：46/44 拉开层级 */
   .btn.small{min-height:44px;}
   #btnExec,#btnPrint,#btnStocktakeEnd,#btnGenWip{min-height:48px;}
   /* 定位卡的动作按钮是主动作：必须压过上面的 .btn.small(34px)。
@@ -1215,7 +1265,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
      否则搜索框仍是 12–14px，iOS 聚焦时会自动放大整页。
      阶段11 之前这些字号写在各控件的 inline style 上（inline 优先级最高），
      根本没法用 CSS 覆盖 —— 迁到 class 之后这个既有问题才修得掉。 */
-  .field,.field--md,.field--sm,.field--xs{font-size:16px;min-height:44px;}   /* .field--inv 死引用已清（全站无定义无用法） */
+  .field,.field--md,.field--sm,.field--xs{font-size:16px;min-height:48px;}   /* 设计系统：手机输入 48px */   /* .field--inv 死引用已清（全站无定义无用法） */
   /* 工单执行的汇总栏在手机上纵向堆叠 */
   .exec-summary{flex-direction:column;align-items:flex-start;gap:4px;}
   /* 当前对象条：chip 与按钮都是可点元素，手机上必须达到 44px 触控目标；
