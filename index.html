@@ -7908,7 +7908,13 @@ function dataConsistencyHtml() {
       const actions = (t.localOnly || []).map(rawKey => {
         const key = String(rawKey), rec = findRec(k, rawKey);
         const protectedDelete = isProtectedLocalDelete(k, rec);
-        const buttons = (k === 'transactions' || k === 'itemOperations') ? '' :
+        /* 物品操作命令：推回飞书是死路（专用端点才有 apply 副作用），但「仅本地」的
+           命令必须有删除出口 —— 否则测试期产生的垃圾命令永远推不掉也删不掉
+           （用户实测反馈）。transactions（账本凭证）仍然不给删。 */
+        const buttons = (k === 'transactions') ? '' :
+          (k === 'itemOperations')
+          ? '<span class="reconcile-key-actions"><button class="btn tiny ghost" data-itmop-localonly-del="' + esc(key) + '">删除本机记录（需凭据）</button></span>'
+          :
           '<span class="reconcile-key-actions">' +
           '<button class="btn tiny ghost" data-reconcile-push="1" data-table="' + esc(k) + '" data-key="' + esc(key) + '">推回飞书</button>' +
           (!protectedDelete ? '<button class="btn tiny ghost" data-reconcile-del="1" data-table="' + esc(k) + '" data-key="' + esc(key) + '">删除本地</button>' : '') +
@@ -8182,6 +8188,29 @@ function renderAlignBox() {
       const r = await pushOneReconcileRecord(table, key);
       if (!r.ok) alert('推送失败：' + r.error);
     } finally { btn.disabled = false; }
+  }));
+  /* 物品操作命令（仅本地）的删除出口：凭据留痕 + 清队列副本，绝不调用任何飞书删除 */
+  box.querySelectorAll('[data-itmop-localonly-del]').forEach(btn => btn.addEventListener('click', async () => {
+    const code = btn.dataset.itmopLocalonlyDel;
+    const rec = (state.itemOperations || []).find(x => x.code === code);
+    if (!rec) { alert('记录已不存在，请重新核对。'); await runReconcile(); return; }
+    const lines = ['删除本机物品操作记录「' + code.slice(0, 13) + '…」？', '',
+      '对账已确认：飞书里**没有**这条操作，删它不会动到飞书任何一行。',
+      '内容：' + (rec.kind || '—') + ' · ' + (rec.phase || '—') + ' · 操作人 ' + (rec.operator || '—')];
+    lines.push('', '会写删除凭据留痕，**绝不调用任何飞书删除**。',
+      '同一条命令在离线队列里的副本也会一并清掉（队列条目的 id 就是这个 opId）。');
+    if (!confirm(lines.join('\n'))) return;
+    const j = await fsJournalDeletion([{ table: 'itemOperations', key: String(code) }],
+      '删除本机物品操作记录（仅在本地）', 'itmop-localonly-delete');
+    if (!j || !j.ok) { alert('删除凭据写入失败，已放弃（数据未改动）：' + ((j && j.error) || '未知原因')); return; }
+    state.itemOperations = (state.itemOperations || []).filter(x => x.code !== code);
+    try {
+      const ob = await fsOutboxAsync();
+      if (ob) await ob.removeById(code); else fsOutbox().removeById(code);
+      fsQueueChip();
+    } catch (e) { /* 队列副本清理失败不阻塞记录删除 —— 冲刷本就跳过 ITM 命令 */ }
+    save(); renderRes(); renderStatusBar(); fsQueueChip();
+    await runReconcile();
   }));
   box.querySelectorAll('[data-wip-localonly-del]').forEach(btn => btn.addEventListener('click', async () => {
     const r = await cleanLocalOnlyExecutedWip(btn.dataset.wipLocalonlyDel);
@@ -9422,7 +9451,8 @@ function fsSchedulePoll() {
       fsRunCensus().catch(e => { log('⚠️ 键对账失败：' + e.message); healthError('键对账', e); });
     }
     fsSchedulePoll();
-  }, idle ? Math.max(POLL_IDLE_MS, pollActiveMs()) : pollActiveMs());
+  /* 2.66.0 S4：±20% 抖动——多设备同频轮询会同时打到飞书 API 造成突发频控 */
+  }, idle ? Math.max(POLL_IDLE_MS, Math.round(pollActiveMs() * (0.8 + Math.random() * 0.4))) : pollActiveMs());
 }
 function fsStartPolling() { fsSchedulePoll(); }
 document.addEventListener('visibilitychange', () => { fsSchedulePoll(); });
