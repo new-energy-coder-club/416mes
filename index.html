@@ -10318,6 +10318,10 @@ function renderDataStoreHint() {
 let itemPage = null;
 function mountItemPage() {
   if (!itemPage) itemPage = window.ItemUI.mount({ document, getState: () => state, getPersistence: () => itmPersistence,
+    clearItmConflict: async (key) => { delete state.__itmConflicts[key];
+      await stateSaveQueue.run(async () => { if (!localStore) throw new Error('本机不可持久化');
+        await localStore.transaction(['records','syncMeta'], tx => ITEM_PERSIST.writeSnapshot(tx, state)); });
+      log('✓ 已人工核实并解除「' + key + '」的作业暂停'); },
     refreshConflicts: async () => { const remote = await fsPullState(); await stateSaveQueue.run(async () => {
       if (!localStore || itmReadOnlyTab) throw new Error('本机不可持久化或标签只读');
       const next = JSON.parse(JSON.stringify(state));
