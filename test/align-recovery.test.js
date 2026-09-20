@@ -431,8 +431,9 @@ test('阶段5：保存计划必须走 CORE.updateOrderPlan 并同步飞书、留
 
 test('阶段5：已执行工单不得直接删除，必须先冲销（入口与文案都要说清）', () => {
   const s = fnSrc('showWipDetail');
-  assert.match(s, /p\.anyExecuted && !CORE\.isCancelled\(w\)[\s\S]{0,120}先「冲销工单」再删除/,
-    '删除按钮必须拦住已执行的工单并说明先冲销');
+  /* 2.60.0：冲销入口已下线，删除拦截文案统一为「不可删+导出核对」 */
+  assert.match(s, /p\.anyExecuted && !CORE\.isCancelled\(w\)[\s\S]{0,120}不可删除（冲销入口已下线）/,
+    '删除按钮必须拦住已执行的工单并说明唯一出路口径');
   assert.match(s, /workorderLocalDuplicate\(w\.code\)[\s\S]{0,120}数据对齐/,
     '同号重复工单不得走普通删除（会连飞书唯一记录一起删）');
 });
