@@ -79,7 +79,7 @@ footer{border-top:1px solid rgba(142,162,216,.2);padding:18px 0 26px;text-align:
   <div class="wrap topline">
     <img src="nec-logo-white.png" alt="NEC">
     <span class="brand">CHANGZHOU · NEC WORKSHOP</span>
-    <span class="chip">416MES 前端在线</span>
+    <span class="chip" id="joinOnlineChip">416MES 状态检测中…</span>
   </div>
 </header>
 
@@ -103,7 +103,7 @@ footer{border-top:1px solid rgba(142,162,216,.2);padding:18px 0 26px;text-align:
             <div><b>对象：</b>极致审美的主美 / 设计师<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;对仓储管理 MES 感兴趣的 N 个人</div>
             <div><b>集结：</b>玉衡 A416 · 半小时线下 Workshop</div>
           </div>
-          <div class="meta">打印 2026-09-12 · 群码有效至 09-19</div>
+          <div class="meta" data-expiry="2026-09-19">打印 2026-09-12 · 群码有效至 09-19</div>
         </div>
       </div>
       <div class="foot"><span>BUILT TO DAWN · KEEP BUILDING&#9608;</span><span class="url">newenergycoder.club</span></div>
@@ -120,7 +120,7 @@ footer{border-top:1px solid rgba(142,162,216,.2);padding:18px 0 26px;text-align:
       </div>
       <div class="panel">
         <h3>// 怎么加入</h3>
-        <p>① 微信扫左侧招募码进群（有效至 09-19）<br>② 玉衡 A416 半小时线下 Workshop 集结<br>③ 先逛系统：<a href="index.html">mes.newenergycoder.club</a>，SHOW, DON'T TELL</p>
+        <p id="joinRecruitSteps">① 微信扫左侧招募码进群（有效至 09-19）<br>② 玉衡 A416 半小时线下 Workshop 集结<br>③ 先逛系统：<a href="index.html">mes.newenergycoder.club</a>，SHOW, DON'T TELL</p>
       </div>
       <div class="cta">
         <a class="btn primary" href="home.html">进入系统 →</a>
@@ -159,5 +159,27 @@ footer{border-top:1px solid rgba(142,162,216,.2);padding:18px 0 26px;text-align:
 <footer>
   <div class="wrap">NEC WORKSHOP · 416MES RECRUITING · LABEL SIG-A416-001 · BUILT TO DAWN · KEEP BUILDING&#9608;</div>
 </footer>
+<script>
+/* 2.61.0（k3 F8）：招募码过期自动隐藏；「前端在线」改为真实可达性检测（fetch 同页 1px 探测） */
+(function () {
+  var expiry = new Date('2026-09-19T23:59:59+08:00');
+  var expired = Date.now() > expiry.getTime();
+  var chip = document.getElementById('joinOnlineChip');
+  function setChip(ok) { if (chip) chip.textContent = ok ? '416MES 前端在线' : '416MES 暂未响应'; }
+  if (chip) {
+    if (window.fetch) {
+      fetch('index.html', { method: 'HEAD', cache: 'no-store' }).then(r => setChip(true)).catch(() => setChip(false));
+    } else { setChip(true); }
+  }
+  if (expired) {
+    ['meta[data-expiry]', '#joinRecruitSteps'].forEach(function (sel) {
+      var el = document.querySelector(sel);
+      if (el) el.innerHTML = '⚠ 招募群码已过期（2026-09-19）。需要加入请联系管理员获取新码。';
+    });
+    var code = document.querySelector('.code');
+    if (code) code.style.filter = 'blur(6px)';
+  }
+})();
+</script>
 </body>
 </html>

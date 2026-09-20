@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
  * nec-sync.mjs — NEC 小工单 ↔ 飞书同步脚本（基于 lark-cli）
+ * 同步口径：新增/修改双向；删除仅本地（飞书侧删行需手工，pull 不会复活已删单）
  *
  * 用法：
  *   node nec-sync.mjs init                          # 初始化：建多维表格 + 选通知群 + 写配置
@@ -129,7 +130,7 @@ async function push(file, dryRun) {
   if (!orders.length) { console.log('导出文件中没有工单，无需同步。'); return; }
   console.log(`== 同步 ${orders.length} 张工单到「NEC小工单台账」${dryRun ? '（dry-run）' : ''} ==\n`);
 
-  let created = 0, updated = 0, skipped = 0, notified = 0;
+  let created = 0, updated = 0, skipped = 0, notified = 0, failed = 0;
   for (const o of orders) {
     // 1. 判重：按工单号精确搜
     const found = lark(['base', '+record-search', '--base-token', cfg.app_token,
@@ -161,14 +162,21 @@ async function push(file, dryRun) {
         console.log(`  🔄 ${o.code} ${o.title} [${o.status}]`);
       } else { skipped++; console.log(`  ⏭  ${o.code} 无变化`); }
     }
-    // 2. 群通知：新建或状态非「待处理」的变更
+    /* 2.61.0（k3 F4）：幂等键并入内容指纹——同状态下的后续变更（改负责人/截止/备注）
+       不再复用旧键被飞书去重吞掉；发送失败计入 failed 而不是照常 notified++。 */
     if (action && cfg.chat_id) {
-      lark(['im', '+messages-send', '--chat-id', cfg.chat_id, '--markdown', notifyMarkdown(o, action),
-        '--idempotency-key', (o.code + '-' + o.status).slice(0, 50), '--as', 'bot'], { dryRun });
-      notified++;
+      const fingerprint = Buffer.from(JSON.stringify([o.owner, o.due, o.priority, o.materials, o.note])).toString('base64url').slice(0, 24);
+      try {
+        lark(['im', '+messages-send', '--chat-id', cfg.chat_id, '--markdown', notifyMarkdown(o, action),
+          '--idempotency-key', (o.code + '-' + o.status + '-' + fingerprint).slice(0, 60), '--as', 'bot'], { dryRun });
+        notified++;
+      } catch (err) {
+        failed++;
+        console.error(`  ⚠ 群通知发送失败（${o.code}）：${err.message}`);
+      }
     }
   }
-  console.log(`\n完成：新建 ${created}，更新 ${updated}，无变化 ${skipped}，群通知 ${notified}${dryRun ? '（均未实际执行）' : ''}`);
+  console.log(`\n完成：新建 ${created}，更新 ${updated}，无变化 ${skipped}，群通知 ${notified}${failed ? '（失败 ' + failed + '）' : ''}${dryRun ? '（均未实际执行）' : ''}`);
 }
 
 /* ---------- pull（飞书 → 416MES） ---------- */

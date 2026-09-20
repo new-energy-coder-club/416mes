@@ -125,7 +125,7 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
     </a>
     <a class="card c-red" href="index.html#scan">
       <div class="icon">🔫</div><h3>扫码工作台</h3>
-      <p>扫 MAT/LOC/CTN 码即查位置与库存（<b>只读</b>）；扫 WIP 工单码并<b>确认执行</b>才增减库存。此外盘点与手工调整是另外的合法改数入口。</p>
+      <p>扫 MAT/LOC/CTN 码即查位置与库存（<b>只读</b>）；扫 WIP 工单码并<b>确认执行</b>才增减库存。盘点已物品化（只读报告），MAT 数量账已封存。</p>
       <span class="go">进入 →</span>
     </a>
   </div>
@@ -133,7 +133,7 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
 
   <div class="section-title">🛠️ 日常运维（数据同步闭环）</div>
   <div class="ops">
-    <h3>NEC 工单与飞书双向同步</h3>
+    <h3>NEC 工单与飞书同步（增改双向；删除仅本地，飞书侧需手工删行）</h3>
     <div class="step"><span class="num">1</span><span>NEC 工单与飞书双向同步：<code>node nec-sync.mjs push</code>（推）/ <code>node nec-sync.mjs pull</code>（拉，生成文件后在台账页「导入合并」）</span></div>
   </div>
 </main>
@@ -158,13 +158,13 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
       var days = lastBackup ? Math.floor((Date.now() - lastBackup) / 864e5) : 99;
       chipMes.className = 'chip ' + (days > 7 ? 'bad' : 'ok');
       chipMes.innerHTML = '<span class="dot"></span><span class="t">在管物料 ' + mats.length +
-        ' 项 · 库存总值 ¥' + totalVal.toFixed(0) + ' · 待执行工单 ' + wips.length +
+        ' 项 · 历史台账估值 ¥' + totalVal.toFixed(0) + ' · 待执行工单 ' + wips.length +
         (days > 7 ? ' · ⚠已 ' + days + ' 天未备份' : ' · 备份 ' + (lastBackup ? days + ' 天前' : '从未')) + '</span>';
       // 运营看板
       document.getElementById('dash').style.display = 'block';
       var tiles = [
         { n: mats.length, l: '在管物料', w: false },
-        { n: '¥' + totalVal.toFixed(0), l: '库存总值', w: false },
+        { n: '¥' + totalVal.toFixed(0), l: '历史台账估值', w: false },
         { n: wips.length, l: '待执行工单', w: wips.length > 0 },
         { n: (s.transactions || []).length, l: '库存流水', w: false },
         { n: lastBackup ? days + ' 天前' : '从未', l: '上次备份', w: days > 7 }
