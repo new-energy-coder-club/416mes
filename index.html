@@ -1327,6 +1327,100 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   #tab-item-work .itm-grid td{display:grid;grid-template-columns:60px minmax(0,1fr);gap:8px;border:0;padding:6px}
   #tab-item-work .itm-grid td::before{content:attr(data-th);font-weight:600;color:var(--text-sub)}
 }
+
+/* ============================================================
+   08 MOBILE-REDESIGN（子代理 redesign-pages.md）：移动端布局重构
+   全部 @media screen，打印域零触碰（07 PRINT 区在上）。
+   ============================================================ */
+/* ---- P0 · scan：劝退条降级 + 全屏关闭键移右下拇指区 + 相机键沉底 ---- */
+@media screen and (max-width:767px){
+  /* 劝退条在 .panel 外、flex order 管不到 → 降级为一行小字条 */
+  #tab-scan>p.hint{display:flex;align-items:center;gap:8px;font-size:12px;
+    margin:0 0 6px;color:var(--text-muted);flex-wrap:nowrap;overflow:hidden;}
+  #tab-scan>p.hint .btn{min-height:36px;font-size:12px;padding:4px 10px;}
+  /* 全屏结果卡关闭键：右上角单手难达 → 移到右下拇指区、加大 */
+  body.scan-fs .scan-fs-close{top:auto;bottom:calc(66px + env(safe-area-inset-bottom,0));
+    right:12px;min-height:48px;padding:0 20px;font-size:15px;font-weight:600;
+    background:var(--surface);box-shadow:0 4px 14px rgba(10,16,28,.22);}
+  /* 相机键沉到拇指区（sticky，z 低于导航） */
+  #btnCam{position:sticky;bottom:66px;z-index:calc(var(--z-nav) - 1);
+    box-shadow:0 -2px 12px rgba(10,16,28,.12);}
+}
+/* ---- P0 · res：卡片视觉层级 + 操作分级（.tiny 死类不动，用 data-res-* 接管） ---- */
+@media screen and (max-width:560px){
+  #resTable td:first-child{display:block;font-size:17px;font-weight:700;
+    padding:2px 4px 6px;border-bottom:1px dashed var(--line);margin-bottom:4px;}
+  #resTable td:first-child::before{content:none;}
+  #resTable td:first-child code{font-size:17px;}
+  #resTable tr{position:relative;}
+  #resTable td[data-th="同步状态"]{position:absolute;top:10px;right:10px;padding:0;border:none;}
+  #resTable td[data-th="同步状态"]::before{content:none;}
+  .res-sync{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--surface-2);}
+  #resTable td[data-th="操作"]{display:block;padding:6px 4px 2px;}
+  #resTable td[data-th="操作"]::before{content:none;}
+  .res-row-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .res-row-actions .btn[data-res-edit]{grid-column:1/-1;min-height:48px;
+    background:var(--color-primary,var(--blue));color:#fff;border-color:transparent;font-weight:600;}
+  .res-row-actions .btn[data-res-detail],.res-row-actions .btn[data-res-print]{min-height:44px;}
+  .res-row-actions .btn[data-res-del]{grid-column:1/-1;min-height:44px;
+    background:transparent;border:none;color:var(--danger-fg);
+    text-decoration:underline;text-underline-offset:3px;font-size:13px;}
+}
+@media screen and (max-width:767px){
+  #tab-res .toolbar:has(#resSearch){display:grid;grid-template-columns:1fr auto;gap:8px;}
+  #resSearch{grid-column:1/-1;width:100%;min-height:48px;}
+  #btnResAdd{min-height:48px;font-weight:600;}
+  #resSyncHint{grid-column:1/-1;}
+}
+/* ---- P0 · label：操作区重构（打印域一行不碰） ---- */
+@media screen and (max-width:767px){
+  #tab-label .typebar{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  #tab-label .typebar button{min-height:48px;border-radius:var(--r-md);}
+  #tab-label .lw-select{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;}
+  #recFilter{grid-column:1/-1;width:100%;min-height:48px;}
+  #btnSelAll,#btnSelNone{min-height:44px;width:100%;}
+  #tab-label .lw-print{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;margin-top:8px;font-size:13px;}
+  #selPaper,#selInk,#numFontScale{min-height:48px;font-size:16px;width:100%;}
+  #btnPrint{grid-column:1/-1;width:100%;min-height:48px;font-size:16px;font-weight:600;
+    position:sticky;bottom:66px;z-index:calc(var(--z-nav) - 1);box-shadow:0 -2px 12px rgba(10,16,28,.12);}
+  #tab-label .preview{max-height:56vh;overflow:auto;border:1px solid var(--line);border-radius:var(--r-md);}
+  #tab-label .label-list{max-height:40vh;overflow:auto;}
+}
+/* ---- P1 · wip ---- */
+@media screen and (max-width:767px){
+  #btnWipNew{width:100%;min-height:48px;font-size:15px;font-weight:600;}
+  #tab-wip .toolbar:has(#btnWipNew){flex-direction:column;align-items:stretch;}
+  .wip-summary{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch;}
+  .wip-chip{flex:none;min-height:44px;}
+}
+@media screen and (max-width:560px){
+  #wipTable td:first-child{display:block;font-size:16px;padding-bottom:4px;
+    border-bottom:1px dashed var(--line);margin-bottom:4px;}
+  #wipTable td:first-child::before{content:none;}
+  #wipTable td[data-th="操作"]{display:block;}
+  #wipTable td[data-th="操作"]::before{content:none;}
+  #wipTable td[data-th="操作"] .btn{width:100%;min-height:44px;}
+}
+/* ---- P1 · ledger / txn ---- */
+@media screen and (max-width:767px){
+  #tab-ledger .toolbar--main{position:sticky;top:0;z-index:calc(var(--z-nav) - 1);
+    background:var(--surface);padding-block:6px;}
+  #matSearch{width:100%;min-height:48px;}
+  #btnTxnMore{width:100%;min-height:48px;}
+}
+@media screen and (max-width:560px){
+  #matTable td:first-child{display:block;font-size:16px;font-weight:600;
+    border-bottom:1px dashed var(--line);margin-bottom:4px;padding-bottom:4px;}
+  #matTable td:first-child::before{content:none;}
+  #txnTable td:first-child{display:block;font-size:14px;font-weight:600;
+    border-bottom:1px dashed var(--line);margin-bottom:4px;}
+  #txnTable td:first-child::before{content:none;}
+}
+/* ---- P2 · nec 看板编辑按钮漏网触达面 24→44 ---- */
+.nec-card__edit{min-height:44px;padding:8px 14px;}   /* 触达面：覆盖 ≤560 卡态块里的 24px（同优先级后定义偶发不生效，故明确点） */
+@media screen and (max-width:560px){
+  .nec-card .nec-card__edit{min-height:44px;}
+}
 </style>
 </head>
 <body>
