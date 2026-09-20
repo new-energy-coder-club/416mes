@@ -224,7 +224,8 @@ test('清理孤悬流水必须先写凭据、只删仅本地的、并回落高�
   /* 同理：高水位赋值必须真的在这个函数体里出现且只有一处 */
   const hwLines = s.split('\n').filter(l => /state\.txnSeq\s*=/.test(l));
   assert.strictEqual(hwLines.length, 1, '高水位赋值必须有且只有一处');
-  assert.match(hwLines[0], /p\.contiguousMax \+ 1/, '必须回落到连续段末尾 + 1');
+  /* 2.61.1：txnSeq 语义是「最后已用号」——+1 会在清理当场自造假缺口（审计 B-a） */
+  assert.match(hwLines[0], /p\.contiguousMax(?![\s]*\+\s*1)/, '必须回落到连续段末尾（不得再 +1）');
   assert.ok(!/fsPushDelete/.test(s), '绝不允许删飞书的流水');
   assert.match(s, /confirm\(/, '必须二次确认');
 });
@@ -383,7 +384,7 @@ test('清理幽灵流水：先写凭据、只删本机、回落高水位、绝�
   assert.match(s, /if \(!j \|\| !j\.ok\)/, '凭据写失败必须放弃（fsJournalDeletion 不抛异常）');
   assert.match(s, /removeRecord\('transactions'/, '必须从 outbox 摘除，否则又被推回去');
   assert.ok(!/fsPushDelete/.test(s), '幽灵流水本来就不在飞书，绝不允许调 fsPushDelete');
-  assert.match(s, /state\.txnSeq = real \+ 1/, '必须把高水位回落到真实最大 + 1');
+  assert.match(s, /state\.txnSeq = real(?![\s]*\+\s*1)/, '高水位=真实最大号（最后已用；+1 自造假缺口）');
   assert.match(s, /confirm\(/, '必须二次确认');
   assert.match(s, /await runReconcile\(\)/, '清理后必须重新核对，把真实状态报出来');
 });

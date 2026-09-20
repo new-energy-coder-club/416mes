@@ -7322,6 +7322,15 @@ async function deleteOneLocalRecord(table, key) {
   const rec = findRec(table, key);
   if (!rec) return { ok: false, error: '记录已不存在，请重新核对' };
   if (isProtectedLocalDelete(table, rec)) return { ok: false, error: '已执行/已取消工单不能直接删除本地，请先处理业务状态' };
+  /* 2.61.2（审计 B-b）：受控实体的合法性凭据就是引用它的 APPLIED 操作日志——
+     删掉凭据，实体下次同步会被判 unverified 锁死作业。有引用时拒绝删除并说明。 */
+  if (table === 'itemOperations') {
+    const oid = String(key);
+    const refs = []
+      .concat((state.items || []).filter(r => r.lastOpId === oid).map(r => '物品 ' + r.code))
+      .concat((state.containers || []).filter(r => r.lastOpId === oid).map(r => '容器 ' + r.code));
+    if (refs.length) return { ok: false, error: '该操作记录是 ' + refs.join('、') + ' 的启用/变更凭据，删除后这些记录会被判为未核验；请先到「物品作业」页用新操作替代，或保留作为审计凭据' };
+  }
   /* 先写删除凭据；写失败就不动数据。 */
   /* 必须检查返回值：fsJournalDeletion 不抛异常（内部已 catch），只写 try/catch 是抓不到的。 */
   const jr = await fsJournalDeletion([{ table, key: String(key) }], '人工裁决：仅删除本地记录', 'reconcile-local-delete');
@@ -7376,7 +7385,8 @@ const RES_PREVIEW_FIELDS = {
   items: ['name', 'spec', 'loc'],
   manuals: ['name', 'ver', 'loc'],
   workorders: ['type', 'date', 'status', 'items'],
-  transactions: ['time', 'type', 'matCode', 'delta', 'reason']
+  transactions: ['time', 'type', 'matCode', 'delta', 'reason'],
+  itemOperations: ['kind', 'itemCode', 'phase', 'operator']   /* 2.61.2（审计 B-b）：否则「本机查不到内容」恒空 */
 };
 function recPreview(table, key) {
   const rec = findRec(table, key);
@@ -7421,11 +7431,13 @@ function dataConsistencyHtml() {
       const actions = (t.localOnly || []).map(rawKey => {
         const key = String(rawKey), rec = findRec(k, rawKey);
         const protectedDelete = isProtectedLocalDelete(k, rec);
-        const buttons = k === 'transactions' ? '' :
+        const buttons = (k === 'transactions' || k === 'itemOperations') ? '' :
           '<span class="reconcile-key-actions">' +
           '<button class="btn tiny ghost" data-reconcile-push="1" data-table="' + esc(k) + '" data-key="' + esc(key) + '">推回飞书</button>' +
           (!protectedDelete ? '<button class="btn tiny ghost" data-reconcile-del="1" data-table="' + esc(k) + '" data-key="' + esc(key) + '">删除本地</button>' : '') +
           '</span>';
+        /* 2.61.2（审计 B-b）：物品操作行的「推回飞书」是死路（通用 upsert 拒收操作表；
+           专用端点会真重放 apply 副作用）——隐藏按钮，只留删除本地。 */
         const pv = recPreview(k, rawKey);
         /* 已执行/已取消的工单走不了普通本地删除（审计链保护）。
            如果它同时「仅在本地」，就给它唯一的出口：带凭据的作废删除。 */
@@ -7737,6 +7749,9 @@ function renderAlignBox() {
       removed: result.removed, operator: state.operator || ''
     });
     if (state.__localDupJournal.length > 20) state.__localDupJournal.length = 20;
+    /* 2.61.2（审计 B-c）：收敛也是一次删除——补进删除凭据 journal，闭环可审计 */
+    (function () { try { fsJournalDeletion([{ table: 'workorders', key: code }],
+      '本地重复工单收敛：移除 ' + (result.removed || 0) + ' 条相同副本', 'wip-local-dup-collapse'); } catch (e) { } })();
     /* 纯本地收敛：这里**绝不能**调用 fsPushDelete。飞书按业务键只有唯一一行，
        调用 delete 会把那一行也删掉。 */
     save(); renderWip(); renderAlignBox();
@@ -8274,6 +8289,7 @@ async function fixTxnSeqHighWater() {
     '\u00b7 \u53ea\u5220\u672c\u673a\uff0c\u98de\u4e66\u4e0d\u53d7\u5f71\u54cd\uff08\u5b83\u4eec\u672c\u6765\u5c31\u4e0d\u5728\u98de\u4e66\uff09\n' +
     '\u00b7 \u4f1a\u5199\u5220\u9664\u51ed\u636e\u7559\u75d5\n' +
     '\u00b7 \u4e4b\u540e\u8d26\u672c\u8986\u76d6\u5ea6\u4e0d\u518d\u62a5\u90a3 ' + p.jump + ' \u6761\u5047\u7f3a\u53e3\n\n' +
+    gapWarn +
     '\u524d\u63d0\uff1a\u4f60\u786e\u8ba4\u8fd9\u51e0\u6761\u662f\u6d4b\u8bd5/\u811a\u672c\u7559\u4e0b\u7684\uff0c\u4e0d\u662f\u771f\u5b9e\u5e93\u5b58\u53d8\u52a8\u3002')) return;
 
   const j = await fsJournalDeletion(
@@ -8287,7 +8303,7 @@ async function fixTxnSeqHighWater() {
   if (state.__syncedKeys && state.__syncedKeys.transactions) {
     state.__syncedKeys.transactions = state.__syncedKeys.transactions.filter(k => !drop.has(String(k)));
   }
-  state.txnSeq = p.contiguousMax + 1;
+  state.txnSeq = p.contiguousMax;   /* 2.61.1（审计 B-a）：txnSeq=最后已用号 */
   save();
   log('\ud83d\udd27 \u5df2\u6e05\u7406 ' + removable.length + ' \u6761\u5b64\u60ac\u5927\u53f7\u6d41\u6c34\uff0c\u5e8f\u53f7\u9ad8\u6c34\u4f4d\u56de\u843d\u5230 #' + state.txnSeq);
   await runReconcile();
@@ -8331,6 +8347,10 @@ function txnGhostHtml() {
 async function cleanGhostTxns() {
   const g = txnGhosts();
   if (!g.length) { alert('没有发现幽灵流水。请先点「重新核对」。'); return; }
+  /* 2.61.1（审计 B-a）：清理中间序号流水会留下永久缺口——如实提示 */
+  var maxGhost = g.length ? Number(g[g.length - 1].seq) : 0;
+  var hasNewer = (state.transactions || []).some(function (t) { return Number(t && t.seq || 0) > maxGhost; });
+  var gapWarn = hasNewer ? '\n\n\u26a0\ufe0f 清理中间序号的流水会留下永久缺口 #' + g[0].seq + '～' + maxGhost + '（回放校验报缺口，属预期）' : '';
   if (!confirm('清理 ' + g.length + ' 条「只在本地、飞书里没有」的流水？\n\n' +
     g.slice(0, 10).map(t => '  #' + t.seq + ' ' + (t.time || '') + ' ' + (t.type || '') + ' ' +
       (t.matCode || '') + ' ' + (t.operator || '') + ' / ' + (t.reason || '')).join('\n') +
@@ -8344,13 +8364,16 @@ async function cleanGhostTxns() {
   if (!j || !j.ok) { alert('删除凭据写入失败，已放弃清理（数据未改动）：' + ((j && j.error) || '未知原因')); return; }
   const drop = new Set(g.map(t => String(t.seq)));
   state.transactions = state.transactions.filter(t => !drop.has(String(t && t.seq)));
-  try { const ob = await fsOutboxAsync(); for (const t of g) { try { await ob.removeRecord('transactions', t.seq); } catch (e) { } } } catch (e) { }
+  try { const ob = await fsOutboxAsync(); for (const t of g) { try { await ob.removeRecord('transactions', t.seq); } catch (e) { } }
+    /* 2.61.1（审计 B-a）：对应的历史 op:'stock' 队列条目连坐清除——否则冲刷会把幽灵流水重新写回飞书 */
+    if (ob && ob.list) { const q = await ob.list(); for (const it of q) { if ((it.op || 'stock') === 'stock' && it.localSeq != null && drop.has(String(it.localSeq))) { try { await ob.removeById(it.id); } catch (e) { } } } }
+  } catch (e) { }
   if (state.__syncedKeys && state.__syncedKeys.transactions) {
     state.__syncedKeys.transactions = state.__syncedKeys.transactions.filter(k => !drop.has(String(k)));
   }
   /* 高水位回落到真实最大 + 1（幽灵流水往往就是被它顶上去的） */
   const real = (state.transactions || []).reduce((m, t) => Math.max(m, Number(t && t.seq) || 0), 0);
-  state.txnSeq = real + 1;
+  state.txnSeq = real;   /* 2.61.1（审计 B-a） */
   save();
   log('🧹 已清理 ' + g.length + ' 条幽灵流水，序号高水位回落到 #' + state.txnSeq);
   await runReconcile();
