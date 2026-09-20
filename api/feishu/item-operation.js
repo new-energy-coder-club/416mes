@@ -36,6 +36,12 @@ function handlerFor(service) {
       if (req.method === 'GET') result = await service.get(req, req.query && req.query.opId);
       else {
         const body = JSON.parse((await readBody(req)) || '{}');
+        /* 2.70.0 M3：人工收口动作（admin）——POST {action:'settle', opId} */
+        if (body.action === 'settle') {
+          if (!body.opId) return res.status(400).json({ ok: false, error: 'missing opId' });
+          result = await service.settle(req, String(body.opId));
+          return res.status(200).json({ ok: true, operation: result });
+        }
         result = await service.post(req, body);
       }
       return res.status(200).json({ ok: true, operation: result });

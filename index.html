@@ -2269,6 +2269,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <div id="queueBox" class="panel notice notice--info" style="display:none"></div>
       <div id="conflictBox" class="panel notice notice--danger" style="display:none"></div>
       <div id="healthBox" class="panel notice notice--success" style="display:none"></div>
+      <div id="settleBox" class="panel" style="display:none"></div>
       <div class="panel">
         <details class="log-wrap" id="scanLogWrap" open>
           <summary><span class="log-wrap__h">操作日志</span><span class="log-wrap__last" id="scanLogLast">（暂无记录）</span></summary>
@@ -7370,6 +7371,30 @@ function fsStatusHint(msg, ok) {
   if (el) el.style.color = ok ? '#7be3a8' : '#e8a87c';
   fsQueueChip();   // 顶部离线队列入口：有待冲刷记录时常驻显示条数
   renderStatusDockSum();
+  renderSettleBox();
+}
+
+/* 2.70.0 M3：未决操作人工收口——卡在 PREPARED/REPAIR_REQUIRED 的操作，admin 一键核实收口 */
+let _settleCache = null, _settleAt = 0;
+async function renderSettleBox() {
+  const box = document.getElementById('settleBox');
+  if (!box) return;
+  try {
+    if (!_settleCache || Date.now() - _settleAt > 30000) {
+
+      const st = JSON.parse(localStorage.getItem('mes416_state_v1'));
+      const ops = (st.itemOperations || []).filter(o => ['PREPARED', 'REPAIR_REQUIRED'].includes(o.phase));
+      _settleCache = ops; _settleAt = Date.now();
+    }
+    const ops = _settleCache;
+    if (!ops.length) { box.hidden = true; return; }
+    box.hidden = false;
+    box.innerHTML = '<h3>🔒 未决操作（' + ops.length + '）</h3>' +
+      '<p class="hint">卡在准备中/待修复的操作。核实实际状态后可人工收口（admin）：状态一致→APPLIED；不一致→REJECTED。</p>' +
+      ops.slice(0, 8).map(o =>
+        '<div class="settle-row"><code>' + esc(o.code || '') + '</code> ' + esc(o.kind || '') + ' · ' + esc(o.phase || '') +
+        ' <button class="btn tiny ghost" data-settle-op="' + esc(o.code || '') + '">人工收口</button></div>').join('');
+  } catch (e) { box.hidden = true; }
 }
 
 /** 阶段2（修订）：进入「同步与状态」页时刷新全部面板。
@@ -8326,6 +8351,17 @@ function renderAlignBox() {
   box.style.display = 'block';
   box.innerHTML = html;
   renderStatusDockSum();
+  box.querySelectorAll('[data-settle-op]').forEach(btn => btn.addEventListener('click', async () => {
+    const opId = btn.dataset.settleOp;
+    if (!confirm('人工收口操作 ' + opId + '？\n\n将核对实体实际状态：一致→APPLIED；不一致→REJECTED（如实标记）。')) return;
+    btn.disabled = true;
+    try {
+      const r = await fsPost('/api/feishu/item-operation', { action: 'settle', opId });
+      log('🔒 人工收口 ' + opId + '：' + (r.operation && r.operation.phase));
+      _settleCache = null;   // 失效缓存，下次重拉
+      await runReconcile();
+    } catch (e) { alert('收口失败：' + errText(e)); btn.disabled = false; }
+  }));
   box.querySelectorAll('[data-reconcile-push]').forEach(btn => btn.addEventListener('click', async () => {
     const table = btn.dataset.table, key = btn.dataset.key, rec = findRec(table, key);
     if (!rec) { alert('记录已不存在，请重新核对。'); return; }
