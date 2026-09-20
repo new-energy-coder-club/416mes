@@ -1160,6 +1160,16 @@ body.cols-compact .col-secondary{display:none}
    z-index 取 nav+1：卡片盖住内容但**不盖住底部导航** —— 否则用户除了关闭按钮无路可走。
    ============================================================ */
 .scan-fs-close{display:none}
+.scan-fs-next{display:none}
+@media screen and (max-width:767px){
+  /* 连续扫码：右下拇指区放「扫下一件」（主），左下放「关闭」（次） */
+  body.scan-fs .scan-fs-next{display:inline-flex;align-items:center;justify-content:center;
+    position:fixed;bottom:calc(66px + env(safe-area-inset-bottom,0));right:12px;z-index:calc(var(--z-nav) + 2);
+    min-height:52px;padding:0 22px;font-size:15px;font-weight:600;font-family:inherit;
+    background:var(--color-primary);color:#fff;border:none;border-radius:var(--r-md);
+    box-shadow:0 4px 14px rgba(31,111,214,.34);cursor:pointer;}
+  body.scan-fs .scan-fs-close{left:12px;right:auto;min-height:48px;padding:0 18px;}
+}
 @media screen and (max-width:767px){
   .cam-frame{inset:12% 20%;}          /* §7.5：取景框内缩到约 60vw */
   .cam-corner{width:22px;height:22px;}
@@ -1538,12 +1548,12 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   <button data-tab="scan" data-primary="1">扫码工作台</button>
   <button data-tab="wip" data-primary="1" data-label="库存工单（WIP）" data-short="库存工单">库存工单（WIP）</button>
   <div class="nav-group">台账与建档</div>
-  <button data-tab="ledger" class="on" data-primary="1">物料台账·历史</button>
+  <button data-tab="ledger" class="on" data-label="物料台账·历史" data-short="台账">物料台账·历史</button>
   <button data-tab="txn" data-label="库存流水" data-short="流水">库存流水</button>
   <button data-tab="res" data-label="资源档案" data-short="档案">资源档案</button>
   <button data-tab="member">成员名录</button>
   <div class="nav-group">标签与制作</div>
-  <button data-tab="label" data-primary="1">标签打印</button>
+  <button data-tab="label" data-label="标签打印" data-short="标签">标签打印</button>
   <button data-tab="design">排版工具</button>
   <div class="nav-group">实验室协作</div>
   <button data-tab="nec" data-label="NEC 任务（NEC）" data-short="NEC 任务">NEC 任务（NEC）</button>
@@ -1573,7 +1583,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <p class="hint">查询不改变库存。物品位置由容器归属派生；旧定位仅是历史线索。</p>
       <label for="itmSearch">编码 / 名称 / 规格 / 说明</label>
       <div class="itm-toolbar"><span class="field-wrap itm-grow"><svg class="field-wrap__icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6.5 1a5.5 5.5 0 1 0 3.4 9.8l3.2 3.2 1.4-1.4-3.2-3.2A5.5 5.5 0 0 0 6.5 1zm0 2a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7z" fill="currentColor"/></svg><input class="field" id="itmSearch" placeholder="扫码或输入，例如 ITM:WP-…" aria-label="唯一物品查询"></span><button class="btn" id="itmSearchBtn">查询</button></div>
-      <div class="itm-toolbar"><button class="btn ghost" id="itmSearchCamera">相机查询</button><button class="btn ghost" id="itmSearchCameraStop">关闭查询相机</button></div>
+      <div class="itm-toolbar"><button class="btn soft" id="itmSearchCamera">相机查询</button><button class="btn soft" id="itmSearchCameraStop">关闭查询相机</button></div>
       <div id="itmSearchStatus" class="itm-status" role="status">输入编码可精确定位，也可按名称查找。仅查询，不提交作业。</div>
       <div id="itmResults" class="itm-cards" aria-live="polite"></div>
     </div>
@@ -1589,8 +1599,8 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <div id="itmStep" class="itm-step" aria-live="polite"></div>
       <label for="itmCode">当前步骤编码</label>
       <div class="itm-toolbar"><input class="field itm-grow" id="itmCode" placeholder="LOC:L-A / CTN:C-A / ITM:I-P" aria-label="三码输入"><button class="btn" id="itmScanBtn">填入本步骤</button></div>
-      <div class="itm-toolbar"><button class="btn ghost" id="itmCamera">相机扫码</button><button class="btn ghost" id="itmCameraStop">关闭相机</button><button class="btn ghost" id="itmReset">重扫本行</button></div>
-      <div class="itm-toolbar"><button class="btn itm-btn-primary" id="itmConfirm">确认本行，保存待提交</button><button class="btn ghost" id="itmDraftSave">保存草稿</button><button class="btn ghost" id="itmDraftRestore">恢复最近草稿</button></div>
+      <div class="itm-toolbar"><button class="btn soft" id="itmCamera">相机扫码</button><button class="btn soft" id="itmCameraStop">关闭相机</button><button class="btn soft" id="itmReset">重扫本行</button></div>
+      <div class="itm-toolbar"><button class="btn itm-btn-primary" id="itmConfirm"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z" fill="currentColor"/></svg> 确认本行，保存待提交</button><button class="btn soft" id="itmDraftSave">保存草稿</button><button class="btn soft" id="itmDraftRestore">恢复最近草稿</button></div>
       <div id="itmStatus" class="itm-status" role="status">填写步骤后先保存待提交，再到待处理区核对并提交。</div>
     </div>
     <div class="panel">
@@ -1616,7 +1626,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <details><summary>核实启用 · 旧库位 / 容器</summary><div class="itm-detail-body"><p class="hint">先核实实物及归属，仅生成待提交命令，不直接启用。</p><label class="itm-control" for="itmAdminLoc">库位码<input class="field" id="itmAdminLoc" placeholder="填写库位原始编码"></label><label class="itm-control" for="itmAdminContainer">容器码（启用容器时填写）<input class="field" id="itmAdminContainer" placeholder="填写容器原始编码"></label><div class="itm-toolbar"><button class="btn" id="itmActivateLoc">核实启用库位</button><button class="btn" id="itmActivateContainer">核实启用容器</button></div></div></details>
       <details><summary>退役 · 不再使用的物品</summary><div class="itm-detail-body"><p class="hint">仅待入库或已出库物品可申请；在库物品不可直接退役。暂不支持停用库位。</p><label class="itm-control" for="itmRetireCode">物品码<input class="field" id="itmRetireCode" placeholder="待退役物品码"></label><label class="itm-control" for="itmRetireReason">退役原因<input class="field" id="itmRetireReason" placeholder="说明退役原因"></label><button class="btn" id="itmRetire">申请退役</button></div></details>
       <details><summary>导入命令 · 只读复核</summary><div id="itmRecoveryReview" class="itm-detail-body" aria-live="polite"></div></details>
-      <details><summary>关系冲突 · 核验与检查</summary><div class="itm-detail-body"><button class="btn ghost" id="itmConflictRefresh">安全重新拉取检查</button><div id="itmConflictPanel" aria-live="polite"></div></div></details>
+      <details><summary>关系冲突 · 核验与检查</summary><div class="itm-detail-body"><button class="btn soft" id="itmConflictRefresh">安全重新拉取检查</button><div id="itmConflictPanel" aria-live="polite"></div></div></details>
     </div>
   </section>
   <section class="tab on" id="tab-ledger">
@@ -2107,7 +2117,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <br>不写前缀也能扫：系统会按「库存工单 → NEC 任务 → 物品 → 手册 → 物料」顺序自动识别。
       </details>
       <span class="field-wrap"><svg class="field-wrap__icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M1 1h4v2H3v2H1V1zm10 0h4v4h-2V3h-2V1zM1 11h2v2h2v2H1v-4zm12 0h2v4h-4v-2h2v-2zM3 7h10v2H3V7z" fill="currentColor"/></svg><input class="scan-input" id="scanInput" placeholder="扫描或输入，如 MAT:GJ-SD-001 / WIP:LL20260909007，回车确认" autofocus></span>
-      <button class="btn ghost mt-8" id="btnCam">📷 摄像头扫码</button>
+      <button class="btn soft mt-8" id="btnCam"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 7h2l2-2h8l2 2h2a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1zm8 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" fill="currentColor"/></svg> 摄像头扫码</button>
       <div id="camOverlay" class="cam-overlay" role="dialog" aria-modal="true" aria-label="摄像头扫码">
         <div class="cam-stage">
           <video id="camVideo" autoplay playsinline muted></video>
@@ -2127,6 +2137,9 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
            关闭按钮刻意放在 #scanResult 之外 —— 结果卡是整块 innerHTML 重建的，
            放里面会被冲掉。 -->
       <button type="button" class="scan-fs-close" id="btnScanFsClose" aria-label="关闭全屏结果">✕ 关闭</button>
+      <!-- 连续扫码闭环：「扫下一件」是全屏结果卡里的主动作 —— 放下手机前不用再摸回顶部。
+           刻意放在 #scanResult 之外（结果卡是整块 innerHTML 重建的，放里面会被冲掉）。 -->
+      <button type="button" class="scan-fs-next" id="btnScanFsNext" aria-label="扫下一件">📷 扫下一件</button>
       <div class="scan-result" id="scanResult"></div>
     </div>
   </section>
@@ -3370,6 +3383,12 @@ function scanFullscreen(on) {
   document.body.classList.toggle('scan-fs', !!on);
 }
 document.getElementById('btnScanFsClose').addEventListener('click', () => scanFullscreen(false));
+// 连续扫码闭环：「扫下一件」= 关全屏 + 焦点回输入框（handleScan 未动）
+document.getElementById('btnScanFsNext').addEventListener('click', () => {
+  scanFullscreen(false);
+  const si = document.getElementById('scanInput');
+  if (si) { si.focus(); si.select(); }
+});
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && document.body.classList.contains('scan-fs')) scanFullscreen(false);
 });
@@ -7395,9 +7414,11 @@ function resImpact(table, rec) {
   return out;
 }
 
-function renderRes() {
+let _resShown = 40;   /* 长列表分段加载：首屏 40 条 +「加载更多」 */
+function renderRes(more) {
   const cfg = RES_TYPES[resType];
   if (!cfg) return;
+  if (!more) _resShown = 40;   // 类型切换/搜索/外部刷新都重置回首屏
   /* 类型条 */
   document.querySelectorAll('#resTypeBar .res-type').forEach(b => {
     const t = b.dataset.restype;
@@ -7414,7 +7435,7 @@ function renderRes() {
   const tbody = document.querySelector('#resTable tbody');
   thead.innerHTML = '<tr>' + cfg.cols.map(c => '<th>' + esc(c[1]) + '</th>').join('') +
     '<th style="width:150px">同步状态</th><th style="width:230px">操作</th></tr>';
-  tbody.innerHTML = rows.map(r => {
+  tbody.innerHTML = rows.slice(0, _resShown).map(r => {
     const key = String(r[cfg.key]);
     const sy = resSyncState(resType, r);
     return '<tr>' + cfg.cols.map((c, i) => {
@@ -7430,6 +7451,21 @@ function renderRes() {
       '<button class="btn tiny ghost" data-res-del="' + esc(key) + '">作废删除</button>' +
       '</span></td></tr>';
   }).join('') || '<tr><td colspan="' + (cfg.cols.length + 2) + '" class="empty-row">（没有符合条件的' + cfg.label + '）</td></tr>';
+  /* 长列表分段加载：几百条一次渲染太重。首屏 40 + 「加载更多」。
+     data-res-* 行模板原样不动（align-recovery 测试锁定它们）。 */
+  let moreBtn = document.getElementById('btnResMore');
+  const rest = rows.length - _resShown;
+  if (rest > 0) {
+    if (!moreBtn) {
+      moreBtn = document.createElement('button');
+      moreBtn.type = 'button'; moreBtn.className = 'btn soft btn--block'; moreBtn.id = 'btnResMore';
+      moreBtn.addEventListener('click', () => { _resShown += 40; renderRes(true); });
+      const tbl = document.getElementById('resTable');
+      if (tbl && tbl.parentElement) tbl.parentElement.insertAdjacentElement('afterend', moreBtn);
+    }
+    moreBtn.textContent = '加载更多（剩余 ' + rest + ' 条）';
+    moreBtn.style.display = '';
+  } else if (moreBtn) moreBtn.style.display = 'none';
   const sum = document.getElementById('resSummary');
   if (sum) sum.textContent = '共 ' + all.length + ' 条' + (k ? ' · 筛选出 ' + rows.length + ' 条' : '') +
     ' · 来源：飞书「' + cfg.label + '」表' + (k && !rows.length ? ' · 换个关键词试试，或点「＋ 新增」' : '');
