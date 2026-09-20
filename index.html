@@ -253,6 +253,27 @@ section.tab.on{display:block;}
   /* 防 hover 变换残留在禁用按钮上（部分浏览器 disabled 仍触发 :hover） */
   .btn:disabled{transform:none;box-shadow:none;}
 }
+/* 批次4（组件提案 §1.6 · .btn--download）：文字 + 右侧深色图标块，
+   hover 时图标块 0.3s 滑动铺满。绿改用 --done-fg 系（导出=产出完成物）。
+   (0,2,0) 压过 .btn 的渐变/底边；hover 显式摘掉 3D（动画主角是图标块）。 */
+@media screen{
+  .btn.btn--download{position:relative;overflow:hidden;padding:0;
+    border-color:var(--done-fg);background:var(--done-fg);font-weight:600;
+    box-shadow:var(--shadow-1);}
+  .btn--download__text{display:inline-flex;align-items:center;padding:0 14px;
+    transition:opacity .25s ease;}
+  .btn--download__icon{position:absolute;top:0;right:0;height:100%;width:42px;
+    display:flex;align-items:center;justify-content:center;color:#fff;
+    background:#0f4a2a;transition:width .3s ease;}
+}
+@media screen and (hover:hover){
+  .btn.btn--download:not(:disabled):hover{transform:none;box-shadow:var(--shadow-2);}
+  .btn.btn--download:not(:disabled):hover .btn--download__text{opacity:0;}
+  .btn.btn--download:not(:disabled):hover .btn--download__icon{width:100%;}
+}
+@media screen{
+  .btn.btn--download:not(:disabled):active{background:#0d3f24;transform:translateY(1px);}
+}
 table.grid{border-collapse:collapse;width:100%;font-size:13px;}
 table.grid th,table.grid td{border:1px solid var(--line);padding:4px 6px;text-align:left;}
 table.grid th{background:var(--surface-2);white-space:nowrap;font-size:12px;font-weight:600;color:var(--text-sub);}
@@ -756,6 +777,15 @@ body.stocktake-on .stocktake-banner{display:block}
   /* 借 Uiverse/R1SH4BH81 的 focus 蓝边（#2d79f3 → 本项目 --cyan-ink）；
      不加 box-shadow：全局 :focus-visible 已有 3px 焦点环，双层会糊 */
   .field:focus{border-color:var(--cyan-ink);}
+  /* 批次4（组件提案 §2.3 · .field-wrap）：左图标输入行（限 scan/items 两个高频点位）；
+     focus-within 让图标随焦点变色 */
+  .field-wrap{position:relative;display:flex;align-items:center;max-width:100%;}
+  .field-wrap>.field,.field-wrap>.scan-input{padding-left:38px;width:100%;flex:1;}
+  .field-wrap__icon{position:absolute;left:12px;width:16px;height:16px;
+    color:var(--text-muted);pointer-events:none;transition:color .15s ease;}
+  .field-wrap:focus-within>.field,.field-wrap:focus-within>.scan-input{
+    border-color:var(--cyan-ink);}
+  .field-wrap:focus-within>.field-wrap__icon{color:var(--cyan-ink);}
 }
 .field--md{padding:6px 10px;font-size:13px;border-radius:5px}
 .field--sm{padding:3px 8px;font-size:13px;border-radius:5px}
@@ -1015,7 +1045,7 @@ body.cols-compact .col-secondary{display:none}
 @media screen and (max-width:767px){
   #tab-scan .panel{display:flex;flex-direction:column;}
   #tab-scan .panel>h2{order:0;}
-  #scanInput{order:1;}
+  #tab-scan .field-wrap{order:1;}
   #btnCam{order:2;}
   #scanResult{order:3;}
   #stocktakeBanner{order:4;}
@@ -1264,6 +1294,8 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
 @media(max-width:600px){
   :is(#tab-items,#tab-item-work) .panel{padding:12px}
   :is(#tab-items,#tab-item-work) .itm-toolbar>.field,:is(#tab-items,#tab-item-work) .itm-control{width:100%;flex-basis:100%}
+  /* 批次4：itmSearch 加 .field-wrap 包装后不再是直接子级 —— 补偿（组件提案 R6） */
+  :is(#tab-items,#tab-item-work) .itm-toolbar>.field-wrap{width:100%;flex-basis:100%}
   /* 阶段A：按钮两列等分，主操作独占一行 —— 不再让长文案各自断行变形 */
   :is(#tab-items,#tab-item-work) .itm-toolbar>.btn{flex:1 1 calc(50% - 10px);min-height:48px}
   :is(#tab-items,#tab-item-work) .itm-toolbar>.itm-btn-primary{flex:1 1 100%}
@@ -1331,7 +1363,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <h2>库位、容器与物品查询</h2>
       <p class="hint">查询不改变库存。物品位置由容器归属派生；旧定位仅是历史线索。</p>
       <label for="itmSearch">编码 / 名称 / 规格 / 说明</label>
-      <div class="itm-toolbar"><input class="field itm-grow" id="itmSearch" placeholder="扫码或输入，例如 ITM:WP-…" aria-label="唯一物品查询"><button class="btn" id="itmSearchBtn">查询</button></div>
+      <div class="itm-toolbar"><span class="field-wrap itm-grow"><svg class="field-wrap__icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6.5 1a5.5 5.5 0 1 0 3.4 9.8l3.2 3.2 1.4-1.4-3.2-3.2A5.5 5.5 0 0 0 6.5 1zm0 2a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7z" fill="currentColor"/></svg><input class="field" id="itmSearch" placeholder="扫码或输入，例如 ITM:WP-…" aria-label="唯一物品查询"></span><button class="btn" id="itmSearchBtn">查询</button></div>
       <div class="itm-toolbar"><button class="btn ghost" id="itmSearchCamera">相机查询</button><button class="btn ghost" id="itmSearchCameraStop">关闭查询相机</button></div>
       <div id="itmSearchStatus" class="itm-status" role="status">输入编码可精确定位，也可按名称查找。仅查询，不提交作业。</div>
       <div id="itmResults" class="itm-cards" aria-live="polite"></div>
@@ -1404,14 +1436,14 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <div class="toolbar toolbar--data">
         <span class="toolbar__group">
           <span class="toolbar__label">Excel 台账</span>
-          <button class="btn small ghost" id="btnExport">导出</button>
+          <button class="btn btn--download" id="btnExport"><span class="btn--download__text">导出</span><span class="btn--download__icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 35 35" width="16" height="16"><path fill="#fff" d="M17.5,22.131a1.249,1.249,0,0,1-1.25-1.25V2.187a1.25,1.25,0,0,1,2.5,0V20.881A1.25,1.25,0,0,1,17.5,22.131Z"/><path fill="#fff" d="M17.5,22.693a3.189,3.189,0,0,1-2.262-.936L8.487,15.006a1.249,1.249,0,0,1,1.767-1.767l6.751,6.751a.7.7,0,0,0,.99,0l6.751-6.751a1.25,1.25,0,0,1,1.768,1.767l-6.752,6.751A3.191,3.191,0,0,1,17.5,22.693Z"/><path fill="#fff" d="M31.436,34.063H3.564A3.318,3.318,0,0,1,.25,30.749V22.011a1.25,1.25,0,0,1,2.5,0v8.738a.815.815,0,0,0,.814.814H31.436a.815.815,0,0,0,.814-.814V22.011a1.25,1.25,0,1,1,2.5,0v8.738A3.318,3.318,0,0,1,31.436,34.063Z"/></svg></span></button>
           <button class="btn small ghost" id="btnImport">导入</button>
           <button class="btn small ghost" id="btnTemplate">下载模板</button>
           <input class="visually-hidden" type="file" id="fileImport" accept=".xlsx,.xls">
         </span>
         <span class="toolbar__group">
           <span class="toolbar__label">备份 / 合并</span>
-          <button class="btn small ghost" id="btnBackupJson">导出备份 JSON</button>
+          <button class="btn btn--download" id="btnBackupJson"><span class="btn--download__text">导出备份 JSON</span><span class="btn--download__icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 35 35" width="16" height="16"><path fill="#fff" d="M17.5,22.131a1.249,1.249,0,0,1-1.25-1.25V2.187a1.25,1.25,0,0,1,2.5,0V20.881A1.25,1.25,0,0,1,17.5,22.131Z"/><path fill="#fff" d="M17.5,22.693a3.189,3.189,0,0,1-2.262-.936L8.487,15.006a1.249,1.249,0,0,1,1.767-1.767l6.751,6.751a.7.7,0,0,0,.99,0l6.751-6.751a1.25,1.25,0,0,1,1.768,1.767l-6.752,6.751A3.191,3.191,0,0,1,17.5,22.693Z"/><path fill="#fff" d="M31.436,34.063H3.564A3.318,3.318,0,0,1,.25,30.749V22.011a1.25,1.25,0,0,1,2.5,0v8.738a.815.815,0,0,0,.814.814H31.436a.815.815,0,0,0,.814-.814V22.011a1.25,1.25,0,1,1,2.5,0v8.738A3.318,3.318,0,0,1,31.436,34.063Z"/></svg></span></button>
           <button class="btn small ghost" id="btnMergeJson">导入合并</button>
           <input class="visually-hidden" type="file" id="fileMerge" accept=".json">
         </span>
@@ -1536,7 +1568,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <h3>物品短链 <span class="hint">与上方勾选集（sel.itm）同源；短链 42 字符，手机相机直扫经 /i/ 转跳到物品。逐条粘贴进乐写「二维码内容」框，或导出 CSV 批量导入（二维码元素绑「短链接」列）。</span></h3>
         <div class="links-actions">
           <button class="btn small ghost" id="btnLinksCopyAll">📋 复制全部</button>
-          <button class="btn small ghost" id="btnLinksCsv">⬇ 导出 CSV</button>
+          <button class="btn btn--download" id="btnLinksCsv"><span class="btn--download__text">导出 CSV</span><span class="btn--download__icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 35 35" width="16" height="16"><path fill="#fff" d="M17.5,22.131a1.249,1.249,0,0,1-1.25-1.25V2.187a1.25,1.25,0,0,1,2.5,0V20.881A1.25,1.25,0,0,1,17.5,22.131Z"/><path fill="#fff" d="M17.5,22.693a3.189,3.189,0,0,1-2.262-.936L8.487,15.006a1.249,1.249,0,0,1,1.767-1.767l6.751,6.751a.7.7,0,0,0,.99,0l6.751-6.751a1.25,1.25,0,0,1,1.768,1.767l-6.752,6.751A3.191,3.191,0,0,1,17.5,22.693Z"/><path fill="#fff" d="M31.436,34.063H3.564A3.318,3.318,0,0,1,.25,30.749V22.011a1.25,1.25,0,0,1,2.5,0v8.738a.815.815,0,0,0,.814.814H31.436a.815.815,0,0,0,.814-.814V22.011a1.25,1.25,0,1,1,2.5,0v8.738A3.318,3.318,0,0,1,31.436,34.063Z"/></svg></span></button>
           <span class="hint">复制全部 = 每行一条完整短链 URL（LF 分隔，无表头）；CSV 带 BOM，Excel 直开不乱码。</span>
         </div>
         <div class="links-table-wrap">
@@ -1865,7 +1897,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
         <br><b>库存影响：</b>MAT / LOC / CTN / NEC / ITM / MAN 为<b>只读查询</b>；只有 <b>WIP</b> 工单在点「确认执行」后才增减库存。
         <br>不写前缀也能扫：系统会按「库存工单 → NEC 任务 → 物品 → 手册 → 物料」顺序自动识别。
       </details>
-      <input class="scan-input" id="scanInput" placeholder="扫描或输入，如 MAT:GJ-SD-001 / WIP:LL20260909007，回车确认" autofocus>
+      <span class="field-wrap"><svg class="field-wrap__icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M1 1h4v2H3v2H1V1zm10 0h4v4h-2V3h-2V1zM1 11h2v2h2v2H1v-4zm12 0h2v4h-4v-2h2v-2zM3 7h10v2H3V7z" fill="currentColor"/></svg><input class="scan-input" id="scanInput" placeholder="扫描或输入，如 MAT:GJ-SD-001 / WIP:LL20260909007，回车确认" autofocus></span>
       <button class="btn ghost mt-8" id="btnCam">📷 摄像头扫码</button>
       <div id="camOverlay" class="cam-overlay" role="dialog" aria-modal="true" aria-label="摄像头扫码">
         <div class="cam-stage">
