@@ -260,6 +260,13 @@ table.grid tr:hover td{background:#f7fafd;}
 .flow-map{margin:0 0 14px;border:1px solid var(--line);border-radius:var(--r-lg);
   background:var(--surface);overflow:hidden}
 .flow-map>summary{cursor:pointer;padding:9px 14px;font-size:13px;color:var(--text-sub);background:var(--surface-2)}
+.sync-section{margin:14px 0 4px;padding:6px 10px;border-left:3px solid var(--blue);background:var(--surface-2);border-radius:0 var(--r-sm) var(--r-sm) 0}
+.sync-section__t{font-weight:700;font-size:13px}
+.sync-section__d{font-size:12px;color:var(--text-muted);margin-top:2px}
+.sync-overview{display:flex;gap:10px;margin:0 0 10px}
+.so-item{padding:3px 10px;border-radius:var(--r-sm);background:var(--surface-2);font-size:12.5px}
+.so-item.ok{color:#2d9d4f;font-weight:700}
+.so-item.bad{color:#e8a020;font-weight:700}
 .flow-map--guide{margin:0 0 14px}
 .flow-map__title{padding:8px 14px;font-size:12px;color:var(--text-muted);background:var(--surface-2);border-bottom:1px solid var(--line)}
 .flow-node--here{border-color:#15803d;background:#22c55e;color:#052e12;font-weight:700;cursor:default;box-shadow:0 0 0 3px rgba(34,197,94,.25)}
@@ -7436,6 +7443,11 @@ function dataConsistencyHtml() {
   const keyList = (arr, cls) => (arr && arr.length)
     ? '<div class="hint ' + (cls || '') + '"><code>' + arr.map(x => esc(String(x))).join('</code>、<code>') + '</code></div>'
     : '';
+  /* 2.62.0 重构：总览条——先给结论，再看明细 */
+  const okT = SYNC_TABLES.filter(k => rep.tables[k] && rep.tables[k].diff === 0).length;
+  const badT = SYNC_TABLES.filter(k => rep.tables[k] && rep.tables[k].diff !== 0).length;
+  html += '<div class="sync-overview"><span class="so-item ok">✓ 一致 ' + okT + ' 表</span>' +
+    (badT ? '<span class="so-item bad">⚠ ' + badT + ' 表不一致</span>' : '') + '</div>';
   const rows = SYNC_TABLES.filter(k => rep.tables[k]).map(k => {
     const t = rep.tables[k];
     const L = t.localRecords, R = t.feishuRecords;
@@ -7634,6 +7646,7 @@ function renderAlignBox() {
      （按键索引会把重复静默覆盖）。 */
   const localDupReport = CORE.workorderDuplicateGroups(state);
   if (localDupReport.groups.length || localDupReport.blank.length) {
+    html += '<div class="sync-section"><div class="sync-section__t">① 重复工单（本地同号多行）</div><div class="sync-section__d">成因：历史导入/测试期重复建单。飞书按工单号只留一行，本地多行永远对不上。处理：点「保留第一行，删除其余」一键收敛（有凭据可撤销）。</div></div>';
     html += '<div class="local-dup-box mt-6">🚨 <b class="text-danger">本地工单存在重复编号 / 空编号</b><br>';
     localDupReport.groups.forEach(g => {
       const rows = g.rows.map((r, n) => {
@@ -7661,6 +7674,7 @@ function renderAlignBox() {
     html += '<div class="toolbar mt-6"><button class="btn small ghost" id="btnUndoLocalDup">撤销上次本地工单去重（' + esc(lastDupJournal.code || '未知编号') + '）</button></div>';
   }
   if (missingCols.length || missingOpts.length) {
+    html += '<div class="sync-section"><div class="sync-section__t">② 飞书表结构要补齐</div><div class="sync-section__d">单选列缺选项、缺列——补齐后这些内容才能同步。点每条右侧按钮一键在飞书补选项（只新增不改删）。</div></div>';
     html += '⚠️ <b>飞书表结构要补齐，否则这些内容永远同步不上去</b><br>';
     missingCols.forEach(([k, t]) => {
       html += '<span class="hint">· <b>' + (TABLE_LABEL[k] || k) + '</b> 缺列：<code>' + t.missingColumns.join('</code>、<code>') + '</code></span><br>';
@@ -7671,7 +7685,9 @@ function renderAlignBox() {
     }));
     html += '<span class="hint">在飞书里补完列/选项后，点「重新核对」即可。</span><br>';
   }
+    html += '<div class="sync-section"><div class="sync-section__t">③ 待推送（本地新建）</div><div class="sync-section__d">本地新建、还没推上飞书的记录。点「立即同步」自动补推。</div></div>';
   if (pendingCount) html += '☁️ <b>本地有 ' + pendingCount + ' 条记录飞书里没有</b>（本地新建或推送失败的）。<br>';
+    html += '<div class="sync-section"><div class="sync-section__t">④ 推送受阻</div><div class="sync-section__d">飞书侧拒绝了某些字段（如缺单选选项），本地值已保留。先处理②，再「立即同步」。</div></div>';
   if (blocked.length) html += '🔒 <b>' + blocked.length + ' 条记录有字段推不上去</b>，已保持本地值不被飞书旧值覆盖：' +
     blocked.slice(0, 5).map(b => (TABLE_LABEL[b.table] || b.table) + ' ' + b.id + '（' + b.fields.join('、') + '）').join('；') +
     (blocked.length > 5 ? ' …' : '') + '<br>';
@@ -7681,6 +7697,7 @@ function renderAlignBox() {
   const pendDelCount = pendDel.reduce((a, [, v]) => a + v.keys.length, 0);
   const REASON = { 'over-threshold': '数量超阈值', 'need-second-census': '首次发现，需再次确认', 'needs-human': '已执行/已取消工单，只能人工裁决' };
   if (pendDelCount) {
+    html += '<div class="sync-section"><div class="sync-section__t">⑤ 待人工确认删除</div><div class="sync-section__d">飞书里找不到的记录（多为测试期删的）。确认是垃圾后点「立即核对删除」清掉本地副本。</div></div>';
     html += '🗑️ <b>有 ' + pendDelCount + ' 条记录在飞书里找不到了</b>，需人工确认后才删除本地：<br>';
     pendDel.forEach(([k, v]) => {
       html += '<span class="hint">· <b>' + (TABLE_LABEL[k] || k) + '</b> ' + v.keys.length + ' 条（' +
