@@ -203,11 +203,13 @@ nav.tabs a.tab-link:hover{color:var(--blue);border-bottom-color:#bcd4f6;}
 main{padding:16px 20px;max-width:1280px;margin:0 auto;}
 section.tab{display:none;}
 section.tab.on{display:block;}
-.panel{background:#fff;border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:14px;}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-xl);
+  box-shadow:var(--shadow-1);padding:18px;margin-bottom:16px;}
+@media screen and (max-width:767px){ .panel{padding:14px;border-radius:var(--r-lg);} }
 /* 阶段15（§4.5）：h2 左侧青竖条，形成全站统一的「图纸分区」节奏。
    ⚠ 用 inline-block 伪元素而不是 display:flex —— 后者会把标题文字变成 flex item，
    长标题（如「⑤ 手册标签生成（…）」）会因 min-width:auto 溢出约 7px（A/B 实测过）。 */
-.panel h2{font-size:16px;font-weight:600;margin-bottom:10px;color:var(--ink-strong);line-height:1.4;}
+.panel h2{font-size:var(--fs-17);font-weight:700;margin-bottom:12px;color:var(--ink-strong);line-height:1.4;}
 .panel h2::before{content:"";display:inline-block;width:3px;height:14px;border-radius:2px;
   background:var(--cyan-ink);margin-right:8px;vertical-align:-2px;}
 /* 阶段15（§4.5）：主按钮 32px 高、small 28px —— 纵向 padding 归零 + flex 居中，
@@ -301,19 +303,23 @@ section.tab.on{display:block;}
 @media screen{
   .btn.btn--download:not(:disabled):active{background:#0d3f24;transform:translateY(1px);}
 }
-table.grid{border-collapse:collapse;width:100%;font-size:13px;}
-table.grid th,table.grid td{border:1px solid var(--line);padding:4px 6px;text-align:left;}
-table.grid th{background:var(--surface-2);white-space:nowrap;font-size:12px;font-weight:600;color:var(--text-sub);}
+table.grid{border-collapse:collapse;width:100%;font-size:13.5px;}
+table.grid th,table.grid td{border:1px solid var(--line);padding:8px 10px;text-align:left;}
+table.grid th{background:var(--surface-3);white-space:nowrap;font-size:12px;font-weight:700;
+  color:var(--text-sub);letter-spacing:.02em;}
 /* 阶段15（§4.5）：数值列右对齐 + 等宽数字 */
 table.grid th.num,table.grid td.num{text-align:right;font-variant-numeric:tabular-nums;}
 table.grid input[type=text],table.grid input[type=number]{width:100%;border:none;background:transparent;font-size:13px;padding:2px;}
 table.grid input:focus{background:#fff8e6;}   /* 阶段3：移除 outline:none，改用全局 :focus-visible 焦点环 */
-table.grid tr:hover td{background:#f7fafd;}
-.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
+@media screen and (hover:hover){
+  table.grid tr:hover td{background:var(--surface-hover);}
+}
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;}
 .toolbar .spacer{flex:1;}
 .hint{font-size:12px;color:var(--text-muted);}   /* 阶段3：对比度 3.14:1 → 4.97:1 */
-.badge{display:inline-block;padding:1px 8px;border-radius:var(--r-sm);font-size:11px;font-weight:600;
-  white-space:nowrap;min-height:20px;line-height:18px;background:var(--surface-2);color:var(--text-sub);}
+.badge{display:inline-flex;align-items:center;padding:2px 10px;border-radius:var(--r-pill);
+  font-size:11.5px;font-weight:600;white-space:nowrap;min-height:22px;
+  background:var(--surface-2);color:var(--text-sub);}
 /* 阶段15（§4.5）：徽章五档，软色调、11px/600、高 20px、圆角 4px（弃胶囊） */
 .badge--todo{background:var(--todo-bg);color:var(--todo-fg);}
 .badge--doing{background:var(--doing-bg);color:var(--doing-fg);}
@@ -325,7 +331,7 @@ table.grid tr:hover td{background:#f7fafd;}
    ============================================================ */
 /* 库存工单状态徽章：深字浅底，与 NEC 的 .st-* 共用同一套语义色。
    替代原先写死在 WIP_STATUS_STYLE 里的「白字 + 饱和底色」。 */
-.wip-status{display:inline-block;padding:1px 8px;border-radius:var(--r-sm);font-size:11px;font-weight:600;white-space:nowrap}
+.wip-status{display:inline-flex;align-items:center;padding:2px 10px;border-radius:var(--r-pill);font-size:11.5px;font-weight:600;white-space:nowrap;min-height:22px}
 .wip-status.is-pending{background:var(--todo-bg);color:var(--todo-fg)}
 .wip-status.is-active{background:var(--doing-bg);color:var(--doing-fg)}
 .wip-status.is-done{background:var(--done-bg);color:var(--done-fg)}
@@ -377,8 +383,8 @@ table.grid tr:hover td{background:#f7fafd;}
 .pin-btn{margin-left:6px;padding:1px 8px;font-size:11px}
 /* 工单进度条：按「流程状态」着色（0% 灰 / 1–99% 蓝 / 100% 绿 / 已取消 灰），
    红色只保留给校验错误。宽度保持为逐单动态值，只把颜色交给 class。 */
-.progress{height:8px;margin-top:3px;overflow:hidden;border-radius:var(--r-sm);background:var(--surface-2)}
-.progress__bar{height:100%;transition:width .15s ease}
+.progress{height:10px;margin-top:4px;overflow:hidden;border-radius:var(--r-pill);background:var(--surface-2)}
+.progress__bar{height:100%;border-radius:var(--r-pill);transition:width .2s var(--ease-out)}
 .progress__bar--todo{background:var(--cancelled-fg)}
 .progress__bar--active{background:var(--color-primary)}
 .progress__bar--done{background:var(--done-fg)}
@@ -423,12 +429,13 @@ table.grid tr:hover td{background:#f7fafd;}
    ============================================================ */
 .ctx-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:44px;
   margin:0 0 12px;padding:8px 12px;border:1px solid var(--line);
-  border-radius:var(--r-lg);background:var(--surface)}
+  border-radius:var(--r-lg);background:var(--surface);box-shadow:var(--shadow-1)}
 .ctx-bar[hidden]{display:none}
 .ctx-bar__label{font-size:12px;color:var(--text-muted);flex:none}
-.ctx-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;
-  border-radius:var(--r-md);background:var(--surface-2);border:1px solid var(--line);
-  font-size:12.5px;cursor:pointer;font-family:var(--font-mono)}
+.ctx-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;
+  border-radius:var(--r-pill);background:var(--surface-2);border:1px solid transparent;
+  font-size:12.5px;cursor:pointer;font-family:var(--font-mono);
+  transition:border-color .15s ease,color .15s ease,background .15s ease;}
 .ctx-chip b{color:var(--text-muted);font-weight:400;font-family:var(--font-ui)}
 .ctx-chip:hover{border-color:var(--cyan-ink);color:var(--cyan-ink)}
 .status-bar{display:flex;gap:14px;flex-wrap:wrap;align-items:center;
@@ -459,11 +466,16 @@ table.grid tr:hover td{background:#f7fafd;}
   overflow-wrap:anywhere}
 /* ---------- 阶段4：资源档案页 ---------- */
 .res-typebar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
-.res-type{appearance:none;border:1px solid var(--line);background:transparent;cursor:pointer;
-  border-radius:999px;padding:6px 16px;font:inherit;font-size:13px;color:var(--text-muted);white-space:nowrap}
-.res-type:hover{border-color:var(--brand,#1a8fb0);color:var(--brand,#1a8fb0)}
-.res-type[aria-selected="true"]{background:var(--brand,#1a8fb0);border-color:var(--brand,#1a8fb0);color:#fff;font-weight:700}
-.res-type:focus-visible{outline:2px solid var(--brand,#1a8fb0);outline-offset:2px}
+.res-type{appearance:none;border:1.5px solid var(--line);background:var(--surface);cursor:pointer;
+  border-radius:var(--r-pill);padding:8px 18px;font:inherit;font-size:13px;font-weight:600;
+  color:var(--text-sub);white-space:nowrap;
+  transition:border-color .15s ease,background .15s ease,color .15s ease;}
+@media screen and (hover:hover){
+  .res-type:hover{border-color:var(--color-primary);color:var(--color-primary);}
+}
+.res-type[aria-selected="true"]{background:var(--color-primary);border-color:var(--color-primary);
+  color:#fff;font-weight:700;box-shadow:var(--shadow-btn);}
+.res-type:focus-visible{outline:2px solid var(--color-primary);outline-offset:2px;}
 .res-type__n{opacity:.75;font-size:11.5px;margin-left:4px}
 .res-editor{border:1px solid var(--brand,#1a8fb0);border-radius:10px;padding:12px;margin-bottom:10px;
   background:var(--bg-subtle,#f7f8fa)}
@@ -521,11 +533,13 @@ table.grid tr:hover td{background:#f7fafd;}
 .num-delta{font-weight:700;font-variant-numeric:tabular-nums}
 .num-delta--negative{color:var(--danger-fg)}
 .num-delta--positive{color:var(--done-fg)}
-.empty-row{text-align:center;color:var(--text-muted);padding:12px}
+.empty-row{text-align:center;color:var(--text-muted);padding:20px 12px;font-size:13.5px}
 /* 阶段15（§4.5）：空状态。表格内空行用 .empty-row，独立容器用 .empty */
-.empty{display:flex;align-items:center;justify-content:center;min-height:64px;
-  margin:8px 0;padding:12px;border:1px dashed var(--line-strong);border-radius:var(--r-md);
-  color:var(--text-muted);font-size:13px;text-align:center}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+  min-height:96px;margin:10px 0;padding:18px;border:1.5px dashed var(--line-strong);
+  border-radius:var(--r-lg);background:var(--surface-2);
+  color:var(--text-muted);font-size:13.5px;text-align:center}
+.empty::before{content:"🗂";font-size:24px;opacity:.55;line-height:1;}
 .grid-field--w64{width:64px}
 .grid-field--readonly{color:#667;background:#f5f7fa}
 .wip-num--done{color:var(--done-fg)}
@@ -638,13 +652,14 @@ body.stocktake-on .stocktake-banner{display:block}
    · 冲销先出预览面板（列出将被回退的物料/数量/预计库存），再二次确认
    ============================================================ */
 .wip-summary{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
-.wip-chip{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;
-  border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface);
-  color:var(--text-sub);font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit}
+.wip-chip{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 14px;
+  border:1.5px solid var(--line);border-radius:var(--r-pill);background:var(--surface);
+  color:var(--text-sub);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;
+  transition:border-color .15s ease,background .15s ease,color .15s ease;}
 .wip-chip__i{font-size:13px}
 .wip-chip b{font-variant-numeric:tabular-nums}
 .wip-chip:hover{border-color:var(--cyan-ink);color:var(--cyan-ink)}
-.wip-chip.is-on{border-color:var(--cyan-ink);background:var(--todo-bg);color:var(--todo-fg)}
+.wip-chip.is-on{border-color:var(--color-primary);background:var(--primary-050);color:var(--primary-active);}
 .wip-danger{margin-top:12px;padding:10px 12px;border:1px solid var(--line);
   border-left:4px solid var(--danger-fg);border-radius:var(--r-lg);background:var(--surface)}
 .wip-danger__h{font-size:12px;font-weight:600;color:var(--danger-fg);margin-bottom:8px}
@@ -662,7 +677,7 @@ body.stocktake-on .stocktake-banner{display:block}
   font-size:12.5px;color:var(--text-muted);}
 .wip-crumb b{color:var(--ink-strong);font-family:var(--font-mono);}
 .wip-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:10px;margin-bottom:10px;}
-.wip-kpi{padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface-2);}
+.wip-kpi{padding:10px 12px;border:none;border-radius:var(--r-md);background:var(--surface-2);}
 .wip-kpi__l{display:block;font-size:11.5px;color:var(--text-muted);margin-bottom:2px;}
 .wip-kpi__v{font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--ink-strong);
   font-variant-numeric:tabular-nums;}
@@ -712,13 +727,12 @@ body.stocktake-on .stocktake-banner{display:block}
    卡片会被压得没法看。改用 auto-fit —— 放得下就是 4 列，放不下自动 3/2/1 列。 */
 .nec-board{display:grid;grid-template-columns:repeat(auto-fit,minmax(172px,1fr));
   gap:10px;align-items:start}
-.nec-col{border:1px solid var(--line);border-radius:var(--r-lg);background:var(--surface-2);
-  padding:8px;min-width:0}
+.nec-col{border:none;border-radius:var(--r-lg);background:var(--surface-2);padding:10px;min-width:0}
 .nec-col__h{display:flex;align-items:center;justify-content:space-between;gap:6px;
   font-size:12px;font-weight:600;color:var(--text-sub);padding:0 2px 8px}
 .nec-col__empty{margin:0;padding:10px 2px;font-size:12px;color:var(--text-muted)}
 .nec-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);
-  padding:8px;margin-bottom:8px}
+  box-shadow:var(--shadow-1);padding:10px;margin-bottom:10px;}
 .nec-card:last-child{margin-bottom:0}
 .nec-card__row{display:flex;align-items:center;gap:6px;margin-bottom:4px}
 .nec-card__edit{margin-left:auto;border:1px solid var(--line);background:var(--surface-2);
@@ -760,8 +774,7 @@ body.stocktake-on .stocktake-banner{display:block}
 .scan-card__title h3{font-size:16px;font-weight:700;color:var(--ink-strong);line-height:1.35}
 .scan-card__title code{font-family:var(--font-mono);font-size:12.5px;color:var(--text-muted);word-break:break-all}
 .scan-readings{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
-.scan-reading{flex:1 1 96px;min-width:88px;padding:8px 10px;border:1px solid var(--line);
-  border-radius:var(--r-md);background:var(--surface-2)}
+.scan-reading{flex:1 1 96px;min-width:88px;padding:10px 12px;border:none;border-radius:var(--r-md);background:var(--surface-2)}
 .scan-reading__label{display:block;font-size:11.5px;color:var(--text-muted);margin-bottom:2px}
 .scan-reading__value{font-family:var(--font-mono);font-size:18px;font-weight:700;
   color:var(--ink-strong);font-variant-numeric:tabular-nums;word-break:break-all}
@@ -880,8 +893,8 @@ body.stocktake-on .stocktake-banner{display:block}
   display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;
   width:min(92vw,460px)}
 .toast{pointer-events:auto;display:flex;align-items:flex-start;gap:8px;max-width:100%;
-  padding:10px 14px;border-radius:var(--r-md);font-size:13.5px;font-weight:600;
-  box-shadow:0 6px 20px rgba(10,16,28,.18);animation:toastIn .18s ease-out}
+  padding:12px 16px;border-radius:var(--r-lg);font-size:13.5px;font-weight:600;
+  box-shadow:var(--shadow-3);animation:toastIn .18s var(--ease-out)}
 .toast--ok{background:var(--done-bg);color:var(--done-fg);border:1px solid var(--done-fg)}
 .toast--info{background:var(--todo-bg);color:var(--todo-fg);border:1px solid var(--todo-fg)}
 .toast--warn{background:var(--doing-bg);color:var(--doing-fg);border:1px solid var(--doing-fg)}
@@ -1298,11 +1311,11 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   .grid-dense,
   .grid-dense tbody,
   .grid-dense tr{display:block;width:100%;}
-  .grid-dense tr{border:1px solid var(--line);border-radius:var(--r-lg);
-    margin-bottom:10px;padding:8px;background:#fff;}
-  .grid-dense td{display:flex;align-items:center;gap:8px;border:none;padding:4px;}
-  .grid-dense td::before{content:attr(data-th);flex:0 0 76px;
-    font-size:12px;color:var(--text-muted);}
+  .grid-dense tr{border:none;border-radius:var(--r-lg);box-shadow:var(--shadow-1);
+    margin-bottom:12px;padding:10px 12px;background:#fff;}
+  .grid-dense td{display:flex;align-items:center;gap:10px;border:none;padding:5px 2px;}
+  .grid-dense td::before{content:attr(data-th);flex:0 0 84px;
+    font-size:12px;font-weight:600;color:var(--text-muted);}
   .grid-dense td:first-child:has(input[type=checkbox]){padding:0;}
   .grid-dense td:first-child:has(input[type=checkbox])::before{content:"";flex:none;}
   .grid-dense td input[type=text],
@@ -1327,7 +1340,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
 :is(#tab-items,#tab-item-work) .btn{min-height:44px;max-width:100%;white-space:normal;overflow-wrap:anywhere}
 :is(#tab-items,#tab-item-work) .itm-status{padding:10px 12px;background:#f4f7fb;border-radius:6px;margin:12px 0;white-space:pre-wrap}
 :is(#tab-items,#tab-item-work) .itm-cards{display:grid;gap:12px}
-:is(#tab-items,#tab-item-work) .itm-result-card{padding:14px;border:1px solid var(--line);border-radius:8px;background:#fff}
+:is(#tab-items,#tab-item-work) .itm-result-card{padding:14px;border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow-1);background:#fff}
 :is(#tab-items,#tab-item-work) .itm-result-card h3{margin:0 0 8px}
 :is(#tab-items,#tab-item-work) .itm-result-card p{margin:6px 0}
 :is(#tab-items,#tab-item-work) .itm-result-card>.btn{margin:4px 8px 4px 0;text-align:left}
