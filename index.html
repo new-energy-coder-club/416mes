@@ -1529,57 +1529,45 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
 }
 
 /* ============================================================
-   09 PAGE-TOC（新增·页内索引目录 .pg-toc）：建档管理 / ITM作业
-   命名空间 .pg-toc-* 零复用；全部规则 @media screen，打印域零触碰。
-   断点：<1100 = chip 条；≤767 吸顶；≥1100 右栏 200px 粘性。
+   09 PAGE-TOC（悬浮目录 · 用户指定）：右上角悬浮按钮 → 弹出本页索引
+   按钮放在各自 section 内 —— 随页签自动显隐；弹出面板 fixed 定位。
+   全部 @media screen，打印域零触碰。
    ============================================================ */
 @media screen{
-  .pg-toc:empty{display:none;}
-  .pg-toc__title{display:none;}
-  .pg-toc__list{display:flex;flex-direction:row;gap:6px;overflow-x:auto;
-    padding:2px 0 4px;-webkit-overflow-scrolling:touch;scrollbar-width:thin;}
-  .pg-toc__item{flex:none;display:inline-flex;align-items:center;gap:6px;
-    min-height:44px;padding:0 14px;
-    border:1.5px solid var(--line);border-radius:var(--r-pill);
-    background:var(--surface);color:var(--text-sub);
-    font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;
-    transition:border-color .15s ease,background .15s ease,color .15s ease;}
-  .pg-toc__num{font-variant-numeric:tabular-nums;font-size:11px;color:var(--text-muted);}
+  .pg-toc{display:none;position:fixed;z-index:calc(var(--z-overlay) - 1);
+    width:min(320px,calc(100vw - 28px));max-height:min(70vh,560px);overflow:auto;
+    background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);
+    box-shadow:var(--shadow-3);padding:10px;}
+  .pg-toc.is-open{display:block;animation:pgTocIn .16s var(--ease-out);}
+  @keyframes pgTocIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+  .pg-toc__title{padding:2px 6px 10px;font-size:11px;font-weight:700;
+    letter-spacing:1.2px;color:var(--text-muted);}
+  .pg-toc__list{display:flex;flex-direction:column;gap:4px;}
+  .pg-toc__item{display:flex;align-items:center;gap:8px;width:100%;min-height:44px;
+    padding:8px 10px;border:none;border-radius:var(--r-md);background:transparent;
+    color:var(--ink-strong);font-size:14px;font-weight:500;font-family:inherit;
+    text-align:left;cursor:pointer;transition:background .15s ease;}
+  .pg-toc__item:hover,.pg-toc__item.is-on{background:var(--primary-050);
+    color:var(--primary-active);font-weight:600;}
+  .pg-toc__num{font-variant-numeric:tabular-nums;font-size:12px;color:var(--text-muted);flex:none;}
   .pg-toc__dot{width:6px;height:6px;border-radius:50%;background:var(--line-strong);flex:none;}
-  .pg-toc__item.is-on{border-color:var(--color-primary);
-    background:var(--primary-050);color:var(--primary-active);}
-  .pg-toc__item[data-open="1"] .pg-toc__dot{background:var(--color-primary);}
+  .pg-toc__item.is-on .pg-toc__dot,.pg-toc__item[data-open="1"] .pg-toc__dot{background:var(--color-primary);}
+  /* 悬浮按钮：右上角（top 由 JS 按头部实际高度放置） */
+  .pg-toc-fab{position:fixed;right:14px;z-index:calc(var(--z-overlay) - 2);
+    display:inline-flex;align-items:center;justify-content:center;gap:6px;
+    min-height:44px;padding:0 16px;border:none;border-radius:var(--r-pill);
+    background:var(--color-primary);color:#fff;font-size:13px;font-weight:600;
+    font-family:inherit;cursor:pointer;box-shadow:var(--shadow-btn);
+    transition:transform var(--press-t) var(--ease-out),box-shadow .15s ease;}
+  .pg-toc-fab:active{transform:translateY(1px);box-shadow:var(--shadow-1);}
+  .pg-toc-fab::before{content:"";width:16px;height:16px;flex:none;background:currentColor;
+    -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2zm10 0v2h2v2h2v-2h2v-2h-2v-2h-2v2h-2zM4 6h16v2H4V6zm0 5h9v2H4v-2z'/%3E%3C/svg%3E") center/contain no-repeat;
+    mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2zm10 0v2h2v2h2v-2h2v-2h-2v-2h-2v2h-2zM4 6h16v2H4V6zm0 5h9v2H4v-2z'/%3E%3C/svg%3E") center/contain no-repeat;}
+  /* 跳转落点让位（头部不是 fixed，落点留 16px 即可；手机端由 JS 定 FAB 位） */
   #tab-register>.panel>details,#tab-item-work h3{scroll-margin-top:16px;}
 }
-@media screen and (max-width:767px){
-  .pg-toc{position:sticky;top:0;z-index:2;background:var(--surface);}
-  #tab-item-work h3{top:52px;}
-  #tab-register>.panel>details{scroll-margin-top:60px;}
-  #tab-item-work h3{scroll-margin-top:56px;}
-}
-@media screen and (min-width:1100px){
-  #tab-register.on,#tab-item-work.on{display:grid;
-    grid-template-columns:minmax(0,1fr) 200px;gap:0 16px;align-items:start;}
-  #tab-register>.panel,#tab-item-work>.panel{grid-column:1;min-width:0;}
-  .pg-toc{grid-column:2;grid-row:1 / span 9;
-    align-self:start;
-    position:sticky;top:16px;display:block;padding:10px;
-    background:var(--surface);border:1px solid var(--line);
-    border-radius:var(--r-lg);box-shadow:var(--shadow-1);}
-  .pg-toc__title{display:block;padding:2px 6px 8px;
-    font-size:11px;font-weight:700;letter-spacing:1.2px;color:var(--text-muted);}
-  .pg-toc__list{flex-direction:column;overflow:visible;gap:2px;padding:0;}
-  .pg-toc__item{width:100%;min-height:36px;justify-content:flex-start;
-    padding:6px 8px;border-color:transparent;border-radius:var(--r-md);background:transparent;}
-}
-@media screen and (min-width:1100px){
-  @media screen and (hover:hover){
-    .pg-toc__item:hover{border-color:transparent;
-      background:var(--surface-hover);color:var(--ink-strong);}
-  }
-}
-@media screen and (hover:hover){
-  .pg-toc__item:hover{border-color:var(--cyan-ink);color:var(--cyan-ink);}
+@media (prefers-reduced-motion:reduce){
+  .pg-toc.is-open{animation:none;}
 }
 </style>
 </head>
@@ -1644,8 +1632,8 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <div id="itmResults" class="itm-cards" aria-live="polite"></div>
     </div>
   </section>
-  <aside class="pg-toc" id="pgTocItmWork" aria-label="ITM作业 · 本页目录"></aside>
   <section class="tab" id="tab-item-work">
+    <aside class="pg-toc" id="pgTocItmWork" aria-label="ITM作业 · 本页目录"></aside>
     <div class="panel">
       <p class="itm-eyebrow">唯一物品 · 扫码作业</p>
       <h2>唯一物品作业</h2>
@@ -1670,8 +1658,8 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
       <p class="hint">建档、核实启用、退役已移到『建档管理』页。</p>
     </div>
   </section>
-  <aside class="pg-toc" id="pgTocRegister" aria-label="建档管理 · 本页目录"></aside>
   <section class="tab" id="tab-register">
+    <aside class="pg-toc" id="pgTocRegister" aria-label="建档管理 · 本页目录"></aside>
     <div class="panel">
       <p class="itm-eyebrow">先建档 · 再作业</p>
       <h2>建档管理</h2>
@@ -3293,17 +3281,17 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('cl
 
 /* ============================================================
    阶段N（UI 重构）：页内索引目录 .pg-toc ——「建档管理 / ITM作业」
-   纯增量：不改任何既有元素/函数；条目从页面现有 summary/h3 文本派生。
+   右上角悬浮按钮 → 弹出本页索引 → 点条目跳转（details 自动展开）。
+   FAB 放在各自 section 内（随页签显隐）；弹出面板点外部/跳转后自动收起。
    ============================================================ */
 (function () {
   const PG_TOC_PAGES = [
-    { tocId: 'pgTocRegister', tab: 'register', title: '建档管理 · 本页目录',
+    { tocId: 'pgTocRegister', tab: 'register', title: '建档管理 · 目录',
       sel: '#tab-register > .panel > details', mode: 'details' },
-    { tocId: 'pgTocItmWork', tab: 'item-work', title: 'ITM作业 · 本页目录',
+    { tocId: 'pgTocItmWork', tab: 'item-work', title: 'ITM作业 · 目录',
       sel: '#tab-item-work h3', mode: 'scroll' }
   ];
   const PG_TOC_PROBE = 96;
-  const PG_TOC_LOCK = 700;
   const pgTocSmooth = (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) ? 'auto' : 'smooth';
 
   function pgTocParse(text) {
@@ -3317,9 +3305,17 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('cl
 
   function pgTocBuild(def) {
     const host = document.getElementById(def.tocId);
+    const sec = document.getElementById('tab-' + def.tab);
     const els = host ? Array.from(document.querySelectorAll(def.sel)) : [];
-    if (!host || !els.length) return null;
-    const st = { def: def, entries: [], active: -1, lockUntil: 0 };
+    if (!host || !sec || !els.length) return null;
+    const st = { def: def, entries: [], active: 0, host: host, fab: null };
+    /* FAB：放在 section 内 → 随页签自动显隐；top 由 JS 按头部实际高度放置 */
+    const fab = document.createElement('button');
+    fab.type = 'button'; fab.className = 'pg-toc-fab'; fab.textContent = '目录';
+    fab.setAttribute('aria-label', def.title);
+    fab.setAttribute('aria-expanded', 'false');
+    sec.appendChild(fab);
+    /* 弹出面板（aside 已在 section 内） */
     const title = document.createElement('div'); title.className = 'pg-toc__title'; title.textContent = def.title;
     const list = document.createElement('div'); list.className = 'pg-toc__list';
     host.appendChild(title); host.appendChild(list);
@@ -3330,24 +3326,36 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('cl
       if (info.num) { const n = document.createElement('span'); n.className = 'pg-toc__num'; n.textContent = info.num; b.appendChild(n); }
       const dot = document.createElement('span'); dot.className = 'pg-toc__dot'; b.appendChild(dot);
       b.appendChild(document.createTextNode(info.label));
-      b.addEventListener('click', () => pgTocGo(st, i));
+      b.addEventListener('click', () => { pgTocGo(st, i); pgTocClose(st); });
       list.appendChild(b);
       st.entries.push({ el: el, b: b });
     });
     if (def.mode === 'details') st.entries.forEach(en => {
-      const sync = () => { en.b.dataset.open = en.el.open ? '1' : '0'; pgTocKick(); };
+      const sync = () => { en.b.dataset.open = en.el.open ? '1' : '0'; };
       en.el.addEventListener('toggle', sync);
       en.b.dataset.open = en.el.open ? '1' : '0';
     });
+    fab.addEventListener('click', () => {
+      const open = host.classList.toggle('is-open');
+      fab.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) pgTocPlaceFabs();
+    });
+    st.fab = fab;
+    st.host = host;
     return st;
   }
 
   function pgTocGo(st, i) {
     const en = st.entries[i]; if (!en) return;
     if (st.def.mode === 'details' && en.el.tagName === 'DETAILS' && !en.el.open) en.el.open = true;
-    st.active = i; st.lockUntil = Date.now() + PG_TOC_LOCK; pgTocPaint(st);
+    st.active = i; pgTocPaint(st);
     try { en.el.scrollIntoView({ behavior: pgTocSmooth, block: 'start' }); }
     catch (e) { en.el.scrollIntoView(); }
+  }
+
+  function pgTocClose(st) {
+    st.host.classList.remove('is-open');
+    st.fab.setAttribute('aria-expanded', 'false');
   }
 
   function pgTocPaint(st) {
@@ -3361,7 +3369,6 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('cl
   function pgTocUpdate(st) {
     const sec = document.getElementById('tab-' + st.def.tab);
     if (!sec || !sec.classList.contains('on')) return;
-    if (Date.now() < st.lockUntil) return;
     let cur = 0;
     for (let i = 0; i < st.entries.length; i++) {
       if (st.entries[i].el.getBoundingClientRect().top <= PG_TOC_PROBE) cur = i; else break;
@@ -3369,15 +3376,33 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('cl
     if (cur !== st.active) { st.active = cur; pgTocPaint(st); }
   }
 
+  function pgTocPlaceFabs() {
+    const h = document.querySelector('header');
+    const top = (h ? Math.round(h.getBoundingClientRect().bottom) : 64) + 8;
+    document.querySelectorAll('.pg-toc-fab').forEach(f => { f.style.top = top + 'px'; });
+    document.querySelectorAll('.pg-toc.is-open').forEach(p => { p.style.top = (top + 52) + 'px'; });
+  }
+  window.addEventListener('resize', pgTocPlaceFabs);
+
+  function pgTocCloseAll() {
+    document.querySelectorAll('.pg-toc.is-open').forEach(p => p.classList.remove('is-open'));
+    document.querySelectorAll('.pg-toc-fab').forEach(f => f.setAttribute('aria-expanded', 'false'));
+  }
+  document.addEventListener('click', e => {
+    if (e.target.closest && (e.target.closest('.pg-toc') || e.target.closest('.pg-toc-fab'))) return;
+    pgTocCloseAll();
+  });
+
   const pgTocStates = PG_TOC_PAGES.map(pgTocBuild).filter(Boolean);
   let pgTocRaf = 0;
   function pgTocTick() { pgTocRaf = 0; pgTocStates.forEach(pgTocUpdate); }
   function pgTocKick() { if (!pgTocRaf) pgTocRaf = requestAnimationFrame(pgTocTick); }
   window.addEventListener('scroll', pgTocKick, { passive: true });
-  window.addEventListener('resize', pgTocKick, { passive: true });
-  document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('click', () => setTimeout(pgTocKick, 60)));
-  pgTocKick();
+  window.addEventListener('resize', () => { pgTocPlaceFabs(); pgTocKick(); }, { passive: true });
+  document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('click', () => { pgTocCloseAll(); setTimeout(() => { pgTocPlaceFabs(); pgTocKick(); }, 60); }));
+  pgTocPlaceFabs(); pgTocKick();
 })();
+
 
 /* ================= 排版工具（数据桥） ================= */
 /* 同域 iframe 桥接：直接调用排版工具全局函数，失败时自动降级为剪贴板/下载手动流程 */
