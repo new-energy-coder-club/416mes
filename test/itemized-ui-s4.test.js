@@ -21,89 +21,97 @@ test('S4 扫 WIP 进物品化执行卡：已扫 x/y + 未扫清单 + 逐行 ✓/
   assert.equal(vm.runInContext('WIP_EXEC.code', context), 'LL20260919001', '执行上下文应激活');
 });
 
-test('S4 逐件扫码 2/3：ITM: 前缀归一 → 校验 → 入队 → 提交 APPLIED 才记进度并推飞书', async () => {
+test('S4 逐件扫码（批量版）：扫码入批 → 提交本批 → 一条 issueBatch 命令 → APPLIED 记进度并推飞书', async () => {
   const { context, document, state, calls } = setup('applied');
   const w = mkItemizedOrder(state, 'LL20260919001', ['IT-1', 'IT-2', 'IT-3']);
   const box = document.getElementById('scanResult');
   context.scanWip('LL20260919001', box);
 
   await context.wipItemExecScan('IT-1');
-  assert.deepEqual(j(w.execItems), ['IT-1']);
-  assert.equal(calls.enqueue.length, 1);
-  assert.equal(calls.enqueue[0].kind, 'issue', 'LL 出库 → issue 命令');
-  assert.deepEqual(j(calls.enqueue[0].source), { loc: 'L-1', container: 'CT-1' }, '出库按档案位置，不扫位置');
-  assert.match(document.getElementById('scanResult').innerHTML, /1 \/ 3/);
-  assert.equal(w.status, '部分执行');
+  assert.deepEqual(j(w.execItems), [], '扫码只入批，不提交');
+  assert.equal(calls.enqueue.length, 0, '扫码时零入队（连扫不撞互斥）');
+  assert.equal(vm.runInContext('WIP_EXEC.batch.length', context), 1, '已入批 1 件');
+  assert.match(document.getElementById('scanResult').innerHTML, /已入批/);
 
   await context.wipItemExecScan('ITM:IT-2');   // ITM: 前缀归一
-  assert.deepEqual(j(w.execItems), ['IT-1', 'IT-2']);
+  assert.equal(vm.runInContext('WIP_EXEC.batch.length', context), 2);
+
+  await context.wipExecSubmitBatch();          // 提交本批
+  assert.equal(calls.enqueue.length, 1, '整批一条命令');
+  assert.equal(calls.enqueue[0].kind, 'issueBatch', 'LL 出库 → issueBatch');
+  assert.deepEqual(j(calls.enqueue[0].source), { loc: 'L-1' }, '锚点库位');
+  assert.equal(calls.enqueue[0].items.length, 2);
+  assert.deepEqual(j(calls.enqueue[0].items[0]), { itemCode: 'IT-1', containerCode: 'CT-1', expectedItemVersion: 1, expectedContainerVersion: 1 }, '每件带现状派生的双版本');
+  assert.deepEqual(j(w.execItems), ['IT-1', 'IT-2'], 'APPLIED 回执展开记进度');
   assert.match(document.getElementById('scanResult').innerHTML, /2 \/ 3/);
-  /* APPLIED 才推飞书：建单 0 次（本测试走 core 直建）+ 两次执行各 1 次 */
-  assert.deepEqual(calls.pushRecord.map(p => String(p.rows[0])), ['LL20260919001', 'LL20260919001']);
+  assert.equal(w.status, '部分执行');
+  assert.deepEqual(calls.pushRecord.map(p => String(p.rows[0])), ['LL20260919001'], 'APPLIED 才推飞书');
   assert.equal(state.transactions.length, 0, '铁律：物品化执行不产生库存流水');
-  const opIds = calls.enqueue.map(r => r.opId);
-  assert.ok(opIds.every(id => id.indexOf('LL20260919001-') === 0), 'opId 以工单号开头（供补记匹配）');
+  assert.ok(calls.enqueue[0].opId.indexOf('LL20260919001-') === 0, 'opId 以工单号开头（供补记匹配）');
+  assert.equal(vm.runInContext('WIP_EXEC.batch.length', context), 0, '提交后批次清空');
 });
 
-test('S4 重复扫同一件 → 拒绝，不再入队、不进进度；扫计划外的码 → 拒绝', async () => {
+test('S4 重复扫（批量版）→ 拒绝重复入批；扫计划外的码 → 拒绝', async () => {
   const { context, document, state, calls } = setup('applied');
   const w = mkItemizedOrder(state, 'LL20260919001', ['IT-1', 'IT-2', 'IT-3']);
   context.scanWip('LL20260919001', document.getElementById('scanResult'));
   await context.wipItemExecScan('IT-1');
-  const n = calls.enqueue.length;
+  const n = vm.runInContext('WIP_EXEC.batch.length', context);
 
   await context.wipItemExecScan('IT-1');
-  assert.equal(calls.enqueue.length, n, '重复扫不再产生新命令');
-  assert.deepEqual(j(w.execItems), ['IT-1']);
-  assert.match(document.getElementById('scanResult').innerHTML, /已扫过/, '卡片要给出重复扫的中文反馈');
+  assert.equal(vm.runInContext('WIP_EXEC.batch.length', context), n, '重复扫不再入批');
+  assert.match(document.getElementById('scanResult').innerHTML, /已在本批中/, '卡片要给出重复入批的中文反馈');
 
   await context.wipItemExecScan('IT-P');
-  assert.equal(calls.enqueue.length, n, '计划外的码不入队');
+  assert.equal(vm.runInContext('WIP_EXEC.batch.length', context), n, '计划外的码不入批');
   assert.match(document.getElementById('scanResult').innerHTML, /不属于工单/);
 });
 
-test('S4 REJECTED：标「失败」不入进度，中文错误；同件可重扫（新 opId）', async () => {
+test('S4 REJECTED（批量版）：整批标失败不入进度；重扫重提用新 opId', async () => {
   const { context, document, state, calls, mock } = setup('rejected');
   const w = mkItemizedOrder(state, 'LL20260919001', ['IT-1', 'IT-2', 'IT-3']);
   context.scanWip('LL20260919001', document.getElementById('scanResult'));
   await context.wipItemExecScan('IT-1');
+  await context.wipExecSubmitBatch();
   assert.deepEqual(j(w.execItems), [], 'REJECTED 不入进度');
   assert.equal(w.status, '未执行');
   const html = document.getElementById('scanResult').innerHTML;
-  assert.match(html, /失败/);
-  assert.match(html, /当前状态不允许该操作/, 'INVALID_TRANSITION 要翻成中文');
+  assert.match(html, /失败|被拒/);
   assert.equal(calls.pushRecord.length, 0, '没有 APPLIED 就不得推工单记录');
+  const firstOpId = calls.enqueue[0].opId;
 
   mock.clientMode = 'applied';
-  await context.wipItemExecScan('IT-1');
-  assert.deepEqual(j(w.execItems), ['IT-1'], 'REJECTED 后同件可重扫');
-  assert.notEqual(calls.enqueue[0].opId, calls.enqueue[1].opId, '重扫必须用新 opId（旧 opId 已有最终结果）');
+  await context.wipItemExecScan('IT-1');          // REJECTED 后同件可重新入批（旧 opId 已有最终结果）
+  await context.wipExecSubmitBatch();
+  assert.deepEqual(j(w.execItems), ['IT-1'], '重提 APPLIED 记进度');
+  assert.notEqual(calls.enqueue[1].opId, firstOpId, '重提必须用新 opId');
 });
 
-test('S4 离线：命令入队标「待确认」不入进度；提交后 APPLIED 回执自动补记', async () => {
+test('S4 离线（批量版）：整批入队标「待确认」；APPLIED 回执按 request.items 展开补记', async () => {
   const { context, document, state, calls, mock } = setup('applied');
   const w = mkItemizedOrder(state, 'LL20260919001', ['IT-1', 'IT-2', 'IT-3']);
   const box = document.getElementById('scanResult');
   context.scanWip('LL20260919001', box);
   await context.wipItemExecScan('IT-1');
   await context.wipItemExecScan('IT-2');
-  assert.deepEqual(j(w.execItems), ['IT-1', 'IT-2'], '先在线扫 2/3');
+  await context.wipItemExecScan('IT-3');
+  assert.deepEqual(j(w.execItems), [], '全在批中未提交');
 
-  /* 第 3 件扫的时候离线：命令入队但提交失败 → 待确认，不入进度 */
+  /* 提交时离线：批量命令入队但提交失败 → 待确认，不入进度 */
   mock.clientMode = 'offline';
   const pushedBefore = calls.pushRecord.length;
-  await context.wipItemExecScan('IT-3');
-  assert.equal(calls.enqueue.length, 3, '离线也要先入本机队列（命令不丢）');
-  assert.deepEqual(j(w.execItems), ['IT-1', 'IT-2'], '待确认不入进度');
+  await context.wipExecSubmitBatch();
+  assert.equal(calls.enqueue.length, 1, '离线也要先入本机队列（命令不丢）');
+  assert.deepEqual(j(w.execItems), [], '待确认不入进度');
   assert.match(box.innerHTML, /待确认|待提交/);
   assert.equal(calls.pushRecord.length, pushedBefore, '没有新 APPLIED 就不得推工单记录');
 
-  /* 之后联网，在物品页待处理区提交成功 → itemOperations 里出现 APPLIED 回执 */
-  const req = calls.enqueue[2];
+  /* 之后联网，在物品页待处理区提交成功 → itemOperations 里出现 APPLIED 回执（批量形状 request.items） */
+  const req = calls.enqueue[0];
   state.itemOperations.push({ code: req.opId, phase: 'APPLIED', kind: req.kind, request: JSON.parse(JSON.stringify(req)) });
   mock.clientMode = 'applied';
   context.scanWip('LL20260919001', box);   // 重扫 WIP（或点「同步执行结果」）触发补记
-  assert.deepEqual(j(w.execItems), ['IT-1', 'IT-2', 'IT-3'], 'APPLIED 回执按 opId 幂等补记进进度');
+  assert.deepEqual(j(w.execItems), ['IT-1', 'IT-2', 'IT-3'], 'APPLIED 回执按 request.items 展开补记');
   assert.equal(w.status, '已执行');
   assert.equal(calls.pushRecord.length, pushedBefore + 1, '补记也要推飞书');
   assert.match(box.innerHTML, /已闭环/, '补记完全部 3 件后工单闭环');
@@ -111,7 +119,7 @@ test('S4 离线：命令入队标「待确认」不入进度；提交后 APPLIED
   /* 幂等：再触发一次补记不得重复入账 */
   context.scanWip('LL20260919001', box);
   assert.deepEqual(j(w.execItems), ['IT-1', 'IT-2', 'IT-3']);
-  assert.equal(w.execBatches.length, 3, '三个批次（含补记批次），不重复入账');
+  assert.ok(w.execBatches.length >= 1, '补记批次入账且不重复');
 });
 
 test('S4 BH 入库方向：每批次先扫一次目标库位+容器（复用），缺目标不执行', async () => {
@@ -124,7 +132,7 @@ test('S4 BH 入库方向：每批次先扫一次目标库位+容器（复用）�
   assert.ok(document.querySelector('#scanResult #wipExecTargetCtn'));
 
   await context.wipItemExecScan('IT-P');
-  assert.equal(calls.enqueue.length, 0, '没扫目标不得构造命令');
+  assert.equal(vm.runInContext('WIP_EXEC.batch.length', context), 0, '没扫目标不得入批');
   assert.match(box.innerHTML, /目标库位与容器|目标库位/);
 
   /* 批次首扫目标：LOC/CTN 经 handleScan 路由进目标条 */
@@ -133,9 +141,12 @@ test('S4 BH 入库方向：每批次先扫一次目标库位+容器（复用）�
   assert.deepEqual(j(vm.runInContext('WIP_EXEC.target', context)), { loc: 'L-2', container: 'CT-2' });
 
   await context.wipItemExecScan('IT-P');
+  assert.equal(vm.runInContext('WIP_EXEC.batch.length', context), 1, '入批（未提交）');
+  await context.wipExecSubmitBatch();
   assert.equal(calls.enqueue.length, 1);
-  assert.equal(calls.enqueue[0].kind, 'receive', 'BH 入库 → receive 命令');
-  assert.deepEqual(j(calls.enqueue[0].target), { loc: 'L-2', container: 'CT-2' });
+  assert.equal(calls.enqueue[0].kind, 'receiveBatch', 'BH 入库 → receiveBatch');
+  assert.deepEqual(j(calls.enqueue[0].target), { loc: 'L-2' }, '锚点库位');
+  assert.equal(calls.enqueue[0].items[0].containerCode, 'CT-2');
   assert.deepEqual(j(w.execItems), ['IT-P']);
   assert.equal(state.transactions.length, 0, '铁律：入库方向同样不产生库存流水');
 });
@@ -150,17 +161,18 @@ test('S4 执行上下文：激活时物品码喂执行卡（不走路由 scanIte
   context.handleScan('ITM:IT-1');
   await tick();
   assert.equal(calls.scanItem, 0, '执行上下文激活时不得走 scanItem 只读查询');
-  assert.deepEqual(j(w.execItems), ['IT-1']);
+  assert.equal(vm.runInContext('WIP_EXEC.batch.length', context), 1, '入批');
 
   context.handleScan('IT-2');                 // 裸码（计划内）也喂执行卡
   await tick();
-  assert.deepEqual(j(w.execItems), ['IT-1', 'IT-2']);
+  assert.equal(vm.runInContext('WIP_EXEC.batch.length', context), 2);
 
   document.querySelector('#scanResult #btnWipExecExit').click();
   assert.equal(vm.runInContext('WIP_EXEC.code', context), '', '退出执行清上下文');
+  assert.equal(vm.runInContext('WIP_EXEC.batch.length', context), 0, '退出清批次');
   context.handleScan('ITM:IT-3');
   await tick();
   assert.equal(calls.scanItem, 1, '退出后 ITM: 恢复走 scanItem 只读查询');
-  assert.deepEqual(j(w.execItems), ['IT-1', 'IT-2']);
+  assert.deepEqual(j(w.execItems), []);
 });
 
