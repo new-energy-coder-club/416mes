@@ -2107,6 +2107,106 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   #tab-txn>.page-purpose>.hint{flex:1 1 100%}
 }
 }
+
+/* ============================================================
+   16 SYNC-PAGE · P0（tab-sync 布局研究产出 · 纯 CSS，零 DOM/JS 改动）
+   动作条卡片 / 头条徽 / 四面板层级 / 键行主次 / 队列空态 / 日志 / 科普 details / 桌面 960 列
+   全部 @media screen；打印域零触碰；不新增 fixed 元素；
+   动态渲染内容一律用「面板 id + 后代选择器」命中（面板 innerHTML 由 JS 整体重建）。
+   ============================================================ */
+@media screen{
+  /* ---- S1 顶部动作条：一张卡，主键 / 次键 / 状态徽三分 ---- */
+  #tab-sync>.toolbar{margin:14px 0 0;padding:12px 14px;gap:10px;
+    background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow-1)}
+  #tab-sync>.toolbar #btnCloudSync{min-height:48px;font-size:15px;font-weight:700;padding:0 22px}
+  #tab-sync>.toolbar>:is(#btnSyncRefresh,#btnSyncQueue){min-height:44px}
+  /* 头条（一致 / 不一致徽）：右置胶囊 —— 只是文本，任何断点都不与按钮争权重 */
+  #syncHeadline{margin-left:auto;padding:5px 12px;border-radius:var(--r-pill);
+    background:var(--surface-2);border:1px solid var(--line);
+    font-size:12px;font-weight:600;color:var(--text-sub)}
+  /* 说明行原本靠行内 -4px 上贴裸工具条；卡片化后必须拿掉（行内样式需 !important） */
+  #tab-sync>.toolbar+.hint{margin:8px 0 14px !important}
+
+  /* ---- S2 四块面板：统一卡头 ---- */
+  :is(#cloudGapBox,#queueBox,#conflictBox,#healthBox)>b:first-of-type{font-size:14px;font-weight:700;color:var(--ink-strong)}
+  #cloudGapBox>.mb-6>b{font-size:14px}
+  #settleBox>h3{font-size:14px;margin:0 0 6px}
+
+  /* ---- S3 对账面板（一致性）：结论行 → 总览 pills → 计数表 → 明细 ---- */
+  #cloudGapBox .mb-6{font-size:13.5px;line-height:1.6}
+  #cloudGapBox .sync-overview{margin:0 0 12px;gap:8px;flex-wrap:wrap}
+  #cloudGapBox .so-item{padding:4px 12px;border-radius:var(--r-pill);background:var(--surface);border:1px solid var(--line)}
+  #cloudGapBox .so-item.ok{background:var(--done-bg);color:var(--done-fg);border-color:transparent}
+  #cloudGapBox .so-item.bad{background:var(--doing-bg);color:var(--doing-fg);border-color:transparent}
+  #cloudGapBox>table.grid{margin-bottom:12px}
+  #cloudGapBox .reconcile-keys{background:var(--surface-2)}
+  #cloudGapBox .reconcile-keys>b{font-size:12.5px;color:var(--text-sub)}
+  #cloudGapBox .reconcile-key-row{padding:6px 0}
+  /* 键行/差异表动作主次：推回=tonal 弱主；删除=危险字色 ghost（不新增红填充） */
+  #cloudGapBox button[data-reconcile-push],
+  #cloudGapBox button[data-diff-keep-local]{border-color:transparent;background:var(--primary-050);color:var(--primary-active)}
+  @media screen and (hover:hover){
+    #cloudGapBox button[data-reconcile-push]:not(:disabled):hover,
+    #cloudGapBox button[data-diff-keep-local]:not(:disabled):hover{background:var(--primary-100);filter:none}
+  }
+  #cloudGapBox button[data-reconcile-del],
+  #cloudGapBox button[data-wip-localonly-del],
+  #cloudGapBox button[data-itmop-localonly-del]{color:var(--danger-fg)}
+  /* 分节条：与正文拉开一档 */
+  #cloudGapBox .sync-section{margin:16px 0 8px;padding:8px 12px}
+  #cloudGapBox .sync-section__t{font-size:13px;letter-spacing:.02em}
+  /* 面板底部动作行：虚线分隔；「收起」右置 */
+  #cloudGapBox .toolbar{margin:14px 0 0;padding-top:12px;border-top:1px dashed var(--line)}
+  #cloudGapBox #btnHideAlign{margin-left:auto}
+  /* 「确认删除这 N 条」= 直接执行的删除 → 红填充（语义色纪律：删除四族之一） */
+  #btnConfirmDel{border-color:transparent;background:var(--danger-fg);color:#fff;box-shadow:var(--shadow-btn-danger)}
+  @media screen and (hover:hover){
+    #btnConfirmDel:not(:disabled):hover{filter:brightness(1.07)}
+  }
+
+  /* ---- S4 冲突面板 ---- */
+  #conflictBox table.grid{margin:8px 0 10px}
+  #conflictBox hr{border:none;border-top:1px dashed var(--line);margin:10px 0}
+  #conflictBox .toolbar{margin:10px 0 0}
+
+  /* ---- S5 健康面板：密排数据行 + 动作行分隔 ---- */
+  #healthBox>.hint{font-size:12.5px;line-height:2}
+  #healthBox .toolbar{margin:12px 0 0;padding-top:10px;border-top:1px dashed var(--line)}
+
+  /* ---- S6 队列面板：空态虚线卡（「队列为空」span 紧邻底部工具条，用 :has(+.toolbar) 锚定，
+          避免误伤前面的「落盘说明」span —— 实机预览抓到的误伤已修正） ---- */
+  #queueBox>span.hint:has(+.toolbar){display:block;margin:6px 0 2px;padding:22px 16px;text-align:center;
+    border:1.5px dashed var(--line-strong);border-radius:var(--r-lg);background:var(--surface-2);
+    color:var(--text-muted);font-size:13px}
+  #queueBox table.grid{margin:8px 0 2px}
+  #queueBox .toolbar{margin:12px 0 0;padding-top:10px;border-top:1px dashed var(--line)}
+
+  /* ---- S7 日志面板：瘦身，标题降一号（h2 缺位的页面里别再放大字） ---- */
+  #tab-sync .panel:has(>#scanLogWrap){padding:12px 14px}
+  #tab-sync .log-wrap__h{font-size:15px}
+
+  /* ---- S8 科普 details：summary 通栏化（点开区域更大） ---- */
+  #tab-sync details.rel-panel{padding:0}
+  #tab-sync details.rel-panel>summary{padding:12px 16px;font-weight:600;color:var(--text-sub)}
+  @media screen and (hover:hover){
+    #tab-sync details.rel-panel>summary:hover{background:var(--surface-2)}
+  }
+  #tab-sync details.rel-panel[open]>summary{border-bottom:1px solid var(--line)}
+  #tab-sync .rel-body{padding:12px 16px 14px}
+
+  /* ---- S9 桌面阅读列：960 单列居中（状态页不是数据表页，1280 全宽反而散） ---- */
+  @media (min-width:1024px){
+    #tab-sync>:is(.page-purpose,.toolbar,details.rel-panel,.sync-grid){max-width:960px;margin-inline:auto}
+  }
+}
+
+/* ---- S10 手机 ≤600：主键独占一行 52px，次键两列等分，徽标整行 ---- */
+@media screen and (max-width:600px){
+  #tab-sync>.toolbar{padding:10px 12px}
+  #tab-sync>.toolbar #btnCloudSync{flex:1 1 100%;min-height:52px}
+  #tab-sync>.toolbar>:is(#btnSyncRefresh,#btnSyncQueue){flex:1 1 calc(50% - 5px)}
+  #syncHeadline{flex:1 1 100%;margin-left:0;text-align:center}
+}
 </style>
 </head>
 <body>
