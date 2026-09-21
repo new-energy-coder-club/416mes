@@ -560,7 +560,8 @@ test('P0-4 close 后 window.__scanPerf 有完整累计（captureMs/decodeMs/miss
     decode: async () => { n++; return n >= 3 ? { text: 'LOC:L-A', format: '二维码' } : null; }
   });
   await cam.open({});
-  assert.ok(await waitFor(() => n >= 3, 3000), '应至少 decode 3 次，实测 ' + n);
+  /* P1-2 投票阈值 2：第 3 帧首现计票，第 4 帧才达标进候选（hitCount 在达标时累计）。 */
+  assert.ok(await waitFor(() => n >= 4, 3000), '应至少 decode 4 次（第 4 帧投票达标），实测 ' + n);
   cam.close('test');
   const p = win.__scanPerf;
   assert.ok(p, 'close 后应发布 __scanPerf');
