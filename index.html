@@ -2583,6 +2583,109 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
     #tab-nec .form-row .btn{flex-basis:100%}
   }
 }
+
+#tab-nec .nec-board:has(.nec-col:not(:has(.nec-card))):not(:has(.nec-card)) ~ .hint,
+#tab-nec .nec-board:empty::before{content:"暂无 NEC 任务 —— 上方表单创建第一条"; …}
+/* 21 块（顶层，后写） */ #tab-nec .form-row input,#tab-nec .form-row select{min-height:44px;max-width:100%;
+  width:auto !important;flex:1 1 150px;font-size:16px}
+/* 06 块 ≤600（1141–1143，早写） */ #tab-nec .form-row{flex-direction:column;align-items:stretch;gap:8px;}
+#tab-nec .form-row input,#tab-nec .form-row select{width:100%!important;min-height:44px;font-size:16px;}
+/* ============================================================
+   22 NEC-BOARD-P2 · P0（子代理 page-nec.md · 纯 CSS，零 DOM/JS 改动）
+   前置：21 NEC-BOARD 已上线，本块只做修复与增量，不重复其规则。
+   ① R0 修复 21 的手机回归（width:auto!important 击败 ≤600 的 100%!important
+     + 列向 flex-basis:150px 变高 150px，实测 390 档 #necTitle=225x150）。
+   ② 空态重做：21 的 .nec-board:has(.nec-col:not(:has(.nec-card))) 是
+     :has 嵌套 :has → 非法 → 整条规则（连同 :empty::before）被浏览器丢弃。
+     改用顶层 :not(:has())（合法；不支持 :has 时整条不渲染=回现状）。
+   ③ 列头 count 徽 / 编码徽 / 卡 hover / 卡 padding（对齐 11 L5、12 块语言）。
+   ④ 筛选区：全选 hint-line 44px 触达；裸文本行高近似（P1 label 化后可删）。
+   ⑤ 卡片操作行：.necSel 13→22px（.grid-dense 1134 同款）；编辑键只升字号，
+     不碰 1534/1536 已修的 min-height:44px。
+   级联纪律见 §2.5：全部规则书写于样式表末尾（后写胜）；
+   #tab-nec 前缀 (1,1,0) 起步，凡高于 (0,2,0) 显示开关处一律 :not([hidden])。
+   ============================================================ */
+@media screen{
+
+  /* ---- ① R0 · ≤600 新建表单回归修复（最高优先，视觉项之前） ----
+     与 21 块同特异性 (1,1,1)、本块在后 → 三连覆盖全部生效：
+     width:100%!important 压过 auto!important；flex 复位压过 1 1 150px
+     （列向 basis=高 150px 的根源）；stretch 压过 end（列向右对齐根源）。
+     不碰 1137–1143 的 min-height:44/font-size:16（两侧同值，无需动）。 */
+  @media (max-width:600px){
+    #tab-nec .form-row{align-items:stretch}
+    #tab-nec .form-row input,#tab-nec .form-row select{width:100%!important;flex:0 0 auto}
+    #tab-nec .form-row .btn{width:100%;flex:0 0 auto}
+  }
+
+  /* ---- ② 空态（替代 21 的死规则；其残留无害，可留待顺手清理） ----
+     全板空：board 顶部通栏引导。::before 是 grid item，必须 grid-column:1/-1，
+     否则只占第一列 235px。:not(:has()) 在顶层 → 合法（:has 嵌套禁令只限嵌套）；
+     :has 不支持时本条不渲染 = 回现状，无破版。 */
+  #tab-nec #necBoard:not(:has(.nec-card))::before{
+    content:"还没有 NEC 任务 —— 在上方表单创建第一条";
+    grid-column:1/-1;text-align:center;padding:26px 14px;
+    color:var(--text-muted);font-size:13px;line-height:1.8;
+    border:1.5px dashed var(--line-strong);border-radius:var(--r-lg);
+    background:var(--surface-2)}
+  /* 全板空时隐藏列内（空），避免与顶部引导重复；有卡时恢复。 */
+  #tab-nec #necBoard:not(:has(.nec-card)) .nec-col__empty{display:none}
+  /* 列内空槽（部分列空时）：L4 虚线空语言（surface 白槽压在 surface-2 列底上） */
+  #tab-nec .nec-col__empty{margin:2px 0 0;padding:18px 8px;text-align:center;
+    font-size:12.5px;color:var(--text-muted);
+    border:1.5px dashed var(--line-strong);border-radius:var(--r-md);background:var(--surface)}
+
+  /* ---- ③ 列头 / 卡片（L2/L3 对齐） ---- */
+  #tab-nec .nec-board{gap:12px}                       /* 与卡间距同刻度（--sp-3） */
+  #tab-nec .nec-card{padding:12px}                    /* 10→12，卡内呼吸感 */
+  /* N8 状态徽与列头重复（列=状态分组）：隐藏。回退 = 删除本行即可，零连带。 */
+  #tab-nec .nec-card .badge{display:none}
+  #tab-nec .nec-card__t{font-size:13.5px;line-height:1.5}
+  /* N4 编码 → mono 徽（11 L5 编码徽同款：surface-3 底 + 圆角小徽） */
+  #tab-nec .nec-card__m{display:inline-block;margin-top:8px;padding:1px 7px;
+    border-radius:var(--r-sm);background:var(--surface-3);
+    font-size:11.5px;font-weight:700;color:var(--ink-strong)}
+  #tab-nec .nec-card__f{margin-top:8px;font-variant-numeric:tabular-nums}
+  /* N3 列头 count → 徽（12 块 toolbar__label 的计数徽变体） */
+  #tab-nec .nec-col__h b{display:inline-flex;align-items:center;justify-content:center;
+    min-width:22px;height:20px;padding:0 7px;border-radius:var(--r-pill);
+    background:var(--surface-3);color:var(--ink-strong);
+    font-size:11.5px;font-weight:700;font-variant-numeric:tabular-nums}
+  /* N5 卡 hover 升档（11 L5 结果卡同款；hover:none 触屏零影响） */
+  @media screen and (hover:hover){
+    #tab-nec .nec-card{transition:box-shadow .15s ease,border-color .15s ease}
+    #tab-nec .nec-card:hover{box-shadow:var(--shadow-2);border-color:var(--line-strong)}
+  }
+
+  /* ---- ④ 筛选区 ---- */
+  /* 裸文本「状态筛选」是匿名盒无法选中 → toolbar 统一小字近似（块 20 ② 同款手法）；
+     P1 label 化后本条降级为无害冗余，可留。 */
+  #tab-nec .toolbar{font-size:12.5px;color:var(--text-sub)}
+  /* N6 全选 label 13px/#445 无高度 → 44px 触达 + 勾选框 18px */
+  #tab-nec .toolbar .hint-line{display:inline-flex;align-items:center;gap:6px;
+    min-height:44px;font-size:13px;color:var(--text-sub)}
+  #tab-nec .toolbar .hint-line input[type=checkbox]{width:18px;height:18px;flex:none;
+    accent-color:var(--color-primary)}
+
+  /* ---- ⑤ 卡片操作行 ---- */
+  /* N6 勾选框 13→22px：.grid-dense 1134 卡态表同款先例；主色 accent 一致性 */
+  #tab-nec .necSel{width:22px;height:22px;flex:none;accent-color:var(--color-primary)}
+  /* 编辑键：min-height:44 已由 1534/1536 修复（实测 44px）——只升字号字重，
+     padding 8px 12px 略收（44px 高不变）；用 .nec-card .nec-card__edit (0,2,0)
+     显式点，与 1536 同一手法，避免同特异性歧义。 */
+  #tab-nec .nec-card .nec-card__edit{font-size:12.5px;font-weight:600;padding:8px 12px}
+
+  /* ---- N7 编辑面板两列（≥481；≤480 保持纵列） ----
+     ⚠ 坑 2 实例：不带 :not([hidden]) 的话，(1,1,0) 会压过 r759
+     .nec-card__editor[hidden]{display:none} 的 (0,2,0)，编辑面板永久展开。 */
+  @media (min-width:481px){
+    #tab-nec .nec-card__editor:not([hidden]){display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px}
+  }
+}
+  /* P1-a 配套：label 化后保持"桌面 label 左置同行、手机仍上置"。
+     块 21 的 width:100% 上置规则只保留给不带 for 的 label（改造后不存在，等于自然退役）。 */
+  #tab-nec .form-row>label[for]{width:auto;align-self:center;margin:0}
 </style>
 </head>
 <body>
