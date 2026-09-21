@@ -3422,7 +3422,9 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('cl
       if (info.num) { const n = document.createElement('span'); n.className = 'pg-toc__num'; n.textContent = info.num; b.appendChild(n); }
       const dot = document.createElement('span'); dot.className = 'pg-toc__dot'; b.appendChild(dot);
       b.appendChild(document.createTextNode(info.label));
-      b.addEventListener('click', () => { pgTocGo(st, i); pgTocClose(st); });
+      /* 点条目跳转后面板保持打开 —— 索引是持续导航工具，跳完一节还要跳下一节
+         （用户实测反馈：跳一次就消失=bug）。关闭只靠再点 FAB 或点外部。 */
+      b.addEventListener('click', () => { pgTocGo(st, i); });
       list.appendChild(b);
       st.entries.push({ el: el, b: b });
     });
@@ -7662,7 +7664,7 @@ const RES_TYPES = {
     fields: [
       { k: 'type', label: '类型', type: 'text', ph: '如：A4四抽收纳盒' },
       { k: 'spec', label: '规格', type: 'text', ph: '如：32×25×34cm' },
-      { k: 'loc', label: '当前库位码', type: 'loc', ph: '如：B-01-02-03', hint: '容器放在哪个库位——这是最常要改的一项' }
+      { k: 'loc', label: '当前库位码', type: 'loc', ph: '如：B-01-02-03', hint: '容器放在哪个库位；改库位请用「ITM作业」的容器移库/定位（此处只读展示）' }
     ],
     blank: () => ({ type: '', spec: '', loc: '' }),
     search: r => [r.code, r.type, r.spec, r.loc]
@@ -7799,11 +7801,21 @@ function resOpenEditor(key) {
     : '新增' + cfg.label) + '</h3>' +
     cfg.fields.map(f => {
       const v = rec ? (rec[f.k] == null ? '' : rec[f.k]) : (cfg.blank()[f.k] || '');
-      const input = f.type === 'select'
+      /* 审计 P0-1：受控字段（容器的 loc / 物品的 loc）不在 ordinaryFields 白名单里，
+         resSave 会剥掉、服务端也拒收 —— 之前渲染成可编辑框，用户改了静默丢失。
+         现在如实渲染为只读 + 指引到真正的作业流程。 */
+      const _dummy = {}; cfg.fields.forEach(ff => { _dummy[ff.k] = ''; });
+      const _safeKeys = Object.keys(window.UniqueItems.ordinaryFields(table, _dummy));
+      const _controlled = window.UniqueItems.CONTROLLED[table] && !_safeKeys.includes(f.k);
+      const input = _controlled
+        ? '<input type="text" id="resF_' + f.k + '" value="' + esc(v) + '" readonly style="background:var(--surface-3);color:var(--text-sub)">'
+        : (f.type === 'select'
         ? '<select id="resF_' + f.k + '">' + f.opts.map(o => '<option' + (String(v) === o ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select>'
-        : '<input type="text" id="resF_' + f.k + '" value="' + esc(v) + '"' + (f.ph ? ' placeholder="' + esc(f.ph) + '"' : '') + ' list="resLocList">';
-      return '<div class="form-row"><label>' + esc(f.label) + '</label>' + input +
-        (f.hint ? '<span class="hint">' + esc(f.hint) + '</span>' : '') + '</div>';
+        : '<input type="text" id="resF_' + f.k + '" value="' + esc(v) + '"' + (f.ph ? ' placeholder="' + esc(f.ph) + '"' : '') + ' list="resLocList">');
+      const _hint = _controlled ? '由作业流程维护（ITM作业：入库/出库/换箱、容器移库/定位），此处不可直改——改了不会同步。'
+        : f.hint;
+      return '<div class="form-row"><label>' + esc(f.label) + (_controlled ? '（只读）' : '') + '</label>' + input +
+        (_hint ? '<span class="hint">' + esc(_hint) + '</span>' : '') + '</div>';
     }).join('') +
     '<datalist id="resLocList">' + (state.locations || []).map(l => '<option value="' + esc(l.code) + '">').join('') + '</datalist>' +
     '<div class="toolbar mt-8"><button class="btn small" id="btnResSave">保存</button>' +
@@ -7831,7 +7843,7 @@ function resSave() {
     Object.keys(patch).forEach(k => delete patch[k]); Object.assign(patch, safe);
   }
   let pushed = null, msg = '', clearFields = [];
-  if (resEditing.mode === 'add' && window.UniqueItems.CONTROLLED[table]) { alert('唯一实体请在“库位/容器/物品查询”页通过管理员受控建档；未配置协调时仅保存申请。'); goTab('items'); return; }
+  if (resEditing.mode === 'add' && window.UniqueItems.CONTROLLED[table]) { alert('唯一实体请在「建档管理」页通过受控建档流程新增（库位/容器/物品）。'); goTab('register'); return; }
   if (resEditing.mode === 'add') {
     /* 新增：业务键自动编（与批量建档同一套规则），避免用户瞎编导致和标签编码体系冲突 */
     const pre = table === 'locations' ? 'B' : table === 'containers' ? 'A4SH' : table === 'items' ? 'WP' : 'SC';
@@ -7875,7 +7887,7 @@ function resSave() {
 
 /** 作废删除：显示影响范围 + 同步状态 → 二次确认 → 写凭据 → 删本地 → 推飞书删除 */
 async function resDelete(key) {
-  if (['items', 'containers', 'locations'].includes(resType)) { alert('唯一实体编码不可硬删/回收；请通过受控退役或停用流程处理。'); return; }
+  if (['items', 'containers', 'locations'].includes(resType)) { alert('唯一实体编码不可硬删/回收。物品退役请到「建档管理」的「退役」流程；库位/容器暂无停用/退役命令（如有误建请联系管理员在飞书侧处理）。'); return; }
   const cfg = RES_TYPES[resType], table = resType;
   const rec = (state[table] || []).find(r => String(r[cfg.key]) === String(key));
   if (!rec) { alert('记录已不存在，请刷新。'); renderRes(); return; }
