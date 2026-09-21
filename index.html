@@ -1534,7 +1534,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
    全部 @media screen，打印域零触碰。
    ============================================================ */
 @media screen{
-  .pg-toc{display:none;position:fixed;z-index:calc(var(--z-overlay) - 1);
+  .pg-toc{display:none;position:fixed;right:14px;z-index:calc(var(--z-overlay) - 1);
     width:min(320px,calc(100vw - 28px));max-height:min(70vh,560px);overflow:auto;
     background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);
     box-shadow:var(--shadow-3);padding:10px;}
@@ -3475,8 +3475,21 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('cl
   function pgTocPlaceFabs() {
     const h = document.querySelector('header');
     const top = (h ? Math.round(h.getBoundingClientRect().bottom) : 64) + 8;
-    document.querySelectorAll('.pg-toc-fab').forEach(f => { f.style.top = top + 'px'; });
-    document.querySelectorAll('.pg-toc.is-open').forEach(p => { p.style.top = (top + 52) + 'px'; });
+    /* 宽屏下内容列有 max-width：锚定「内容区右缘」而不是窗口右缘，
+       否则 FAB 孤悬在几百像素的空白里，视觉上等于消失（用户实测 1920 反馈） */
+    const rightOf = sec => {
+      if (!sec) return 14;
+      const r = sec.getBoundingClientRect();
+      return Math.max(14, Math.round(innerWidth - r.right) + 14);
+    };
+    document.querySelectorAll('.pg-toc-fab').forEach(f => {
+      const sec = f.closest('section.tab');
+      f.style.top = top + 'px'; f.style.right = rightOf(sec) + 'px';
+    });
+    document.querySelectorAll('.pg-toc.is-open').forEach(p => {
+      const sec = p.closest('section.tab');
+      p.style.top = (top + 52) + 'px'; p.style.right = rightOf(sec) + 'px';
+    });
   }
   window.addEventListener('resize', pgTocPlaceFabs);
 
