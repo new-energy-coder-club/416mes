@@ -1910,6 +1910,56 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   #matTable th:nth-child(7){width:9%}
   #matTable th:nth-child(12){width:11%}
 }
+
+/* ============================================================
+   13 LAYOUT-SCAN · P0（子代理 page-scan.md · 纯 CSS，零 DOM/JS 改动）
+   扫码工作台（A 档保留）：页头节奏 / 输入 hero / 空态 / 结果卡与执行卡分档 /
+   盘点区桌面卡化 / 880 阅读列。全部 @media screen；打印域零触碰；
+   不动 06 RESPONSIVE 的手机 flex order（桌面规则收在 min-width:768 内）；
+   .cam-overlay 为 ITM 页共享资产，本块不触碰。
+   ============================================================ */
+@media screen{
+/* ---- L0 页头节奏：零 DOM eyebrow（h2::before 顶一行眉题） ---- */
+#tab-scan .panel>h2{margin-bottom:4px}
+#tab-scan .panel>h2::before{content:"扫码工作台 · 七种机读串";display:block;
+  font-size:12px;font-weight:700;letter-spacing:.12em;color:var(--cyan-ink);margin:0 0 6px}
+#tab-scan>p.hint{font-size:12.5px;line-height:1.6;margin:0 0 6px}
+#tab-scan>p.hint .btn{min-height:44px}
+
+/* ---- L1 hero：输入簇（本页唯一大键）+ 相机卫星行 ---- */
+#tab-scan .field-wrap{margin-top:14px}
+#tab-scan .panel>#btnCam{min-height:44px;font-size:13px;font-weight:600}
+
+/* ---- L4 空态：#scanResult 初始真空；任一次扫码后整卡重建，:empty 自动退出 ---- */
+#scanResult:empty{margin-top:14px}
+#scanResult:empty::before{content:"扫或输入机读串，回车确认\A只读：MAT 物料 · LOC 库位 · CTN 容器 · NEC 任务 · ITM 物品 · MAN 手册\A执行：WIP 工单 → 逐件扫码确认后才改库存";
+  white-space:pre-line;display:block;text-align:center;padding:34px 16px;color:var(--text-muted);
+  font-size:13px;line-height:2;border:1.5px dashed var(--line-strong);border-radius:var(--r-lg);
+  background:var(--surface-2)}
+
+/* ---- L5 结果卡节奏（renderScanCard 骨架固定） ---- */
+#scanResult .scan-card__title h3{font-size:15px}
+#scanResult .scan-readings{gap:8px}
+#scanResult .scan-reading{min-width:96px}
+#scanResult .scan-card__actions{margin-top:10px}
+
+/* ---- L6 G1 执行卡分档：执行中=页面第二主角 ---- */
+.wip-exec-bar .field{min-height:44px;font-size:15px}
+#scanResult #btnWipExecBatch{min-height:44px;font-weight:700}
+#scanResult #btnWipExecExit,#scanResult #btnWipExecSync,#scanResult #btnWipExecBatchClear{min-height:40px}
+#scanResult #wipExecItemInput{min-height:48px;font-size:15px}
+#scanResult #wipExecHint{display:block;margin-top:6px}
+@media screen and (max-width:600px){
+  #scanResult #wipExecItemInput{min-height:52px;font-size:16px}
+}
+}
+/* ---- L6b G2 盘点区桌面卡化（收 ≥768 防覆盖手机 flex order 块）+ L10 阅读列 ---- */
+@media screen and (min-width:768px){
+  #tab-scan .panel>label{display:flex;align-items:center;gap:8px;margin-top:12px;padding:10px 12px;
+    border:1px solid var(--line);border-radius:var(--r-md);font-size:13px;cursor:pointer}
+  #tab-scan .panel>label input[type=checkbox]{width:18px;height:18px;flex:none}
+  #tab-scan>.panel{max-width:880px}
+}
 </style>
 </head>
 <body>
@@ -2495,7 +2545,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   </section>
   <!-- ========== 扫码出入库 ========== -->
   <section class="tab" id="tab-scan">
-    <p class="hint">当前为旧 MAT/WIP 工作台。唯一物品请进入独立模式：<button class="btn" onclick="goTab('items')">ITM查询 / 严格三码作业</button></p>
+    <p class="hint">MAT / LOC / CTN / WIP / NEC / MAN 六类机读串在此扫码：<b>查询只读</b>，<b>WIP 工单确认执行才改库存</b>；物品盘点也在这里开关。唯一物品（WP-）请走「<a href="#items" style="color:var(--color-primary)">ITM查询 / 严格三码作业</a>」。</p>
     <p class="page-purpose"><span>七种机读串：MAT / LOC / CTN / WIP / NEC / ITM / MAN</span><span class="impact impact--none">查询只读</span><span class="impact impact--confirm">WIP 确认后改库存</span></p>
     <div class="panel">
       <h2>扫码 / 手输机读串</h2>
