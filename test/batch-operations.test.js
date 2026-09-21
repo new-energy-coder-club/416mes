@@ -112,19 +112,18 @@ test('B9 批量出库：声明容器与现状不符 → SOURCE_MISMATCH', () => 
   ]), actor), /SOURCE_MISMATCH/);
 });
 
-test('B10 entityKeysOf：批量键集 = N×items + M×containers', () => {
+test('B10 entityKeysOf（A2 降级后）：批量键集 = N×items（容器不锁）', () => {
   const keys = U.entityKeysOf(recvBatch([
     { itemCode: 'I-1', containerCode: 'C-1', expectedItemVersion: 0, expectedContainerVersion: 3 },
     { itemCode: 'I-2', containerCode: 'C-1', expectedItemVersion: 0, expectedContainerVersion: 3 },
     { itemCode: 'I-3', containerCode: 'C-2', expectedItemVersion: 0, expectedContainerVersion: 5 }
   ]));
   assert.ok(keys.has('items:I-1') && keys.has('items:I-2') && keys.has('items:I-3'));
-  assert.ok(keys.has('containers:C-1') && keys.has('containers:C-2'));
-  assert.equal(keys.size, 5, '2 容器 + 3 物品');
-  assert.ok(![...keys].some(k => k.startsWith('locations:')), 'LOC 不进收发批量键集');
+  assert.equal(keys.size, 3, '只锁 items（容器行从不被收发写）');
+  assert.ok(![...keys].some(k => k.startsWith('containers:') || k.startsWith('locations:')), '容器/库位均不进收发键集');
 });
 
-test('B11 键集相交即互斥：两批重叠一件', () => {
+test('B11 键集相交即互斥：两批重叠一件（按 items 判）', () => {
   const k1 = U.entityKeysOf(recvBatch([
     { itemCode: 'I-1', containerCode: 'C-1', expectedItemVersion: 0, expectedContainerVersion: 3 }
   ]));
@@ -135,10 +134,10 @@ test('B11 键集相交即互斥：两批重叠一件', () => {
   assert.ok([...k1].some(k => k2.has(k)), '重叠 I-1 → 相交');
 });
 
-test('B12 键集不相交可并行：两批完全不同的物品与容器', () => {
+test('B12 键集不相交可并行：同容器不同物品的两批（A2 后真并行）', () => {
   const k1 = U.entityKeysOf(recvBatch([{ itemCode: 'I-1', containerCode: 'C-1', expectedItemVersion: 0, expectedContainerVersion: 3 }]));
-  const k2 = U.entityKeysOf(recvBatch([{ itemCode: 'I-2', containerCode: 'C-2', expectedItemVersion: 0, expectedContainerVersion: 5 }]));
-  assert.ok(![...k1].some(k => k2.has(k)), '不相交');
+  const k2 = U.entityKeysOf(recvBatch([{ itemCode: 'I-2', containerCode: 'C-1', expectedItemVersion: 0, expectedContainerVersion: 3 }]));
+  assert.ok(![...k1].some(k => k2.has(k)), '同容器不同物品 → 键集不相交 → 并行');
 });
 
 test('B13 单件 receive 回归：change push 化后形状不变', () => {
