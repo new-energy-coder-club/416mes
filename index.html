@@ -2207,6 +2207,93 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   #tab-sync>.toolbar>:is(#btnSyncRefresh,#btnSyncQueue){flex:1 1 calc(50% - 5px)}
   #syncHeadline{flex:1 1 100%;margin-left:0;text-align:center}
 }
+
+/* ============================================================
+   17 RES-LAYOUT · P0（tab-res 资源档案页 · 纯 CSS，零 DOM/JS 改动）
+   类型条 / 工具条 / 同步徽 / 表格行密度与操作列 / 空态 / 编辑面板。
+   全部 @media screen；打印域零触碰；不新增 id / script；data-res-* 模板不动。
+   依据：.ui-research/page-res.md §1（候选 CSS 已注入实机验证：
+   手机卡 349→241px、桌面行 103→49px、编辑器桌面 grid 2 列/输入 38px）。
+   ============================================================ */
+@media screen{
+/* ---- R1 类型条：计数徽 mono 化，选中态反白 ---- */
+.res-typebar{margin-bottom:12px}
+.res-type{display:inline-flex;align-items:center;gap:7px}
+.res-type__n{font-family:var(--font-mono);font-size:11px;font-weight:600;
+  background:var(--surface-3);color:var(--text-sub);border-radius:var(--r-pill);
+  padding:2px 7px;opacity:1;margin-left:0}
+.res-type[aria-selected="true"] .res-type__n{background:rgba(255,255,255,.24);color:#fff}
+
+/* ---- R2 工具条（桌面档）：三控件统一 40px 一条线 ---- */
+#tab-res .toolbar .field{min-height:40px}
+#tab-res .toolbar>.btn{min-height:40px}
+#btnResAdd{padding:0 18px;font-weight:700}
+/* 同步警示：红字 → 琥珀 pill（提醒≠错误，红只留危险；JS 的 text-danger 类名不动） */
+#resSyncHint.text-danger{color:var(--doing-fg);background:var(--doing-bg);
+  border-radius:var(--r-pill);padding:4px 10px;font-weight:600}
+
+/* ---- R3 同步徽：三态语义 pill（替换 498–500 硬编码色，对比度 ≥4.5:1；级联靠本块靠后） ---- */
+.res-sync{display:inline-flex;align-items:center;font-size:11.5px;line-height:1.2;
+  padding:4px 9px;border-radius:var(--r-pill);font-weight:600}
+.res-sync--ok{background:var(--done-bg);color:var(--done-fg)}
+.res-sync--pending{background:var(--doing-bg);color:var(--doing-fg)}
+.res-sync--unknown{background:var(--cancelled-bg);color:var(--cancelled-fg)}
+
+/* ---- R4 表格密度（全断点，手机被 R9 覆盖回 44px）：操作列单行化 ---- */
+#resTable thead th:last-child{width:268px!important}   /* 覆盖 renderRes 8074 内联 width:230 */
+#resTable .res-row-actions{flex-wrap:nowrap;gap:5px}
+#resTable .res-row-actions .btn{min-height:32px;padding:0 10px;font-size:12.5px;
+  border-radius:var(--r-sm);box-shadow:none}
+#resTable .res-row-actions .btn[data-res-del]{color:var(--danger-fg)}  /* 红字提示，非红填充 */
+
+/* ---- R5 空态：搜索无结果 = 虚线空卡（顺带修掉卡态 84px 幽灵标签位） ---- */
+#resTable td.empty-row{display:block!important;border:1.5px dashed var(--line-strong);
+  border-radius:var(--r-lg);background:var(--surface-2);color:var(--text-muted);
+  padding:36px 16px;font-size:13px;text-align:center}
+#resTable td.empty-row::before{content:none!important}
+
+/* ---- R6 编辑面板：容器语言（左主色条 + 品牌浅底）+ 提示独占一行 + 只读虚线 ---- */
+#resEditorBox .res-editor{border:1px solid var(--primary-100);
+  border-left:3px solid var(--color-primary);border-radius:var(--r-md);
+  background:linear-gradient(90deg,var(--primary-050),var(--surface) 62%);
+  box-shadow:var(--shadow-1);padding:14px 16px;margin-bottom:12px}
+#resEditorBox .res-editor>h3{font-size:15px;margin:0 0 10px}
+#resEditorBox .form-row .hint{flex:1 1 100%;margin:4px 0 2px;font-size:12px}
+#resEditorBox input[readonly]{border:1px dashed var(--line-strong)}
+#resEditorBox .toolbar{margin:12px 0 0;padding-top:10px;border-top:1px dashed var(--line)}
+}
+/* ---- R7 编辑面板 ≥768：输入升到 38px/14px；≥3 短字段自动多列（L1.4 双列断点，
+        容器/物品/手册 3 列、库位 2 字段 2 列；保守可改 minmax(300px,1fr)=实测 2 列） ---- */
+@media screen and (min-width:768px){
+  #tab-res .res-editor .form-row input,#tab-res .res-editor .form-row select{
+    min-height:38px;padding:7px 10px;font-size:14px;border-radius:var(--r-sm)}
+  #resEditorBox .res-editor{display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+    column-gap:22px;row-gap:2px;align-items:start}
+  #resEditorBox .res-editor>h3,#resEditorBox .res-editor>datalist,
+  #resEditorBox .res-editor>.toolbar{grid-column:1/-1}
+  #btnResSave{min-height:40px;padding:0 22px}   /* 放 ≥768：手机保持 .btn.small 44 底线 */
+  #resSearch{flex:1 1 240px;max-width:560px}    /* 放 ≥768：不干扰 08 块 ≤767 的 grid 工具条 */
+}
+/* ---- R8 编辑面板 ≤767：label 一律上置（对齐 #tab-nec 既有模式 1137–1139）；
+        修掉"label/input 排列随 input 宽度随机 wrap"的不确定形态 ---- */
+@media screen and (max-width:767px){
+  #tab-res .res-editor .form-row{flex-direction:column;align-items:stretch;gap:6px}
+  #tab-res .res-editor .form-row label{min-width:0;font-size:12.5px;font-weight:600;color:var(--text-sub)}
+  #tab-res .res-editor .form-row input,#tab-res .res-editor .form-row select{width:100%}
+  #resEditorBox .form-row .hint{flex:1 1 auto;margin:0}
+}
+/* ---- R9 手机卡密度 ≤560：4 键 2×2（触达 44 只升不降；选择器必须带 #resTable
+        才能压过 08 块同特异性规则——见 §1.1 实施注意） ---- */
+@media screen and (max-width:560px){
+  #resTable .res-row-actions{grid-template-columns:1fr 1fr;gap:8px}
+  #resTable .res-row-actions .btn[data-res-edit]{grid-column:auto;min-height:44px}
+  #resTable .res-row-actions .btn[data-res-del]{grid-column:auto;min-height:44px;
+    background:transparent;border:none;color:var(--danger-fg);
+    text-decoration:underline;text-underline-offset:3px;font-size:13px}
+  #resTable .res-row-actions .btn[data-res-detail],
+  #resTable .res-row-actions .btn[data-res-print]{min-height:44px}
+}
 </style>
 </head>
 <body>
