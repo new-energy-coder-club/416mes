@@ -932,3 +932,156 @@ test('P1-3 crop 未命中不弹卡，入口保持可用', async () => {
   assert.equal(d.getElementById('scanCamCrop').hidden, false, '入口应保持可用');
   cam.close('test');
 });
+
+/* ================= P1-4 解码 Worker 化 ================= */
+
+/* 假 Worker 类：同步/异步回调消息，记录 postMessage 负载与 terminate。 */
+function makeFakeWorker(opts = {}) {
+  const instances = [];
+  class FakeWorker {
+    constructor(url) {
+      this.url = url;
+      this.posted = [];
+      this.transfers = [];
+      this.terminated = false;
+      this.onmessage = null;
+      this.onerror = null;
+      instances.push(this);
+      if (opts.constructThrow) throw new Error('construct boom');
+    }
+    postMessage(payload, transfer) {
+      this.posted.push(payload);
+      this.transfers.push(transfer);
+      const msg = typeof opts.reply === 'function' ? opts.reply(payload) : opts.reply;
+      if (msg) {
+        const deliver = () => {
+          if (this.terminated) return;
+          if (msg.error && opts.deliverAsError) this.onerror && this.onerror(new Error(msg.error));
+          else this.onmessage && this.onmessage({ data: msg });
+        };
+        if (opts.asyncReply) setTimeout(deliver, opts.asyncReplyMs || 5);
+        else deliver();
+      }
+    }
+    terminate() { this.terminated = true; if (opts.onTerminate) opts.onTerminate(this); }
+  }
+  return { FakeWorker, instances };
+}
+
+/* 带假 Worker 的 setup（win 注入 Worker；decode 走 worker 桥）。 */
+function setupWorker(opts = {}) {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 640; video.videoHeight = 480;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const fw = makeFakeWorker(opts.worker || {});
+  const win = Object.assign({}, document.defaultView, { Worker: fw.FakeWorker });
+  if (opts.winExtra) Object.assign(win, opts.winExtra);
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true,
+    worker: opts.workerFlag,   // undefined = 默认开
+    capture: () => ({ width: 640, height: 480, data: new Uint8ClampedArray(4) })
+  });
+  return { document, cam, win, instances: fw.instances };
+}
+
+test('P1-4 协议正确性：decode 转发 worker（{id,image} + transfer），命中弹卡', async () => {
+  const { document: d, cam, instances } = setupWorker({
+    worker: { reply: p => ({ id: p.id, hits: [{ text: 'LOC:W1', format: '二维码' }] }) }
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => !d.getElementById('scanCamConfirm').hidden, 3000),
+    'worker 命中应弹确认卡');
+  assert.equal(d.getElementById('scanCamValue').textContent, 'LOC:W1');
+  const w = instances[0];
+  assert.ok(w, '应构造 Worker');
+  assert.match(w.url, /scan-decode-worker\.js$/, 'Worker URL 应指向 lib/scan-decode-worker.js，实测 ' + w.url);
+  const payload = w.posted[0];
+  assert.equal(typeof payload.id, 'number', '协议应带数字 id');
+  assert.equal(payload.image.width, 640);
+  assert.equal(payload.image.height, 480);
+  assert.ok(payload.image.data instanceof ArrayBuffer, 'image.data 应为 ArrayBuffer（transferable）');
+  assert.ok(w.transfers[0] && w.transfers[0][0] === payload.image.data, 'transfer 列表应含 data buffer');
+  cam.close('test');
+});
+
+test('P1-4 迟到丢弃：worker 回未知 id 不解析；close() 时 terminate 无挂起', async () => {
+  const { document: d, cam, instances } = setupWorker({
+    worker: { reply: p => ({ id: p.id + 999, hits: [{ text: 'GHOST', format: '二维码' }] }) }
+  });
+  await cam.open({});
+  await tick(100);
+  assert.equal(d.getElementById('scanCamConfirm').hidden, true, '未知 id 的迟到响应不得弹卡');
+  cam.close('test');
+  assert.equal(instances[0].terminated, true, 'close() 必须 terminate worker');
+});
+
+test('P1-4 回退触发：worker 回 error → 自动降级主线程链（win.jsQR）并继续出卡', async () => {
+  const { document: d, cam, instances } = setupWorker({
+    worker: { reply: p => ({ id: p.id, error: 'wasm boom' }) },
+    winExtra: { jsQR: () => ({ data: 'LOC:FALLBACK' }) }
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => !d.getElementById('scanCamConfirm').hidden, 3000),
+    'worker error 后应回退主线程链出卡');
+  assert.equal(d.getElementById('scanCamValue').textContent, 'LOC:FALLBACK');
+  cam.close('test');
+});
+
+test('P1-4 回退触发：worker 构造抛错 → 静默走主线程链', async () => {
+  const { document: d, cam } = setupWorker({
+    worker: { constructThrow: true },
+    winExtra: { jsQR: () => ({ data: 'LOC:CF' }) }
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => !d.getElementById('scanCamConfirm').hidden, 3000),
+    '构造失败应静默回退主线程链');
+  assert.equal(d.getElementById('scanCamValue').textContent, 'LOC:CF');
+  cam.close('test');
+});
+
+test('P1-4 opts.worker=false：不构造 Worker，直接主线程链', async () => {
+  const { document: d, cam, instances } = setupWorker({
+    workerFlag: false,
+    worker: { reply: p => ({ id: p.id, hits: [{ text: 'LOC:NO', format: '二维码' }] }) },
+    winExtra: { jsQR: () => ({ data: 'LOC:MAIN' }) }
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => !d.getElementById('scanCamConfirm').hidden, 3000));
+  assert.equal(instances.length, 0, 'worker=false 时不得构造 Worker');
+  assert.equal(d.getElementById('scanCamValue').textContent, 'LOC:MAIN');
+  cam.close('test');
+});
+
+test('P1-4 terminate 时机：close()/pagehide 后 worker 已 terminate，再 open 重建新实例', async () => {
+  const { cam, instances } = setupWorker({
+    worker: { reply: p => ({ id: p.id, hits: [] }), asyncReply: true, asyncReplyMs: 1 }
+  });
+  await cam.open({});
+  await tick(50);
+  cam.close('user');
+  assert.equal(instances[0].terminated, true, 'close(user) 必须 terminate');
+  await cam.open({});
+  await tick(50);
+  cam.close('pagehide');
+  assert.equal(instances[1] && instances[1].terminated, true, '第二次会话的 worker 也必须 terminate');
+  assert.ok(instances.length >= 2, '再 open 应重建新 worker 实例');
+  cam.close('test');
+});
+
+test('P1-4 worker 解码超时（>2s）→ 回退主线程链', async () => {
+  const { document: d, cam } = setupWorker({
+    worker: { reply: null, asyncReply: false },   // 永不回复 → 超时
+    winExtra: { jsQR: () => ({ data: 'LOC:TIMEOUT' }) }
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => !d.getElementById('scanCamConfirm').hidden, 5000),
+    'worker 超时后应回退主线程链出卡');
+  assert.equal(d.getElementById('scanCamValue').textContent, 'LOC:TIMEOUT');
+  cam.close('test');
+});
