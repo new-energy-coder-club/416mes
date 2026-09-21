@@ -2398,6 +2398,84 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   .danger-reason input{min-height:44px;font-size:16px}
 }
 }
+
+/* ============================================================
+   19 PAGE-LABEL · P0（子代理 page-label.md · 纯 CSS，零 DOM/JS 改动）
+   标签打印页版式对齐 layout-system（L0 页头 / L4 空态 / 工具条主次）：
+   ① 类型条：触达面补齐（768–1099 盲区）+ 桌面 2×4 收半高
+   ② 记录列表：窄列表头不折行 + 筛选空命中反馈
+   ③ 预览空态：居中引导（L4 语言）
+   ④ 导出区：标签文字与控件同行（裸文本节点回流），% 归位，hint 通栏
+   ⑤ 手机：导出键 sticky 全程跟随（toolbar/lw-print display:contents，约束块提升到 .panel）
+   ⚠ 打印域零触碰：#printSheet/.label/.zonecard/@page/@media print 未引用；
+     预览空态规则虽命中 #printSheet 内的 span，但仅在 @media screen 生效，打印输出不变。
+   降级路径：display:contents 不支持（Chrome<65）→ 整段 ⑤ 回退为现状（网格 + 簇内 sticky），无破版。
+   ============================================================ */
+@media screen{
+
+  /* ---- L0 页头微缝隙（对齐 11 LAYOUT-SYSTEM 1691 的刻度） ---- */
+  #tab-label .panel>h2{margin-bottom:4px}
+
+  /* ---- ① 类型条 ---- */
+  /* 触达面：全宽生效 44px（≤767 已有 48px 更高优先级规则 1492，不受影响） */
+  .typebar button{min-height:44px}
+  /* 桌面 ≥1100：280px 列改 2×4（与手机同构），高度 350→~180px，「选择/列表」提前入屏；
+     伪元素标题「①类型与选择」是 grid 项，需独占首行 */
+  @media (min-width:1100px){
+    #tab-label .typebar{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+    #tab-label .typebar::before{grid-column:1/-1}
+    #tab-label .typebar button{padding:8px 6px;border-radius:var(--r-md);font-size:13px;text-align:center}
+  }
+  /* 说明：选中键的填充色是 renderLabelTab 写入的内联样式（类型↔标签条颜色编码），有意保留，不用 CSS 对抗 */
+
+  /* ---- ② 记录选择列表 ---- */
+  /* 280px 窄列：表头不再逐字折行（列表本就横向可滚） */
+  #tab-label .label-list th{white-space:nowrap}
+  /* 筛选空命中反馈（renderLabelTab 输出 shown=[] 时 tbody 恰好为空串，:empty 稳定命中） */
+  #recTable tbody:empty::before{content:"没有匹配的记录 —— 清空筛选或换关键词试试";
+    display:table-cell;text-align:center;padding:22px 12px;
+    color:var(--text-muted);font-size:13px}
+  @media (max-width:560px){
+    /* ≤560 密表已卡片化（tbody=block），空态改为块状居中 */
+    #recTable tbody:empty::before{display:block}
+  }
+
+  /* ---- ③ 预览空态（L4：空框 + 居中引导；勾选后 span 消失自动退出） ---- */
+  #tab-label .preview-inner>span.hint:only-child{
+    flex:1 1 100%;display:flex;align-items:center;justify-content:center;text-align:center;
+    min-height:176px;margin:0;color:var(--text-muted);font-size:13px;line-height:2}
+
+  /* ---- ④ 导出区（桌面 ≥1100）：display:block + 行内流 ——
+     裸文本「纸张/色彩/字号」与后面的控件回到同一行盒（三处标签均为两字等宽，左列自然对齐），
+     "字号 [input] %" 三者同行，消灭 4 条孤行 */
+  @media (min-width:1100px){
+    #tab-label .lw-print{display:block;line-height:1.6}
+    #tab-label .lw-print>.field{display:inline-block;vertical-align:middle;min-width:0;
+      width:calc(100% - 46px);margin:3px 0 10px}
+    #tab-label .lw-print>#numFontScale{width:70px;margin:3px 2px 10px 0}
+    #tab-label .lw-print .hint{display:block;margin-top:10px}
+  }
+
+  /* ---- ⑤ 导出区 + 导出键（手机 ≤767） ---- */
+  /* ⑤-a 关键结构规则：.toolbar 与 .lw-print 改 display:contents（盒消失、子元素上提）：
+     → 「标签+控件」以行内流参与 .panel（与 768–1099 中屏的裸 HTML 行为同构），
+       "% " 自然跟在输入框后，hint 变通栏；
+     → #btnPrint 的 sticky 约束块从 .lw-print 提升为整个 .panel：
+       滚动查看记录列表/预览时导出键始终悬浮在底栏上方 66px，直到 panel 结束才归位。 */
+  @media screen and (max-width:767px){
+    #tab-label .panel>.toolbar{display:contents}
+    #tab-label .lw-print{display:contents}
+    /* ⑤-b 行内流配对（宽度=100% − 两字标签 30px − 安全余量；强制每个"标签+控件"对独立成行） */
+    #tab-label .lw-print .field{display:inline-block;vertical-align:middle;min-width:0}
+    #selPaper,#selInk{width:calc(100% - 50px);min-height:48px;font-size:16px;margin:4px 0 10px}
+    #numFontScale{width:calc(100% - 74px);min-height:48px;font-size:16px;margin:4px 0}
+    /* ⑤-c 导出键：块级全宽（width:100%/sticky/阴影沿用 1498–1499），文案居中保持 .btn 内部 flex */
+    #btnPrint{display:flex;margin-top:4px}
+    /* ⑤-d 提示通栏 + 上提后补回被 display:contents 吃掉的间距 */
+    #tab-label .lw-print .hint{display:block;margin:8px 0 12px}
+    #tab-label .lw-select{margin-bottom:12px}
+  }
+}
 </style>
 </head>
 <body>
