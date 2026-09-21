@@ -43,12 +43,17 @@
   80%{z-index:7;opacity:1;translate:0px 12px;}
   100%{z-index:5;translate:0px 30px;opacity:0;}
 }
-/* 减弱动效偏好：播静态塔，不做下落动画 */
+/* 减弱动效偏好（手机省电模式会上报 reduce）：不播下落动画，但用轻量呼吸脉冲
+   表示「仍在加载」——绝不给一张冻结的静帧（会被当成卡死，用户实测反馈）。
+   opacity 动画对前庭安全友好、合成器零压力。 */
 @media (prefers-reduced-motion:reduce){
   .mes-load .box{animation:none;opacity:1;}
   .mes-load .box-1{translate:0 0;} .mes-load .box-2{translate:0 8px;}
   .mes-load .box-3{translate:0 16px;} .mes-load .box-4{translate:0 24px;}
+  .mes-load .loader{animation:mes-load-pulse 1.6s ease-in-out infinite;}
+  .mes-load__cap{animation:mes-load-pulse 1.6s ease-in-out infinite;}
 }
+@keyframes mes-load-pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
 /* ============================================================
    01 TOKENS —— 旧变量（迁移期保留，值不动，保证零视觉变化）
