@@ -2476,6 +2476,81 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
     #tab-label .lw-select{margin-bottom:12px}
   }
 }
+
+/* ============================================================
+   20 DESIGN-LAYOUT · P0（父代理自研 · 纯 CSS，零 DOM/JS 改动）
+   排版工具页：页头节奏 / 工具条对齐 / 图库空态 / iframe 容器。
+   只管 index.html 的 tab-design 段；iframe 内部不在范围。
+   ============================================================ */
+@media screen{
+  #tab-design>.page-purpose{margin:-4px 0 8px}
+  #tab-design>.page-purpose>span:first-child{font-size:12px;font-weight:700;
+    letter-spacing:.12em;color:var(--cyan-ink)}
+  #tab-design .panel>h2{margin-bottom:6px}
+  /* 工具条：裸「类型/记录」文字节点小字化（无法包裹 → 用 font-size 继承面的近似：
+     select 前的文本节点无法单独选 —— 改为给 toolbar 内 select 加 40px 高与 margin，
+     文本节点视觉上成为小标签的近似处理是给 toolbar 统一 13px 行高） */
+  #tab-design .toolbar{font-size:13px;color:var(--text-sub);gap:8px}
+  #tab-design .toolbar select.field,#tab-design .toolbar select{min-height:40px}
+  #tab-design .toolbar .btn{min-height:40px}
+  #tab-design .toolbar .spacer{flex:1 1 auto}
+  #tab-design .panel>p.hint{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);
+    line-height:1.7}
+  /* 图库空态 */
+  #tab-design .nec-gallery:empty::before{content:"图库加载中，或当前专辑暂无图 —— 点「加载更多」试试";
+    display:block;text-align:center;padding:30px 14px;color:var(--text-muted);font-size:13px;
+    border:1.5px dashed var(--line-strong);border-radius:var(--r-lg);background:var(--surface-2)}
+  /* iframe 容器：细边框 + 圆角下缘（内联 padding:0 保留） */
+  #tab-design .panel:has(>#dsFrame){padding:0}
+  #tab-design #dsFrame{border-top:1px solid var(--line)}
+}
+
+/* ============================================================
+   21 NEC-BOARD · P0（父代理自研 · 纯 CSS，零 DOM/JS 改动）
+   新建表单 label 上置化（手机不挤）/ 看板列与卡片对齐 token / 空态 / 工具条主次。
+   级联坑规避：全部追加在样式表末尾（后写胜），不与 1534 nec-card__edit 先例争峰。
+   ============================================================ */
+@media screen{
+  #tab-nec>.page-purpose{margin:-4px 0 8px}
+  #tab-nec>.page-purpose>span:first-child{font-size:12px;font-weight:700;
+    letter-spacing:.12em;color:var(--cyan-ink)}
+  #tab-nec .panel>h2{margin-bottom:6px}
+
+  /* 新建表单：label 上置 + 控件 44px + 宽度自适应（内联 width 变 max-width） */
+  #tab-nec .form-row{display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin:0 0 12px}
+  #tab-nec .form-row>label{font-size:12.5px;font-weight:600;color:var(--text-sub);
+    display:block;width:100%;margin:0 0 2px}
+  #tab-nec .form-row input,#tab-nec .form-row select{min-height:44px;max-width:100%;
+    width:auto !important;flex:1 1 150px;font-size:16px}
+  #tab-nec .form-row .btn{min-height:44px}
+  #tab-nec .form-row .hint{flex-basis:100%;margin:0}
+
+  /* 看板工具条：筛选 44px、删除勾选右置 danger 44px */
+  #tab-nec .toolbar{gap:8px}
+  #tab-nec #necFilter{min-height:44px}
+  #tab-nec .toolbar:has(#btnNecDel){justify-content:flex-end}
+  #tab-nec .toolbar:has(#btnNecDel)>.btn{min-height:44px}
+
+  /* 看板列头与卡片：token 化（列底 surface-2、卡片白底圆角投影已有，补间距） */
+  #tab-nec .nec-col{border:1px solid var(--line)}
+  #tab-nec .nec-card{box-shadow:var(--shadow-1)}
+
+  /* 空态：看板无任何卡时（四列全空的场景罕见，但列内空态用列自身） */
+  #tab-nec .nec-board:has(.nec-col:not(:has(.nec-card))):not(:has(.nec-card))
+    ~ .hint,
+  #tab-nec .nec-board:empty::before{content:"暂无 NEC 任务 —— 上方表单创建第一条";
+    display:block;text-align:center;padding:30px 14px;color:var(--text-muted);font-size:13px;
+    border:1.5px dashed var(--line-strong);border-radius:var(--r-lg);background:var(--surface-2)}
+
+  /* 桌面：新建列固定 380 */
+  @media (min-width:1400px){
+    #tab-nec .nec-create{width:380px}
+  }
+  /* 手机：新建表单控件通栏（flex 150px 基准已足够），创建按钮全宽 */
+  @media (max-width:600px){
+    #tab-nec .form-row .btn{flex-basis:100%}
+  }
+}
 </style>
 </head>
 <body>
