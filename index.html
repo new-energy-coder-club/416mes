@@ -1791,6 +1791,21 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   :is(#tab-items,#tab-item-work) .itm-toolbar:has(#itmCamera)>.btn{flex:1 1 calc(33.33% - 7px)}
   :is(#tab-items,#tab-item-work) .itm-toolbar>:is(#itmSearchBtn,#itmScanBtn,#itmConfirm){min-height:52px}
 }
+
+/* ---- V2 宏观版式（用户实测 2560：内容左贴边+右侧 1000px 空白 → 加宽并居中）---- */
+@media (min-width:1600px){
+  /* body 是 grid（侧栏+1fr）。grid 项 center 会 fit-content 收缩、stretch 又吃掉 auto margin——
+     正确姿势：定宽 width:min(1560px,100%) + justify-self:center */
+  main{width:min(1560px,100%);max-width:none;justify-self:center}
+}
+@media (min-width:1024px){
+  #tab-item-work>.panel{margin-inline:auto}   /* 880 阅读列居中（覆盖 L10 的左贴边） */
+}
+@media (min-width:900px){
+  /* 查询页搜索 hero 居中（宽屏下输入+按钮不再拉伸全宽） */
+  #tab-items .itm-toolbar:has(>.itm-grow),
+  #tab-items .itm-status{max-width:860px;margin-inline:auto}
+}
 </style>
 </head>
 <body>
