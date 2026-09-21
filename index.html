@@ -2686,6 +2686,65 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   /* P1-a 配套：label 化后保持"桌面 label 左置同行、手机仍上置"。
      块 21 的 width:100% 上置规则只保留给不带 for 的 label（改造后不存在，等于自然退役）。 */
   #tab-nec .form-row>label[for]{width:auto;align-self:center;margin:0}
+
+/* ============================================================
+   23 PAGE-LABEL-V2 · 选择区重构（子代理 page-label-v2.md · 纯 CSS，零 DOM/JS 改动）
+   诊断：.label-list 自带 .panel 类 → ≥1100 三栏网格（05 PAGES 973）同时命中列表容器，
+         把 #recTable 钉死在嵌套 280px 首轨（表格 scrollWidth 544 vs 容器 263）。
+   ① 解开嵌套网格 + 列表列加宽（320@≥1100 / 440@≥1280）
+   ② 行形态两行制（≥561）：第一行 = 勾选 + 码( mono 加粗) + 名称/标题/类型；
+      第二行 = 其余列（规格/库位/说明…）小字灰 + data-th 微标签
+   ③ 空态修正：tbody 改块级后，19 PAGE-LABEL 的空态 ::before 从 table-cell 回块状居中
+   ⚠ 打印域零触碰：不引用 #printSheet/.label/.zonecard/@page/@media print；
+      已实测 Emulation.setEmulatedMedia(print) 下 .label 仍 226.766px=60mm、.label-list 仍 display:none。
+   降级路径：本块整段删除即回现状；②的 data-th 属性选择器不依赖 :has()；
+      flex-basis 55%/45% 的换行配方在任何 ≥561px 宽度下确定性成立（2×45%+gap ≤ 100% ⟺ 容器 ≥100px）。
+   ============================================================ */
+@media screen and (min-width:561px){
+
+  /* ---- ① 根因修复：列表容器不再当网格容器（.label-list 的 .panel 类被 05 PAGES 误命中） ---- */
+  #tab-label .label-list{display:block}
+
+  /* ---- ② 行形态两行制（表转「列表」：thead 隐藏，行=flex 两行） ---- */
+  #tab-label #recTable{display:block}
+  #tab-label #recTable thead{display:none}
+  #tab-label #recTable tbody{display:block}
+  #tab-label #recTable tbody tr{display:flex;flex-wrap:wrap;align-items:center;gap:3px 10px;
+    padding:8px 10px 8px 34px;border:none;border-bottom:1px solid var(--line);
+    border-radius:0;box-shadow:none;position:relative}
+  #tab-label #recTable tbody td{border:none;padding:0;min-width:0;background:transparent}
+  #tab-label #recTable tbody tr:hover{background:var(--surface-hover)}
+  /* 勾选列：绝对定位悬在行左，跨两行垂直居中（触达面=整行，见 P1） */
+  #tab-label #recTable tbody td:first-child{position:absolute;left:10px;top:50%;transform:translateY(-50%)}
+  /* 第一行·主码：data-th 以「码/号」结尾的列（库位码/容器码/物料码/物品码/手册码/工单号/区域码） */
+  #tab-label #recTable td[data-th$="码"],#tab-label #recTable td[data-th="工单号"]{
+    flex:0 1 auto;font-family:var(--font-mono);font-size:12.5px;font-weight:700;
+    color:var(--ink-strong);white-space:nowrap}
+  /* 第一行·描述列：名称/标题/类型（loc·ctn·wip 的「类型」也是主描述） */
+  #tab-label #recTable td[data-th="名称"],#tab-label #recTable td[data-th="标题"],
+  #tab-label #recTable td[data-th="类型"]{
+    flex:1 1 55%;font-weight:600;color:var(--ink-strong);overflow-wrap:anywhere}
+  /* 第二行·其余元数据列：各占 45%，两两成行；唯一落单时 flex-grow 撑满 */
+  #tab-label #recTable tbody td:not(:first-child):not([data-th$="码"]):not([data-th="工单号"])
+    :not([data-th="名称"]):not([data-th="标题"]):not([data-th="类型"]){
+    flex:1 1 45%;display:flex;align-items:baseline;gap:6px;font-size:12px;
+    color:var(--text-muted);overflow-wrap:anywhere}
+  #tab-label #recTable tbody td:not(:first-child):not([data-th$="码"]):not([data-th="工单号"])
+    :not([data-th="名称"]):not([data-th="标题"]):not([data-th="类型"])::before{
+    content:attr(data-th);flex:none;font-size:11px;color:var(--text-muted);opacity:.85}
+
+  /* ---- ③ 空态修正：tbody 块级化后，19 PAGE-LABEL 的 display:table-cell 会退化成匿名表盒 ---- */
+  #recTable tbody:empty::before{display:block;width:100%;text-align:center}
+}
+@media screen and (min-width:1100px){
+  /* 列表列 280→320（1100–1279：预览仍有 ≥261px，60mm 实标 253 需求不被挤压）；
+     用 > 直子选择器只改外层面板，避免再次命中 .label-list.panel */
+  #tab-label>.panel{grid-template-columns:320px minmax(0,1fr) 220px}
+}
+@media screen and (min-width:1280px){
+  /* 主力桌面档：列表 440 → 第二行 元数据 两列一行放得下（ctn 392/loc 364 ≤ 420） */
+  #tab-label>.panel{grid-template-columns:440px minmax(0,1fr) 220px}
+}
 </style>
 </head>
 <body>
