@@ -2294,6 +2294,110 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   #resTable .res-row-actions .btn[data-res-detail],
   #resTable .res-row-actions .btn[data-res-print]{min-height:44px}
 }
+
+/* ============================================================
+   18 WIP-BOARD · P0（子代理 page-wip.md · 纯 CSS，零 DOM/JS 改动）
+   列表工具条主次 / 手机卡内层级 / 详情分区与动作主次 / 空态卡。
+   全部 @media screen；打印域零触碰；wip 无 toc，h3 样式自由。
+   :has() 降级=维持现状（仓库先例 index.html 1148/1506）。
+   ============================================================ */
+@media screen{
+/* ---- W1 页头与列表节奏 ---- */
+#tab-wip>.page-purpose{margin:-4px 0 10px}   /* 与基线(406)一致，仅显式化 */
+#wipListPanel>h2{margin-bottom:8px}
+#tab-wip .toolbar{margin-bottom:10px}
+/* 工具条①：新建=本页唯一大键；hint 让位右置 */
+#tab-wip .toolbar:has(#btnWipNew){margin-bottom:8px}
+#tab-wip .toolbar:has(#btnWipNew) .hint{margin-left:auto}
+#btnWipNew{min-height:48px;padding:0 22px;font-size:15px;font-weight:700}
+/* 摘要 chips=主筛选（现 36px 语义不变），与工具条②形成主/细两级 */
+#tab-wip .wip-summary+.toolbar{margin-top:0}
+/* 工具条②：搜索 grow、刷新右置、统计句降为弱行 */
+#tab-wip .toolbar:has(#wipSearch) #wipSearch{flex:1 1 250px;min-width:0;max-width:420px}
+#tab-wip .toolbar:has(#wipSearch) #btnWipRefresh{margin-left:auto}
+#tab-wip .toolbar:has(#wipSearch) #wipStats{flex:1 1 100%;margin:0;border-top:1px dashed var(--line);
+  padding-top:6px;font-size:12px}
+
+/* ---- W2 桌面表格态（≥561）：密度与数据表语言对齐 12 LEDGER-ARCHIVE ---- */
+@media (min-width:561px){
+  #wipTable th,#wipTable td{padding-block:7px}
+  #wipTable td[data-th="进度"]{min-width:200px}
+  #wipTable .progress{max-width:280px}
+  #wipTable td[data-th="类型"],#wipTable td[data-th="日期"],#wipTable td[data-th="批次"]{color:var(--text-muted)}
+  #wipTable tbody tr:nth-child(even)>td{background:var(--surface-2)}
+  @media (hover:hover){
+    #wipTable tbody tr:hover>td{background:var(--primary-050)}
+  }
+}
+
+/* ---- W3 手机卡内层级（≤560，叠加既有卡化 1367–1381/1511–1516） ---- */
+@media (max-width:560px){
+  /* 状态徽章上提卡右上（res 页同步状态同款先例 1470–1472） */
+  #wipTable tr{position:relative}
+  #wipTable td[data-th="状态"]{position:absolute;top:10px;right:12px;padding:0;border:none;
+    max-width:62%;flex-wrap:wrap;justify-content:flex-end}
+  #wipTable td[data-th="状态"]::before{content:none}
+  /* 类型/日期/批次=档案行弱化；进度=卡内主阅读行强化 */
+  #wipTable td[data-th="类型"],#wipTable td[data-th="日期"],#wipTable td[data-th="批次"]{
+    color:var(--text-muted);font-size:12.5px}
+  #wipTable td[data-th="进度"]{border-top:1px dashed var(--line);margin-top:6px;padding-top:8px;
+    font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+  /* 行内「详情」：通栏唯一动作 → tonal 弱主（对齐 11 LAYOUT-SYSTEM L5 首按钮） */
+  #wipTable td[data-th="操作"] .btn{background:var(--primary-050);color:var(--primary-active);
+    border-color:transparent;box-shadow:none;font-weight:600}
+}
+/* 手机筛选条：统计句/刷新不再挤半宽格（修 1148–1150 grid 流的遗留） */
+@media (max-width:767px){
+  #tab-wip .toolbar:has(#wipSearch) #wipStats{grid-column:1/-1;border-top:0;padding-top:0}
+}
+
+/* ---- W4 空态卡（列表 6133 + 详情流水 6390；迁移表无空行渲染，不受影响） ---- */
+#tab-wip td.empty-row{border:1.5px dashed var(--line-strong);background:var(--surface-2);
+  border-radius:var(--r-lg);padding:28px 16px;font-size:13px;color:var(--text-muted)}
+#tab-wip td.empty-row::before{content:none}      /* 卡态下不吃 data-th 占位 */
+@media (max-width:560px){
+  #tab-wip td.empty-row{display:block}           /* colspan 格在卡态退化为整卡 */
+}
+
+/* ---- W5 详情展开版式（showWipDetail 输出结构固定） ---- */
+/* 页头：crumb 返回键升档 + KPI/进度条归簇 */
+#btnWipBack{min-height:36px}
+@media (max-width:560px){#btnWipBack{min-height:44px}}
+#wipDetailPanel .wip-kpis{margin-bottom:8px}
+#wipDetail>.progress{height:12px;margin:0 0 12px}
+@media (max-width:560px){.wip-kpis{grid-template-columns:repeat(2,1fr)}}   /* 4 卡整齐 2×2 */
+/* 档案行降噪：去 90px 伪表、类型/日期并入一行 muted（.kv 全站多处用，必须 #wipDetail 限域） */
+#wipDetail>.kv{font-size:12.5px;color:var(--text-sub)}
+#wipDetail>.kv b{min-width:0;margin-right:2px;color:var(--text-muted);font-weight:600}
+/* 三节分区条（11 LAYOUT-SYSTEM L1 弱变体；wip 无 toc，无文本锁） */
+#wipDetailPanel h3.detail-section{display:flex;align-items:center;gap:8px;margin:22px 0 10px;
+  font-size:13.5px;font-weight:700;letter-spacing:.04em;color:var(--ink-strong)}
+#wipDetailPanel h3.detail-section::before{content:"";width:3px;height:12px;border-radius:2px;
+  background:var(--cyan-ink);flex:none}
+#wipDetailPanel h3.detail-section::after{content:"";flex:1;height:1px;background:var(--line)}
+/* 详情表斑马纹（与列表/台账同语言） */
+#wipDetailPanel table.grid tbody tr:nth-child(even)>td{background:var(--surface-2)}
+/* 动作条：主键升档、说明降为分隔弱行 */
+#wipDetailPanel .toolbar{row-gap:6px}
+#wipDetailPanel .toolbar>#btnWipExec{min-height:48px;padding:0 22px;font-size:15px;font-weight:700}
+#wipDetailPanel .toolbar>.hint{flex:1 1 100%;margin:0;padding-top:8px;
+  border-top:1px dashed var(--line)}
+/* 手机动作条：主键通栏、关闭半宽 */
+@media (max-width:560px){
+  #wipDetailPanel .toolbar>#btnWipExec{width:100%}
+  #wipDetailPanel .toolbar>#btnWipClose{flex:1 1 calc(50% - 5px);min-height:44px}
+  #wipDetailPanel .toolbar>.hint{flex-basis:100%}
+}
+/* 危险块：密度收紧、删除/作废降权，取消工单保持实红 */
+#wipDetailPanel .wip-danger .toolbar{margin-bottom:0}
+#wipDetailPanel .wip-danger .toolbar .btn{min-height:40px}
+#btnWipDelete,#btnWipLocalOnlyDel{min-height:36px;font-size:13px}
+@media (max-width:560px){
+  #wipDetailPanel .wip-danger .toolbar{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  #wipDetailPanel .wip-danger .toolbar .btn{min-height:44px;width:100%}
+  .danger-reason input{min-height:44px;font-size:16px}
+}
+}
 </style>
 </head>
 <body>
