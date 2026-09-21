@@ -175,9 +175,8 @@ test('captureToken 原样传给 onConfirm，describe 拦截可禁用确定', asy
 test('持续无命中给出可见提示而不是静默（P0-3 分级引导：≥6 帧距离提示，≥18 帧拿远提示）', async () => {
   const { document: d, cam } = setup({ intervalMs: 1, decode: async () => null });
   await cam.open({});
-  await tick(80);
-  const status = d.getElementById('scanCamStatus').textContent;
-  assert.match(status, /请将码放入框内|靠太近了|暂未识别/, '无命中时应给出分级引导或兜底提示');
+  assert.ok(await waitFor(() => /请将码放入框内|靠太近了|暂未识别/.test(d.getElementById('scanCamStatus').textContent)),
+    '无命中时应给出分级引导或兜底提示');
   cam.close('test');
 });
 test('识别后未确认就关闭：onCancel 收到未确认码供调用方提示', async () => {
@@ -214,9 +213,8 @@ test('describe 拒绝时可自定义按钮文案（如「本行已填齐，无�
 test('P0-1 快路径：1920×1080 帧按 frameScale=0.5 降采样产出 960×540', async () => {
   const { cam, sizes } = setupPipeline({ frameScale: 0.5, fullFrameEvery: 4 });
   await cam.open({});
-  await tick(30);
+  assert.ok(await waitFor(() => sizes.length >= 2, 3000), '应至少取帧 2 次，实测 ' + sizes.length);
   cam.close('test');
-  assert.ok(sizes.length >= 2, '应至少取帧 2 次，实测 ' + sizes.length);
   assert.equal(sizes[0], '960x540', '首帧应走快路径 960×540，实测 ' + sizes[0]);
   assert.equal(sizes[1], '960x540', '第 2 帧应走快路径 960×540，实测 ' + sizes[1]);
 });
@@ -224,9 +222,8 @@ test('P0-1 快路径：1920×1080 帧按 frameScale=0.5 降采样产出 960×540
 test('P0-1 慢路径：每 4 帧跑一次全帧 1920×1080 兜小码', async () => {
   const { cam, sizes } = setupPipeline({ frameScale: 0.5, fullFrameEvery: 4 });
   await cam.open({});
-  await tick(60);
+  assert.ok(await waitFor(() => sizes.length >= 5, 3000), '应至少取帧 5 次，实测 ' + sizes.length);
   cam.close('test');
-  assert.ok(sizes.length >= 4, '应至少取帧 4 次，实测 ' + sizes.length);
   assert.equal(sizes[3], '1920x1080', '第 4 帧应走慢路径全帧，实测 ' + sizes[3]);
   assert.equal(sizes[4], '960x540', '第 5 帧应回到快路径，实测 ' + sizes[4]);
 });
@@ -234,9 +231,8 @@ test('P0-1 慢路径：每 4 帧跑一次全帧 1920×1080 兜小码', async () 
 test('P0-1 fullFrameEvery 可调：每 2 帧一次全帧', async () => {
   const { cam, sizes } = setupPipeline({ frameScale: 0.5, fullFrameEvery: 2 });
   await cam.open({});
-  await tick(40);
+  assert.ok(await waitFor(() => sizes.length >= 3, 3000), '应至少取帧 3 次，实测 ' + sizes.length);
   cam.close('test');
-  assert.ok(sizes.length >= 3, '应至少取帧 3 次，实测 ' + sizes.length);
   assert.equal(sizes[1], '1920x1080', '第 2 帧应走慢路径全帧，实测 ' + sizes[1]);
   assert.equal(sizes[2], '960x540', '第 3 帧应回到快路径，实测 ' + sizes[2]);
 });
@@ -244,9 +240,8 @@ test('P0-1 fullFrameEvery 可调：每 2 帧一次全帧', async () => {
 test('P0-1 pipeline:legacy 回归：全部帧走旧全帧路径 1920×1080', async () => {
   const { cam, sizes } = setupPipeline({ pipeline: 'legacy' });
   await cam.open({});
-  await tick(30);
+  assert.ok(await waitFor(() => sizes.length >= 2, 3000), '应至少取帧 2 次，实测 ' + sizes.length);
   cam.close('test');
-  assert.ok(sizes.length >= 2, '应至少取帧 2 次，实测 ' + sizes.length);
   for (const s of sizes) assert.equal(s, '1920x1080', 'legacy 路径应全帧，实测 ' + s);
 });
 
@@ -269,9 +264,8 @@ test('P0-1 注入 capture 时跳过整个内置管线（快/慢路径都不走�
     return { document, cam: cam2, sizes: sizes2 };
   })();
   await cam.open({});
-  await tick(30);
+  assert.ok(await waitFor(() => sizes.length >= 2, 3000), '注入 capture 应被逐帧调用，实测 ' + sizes.length);
   cam.close('test');
-  assert.ok(sizes.length >= 2, '注入 capture 应被逐帧调用，实测 ' + sizes.length);
   for (const s of sizes) assert.equal(s, '1920x1080', '注入 capture 收到原始 video 尺寸，实测 ' + s);
 });
 
@@ -288,9 +282,8 @@ test('P0-1/P0-2 忙碌跳帧：decode 未返回时不重叠调用 decode（inter
     }
   });
   await cam.open({});
-  await tick(80);
+  assert.ok(await waitFor(() => calls >= 2, 3000), '应至少调用 decode 2 次，实测 ' + calls);
   cam.close('test');
-  assert.ok(calls >= 2, '应至少调用 decode 2 次，实测 ' + calls);
   assert.equal(maxOverlap, 1, 'decode 不允许重叠调用（在途跳帧），实测峰值并发 ' + maxOverlap);
 });
 
@@ -377,9 +370,8 @@ test('P0-2 rVFC 同帧（presentedFrames 相同）不重解', async () => {
 test('P0-2 legacyLoop=true 强制旧 setTimeout 循环（不注册 rVFC 回调）', async () => {
   const s = setupRvfc({ legacyLoop: true });
   await s.cam.open({});
-  await tick(30);
+  assert.ok(await waitFor(() => s.counts.decodeCalls >= 2, 3000), 'legacyLoop 应由 setTimeout 驱动解码，实测 ' + s.counts.decodeCalls + ' 次');
   assert.equal(s.rafcRegistrations, 0, 'legacyLoop 下不得注册 rVFC 回调，实测 ' + s.rafcRegistrations + ' 次');
-  assert.ok(s.counts.decodeCalls >= 2, 'legacyLoop 应由 setTimeout 驱动解码，实测 ' + s.counts.decodeCalls + ' 次');
   s.cam.close('test');
 });
 
@@ -506,9 +498,9 @@ test('P0-3 miss≥24 帧且能力含 torch → 给「打开照明」按钮，点
     decode: async () => null
   });
   await cam.open({});
-  await tick(120);   // ≥24 帧 miss
+  assert.ok(await waitFor(() => [...d.querySelectorAll('button')].some(b => /打开照明/.test(b.textContent))),
+    'miss≥24 帧（暗环境）应给出「打开照明」按钮');
   const btn = [...d.querySelectorAll('button')].find(b => /打开照明/.test(b.textContent));
-  assert.ok(btn, 'miss≥24 帧应给出「打开照明」按钮');
   btn.click();
   await tick(5);
   assert.ok(applied.some(c => c.advanced && c.advanced[0] && c.advanced[0].torch === true),
@@ -516,15 +508,23 @@ test('P0-3 miss≥24 帧且能力含 torch → 给「打开照明」按钮，点
   cam.close('test');
 });
 
+/* 轮询直到条件满足或超时（比固定 tick 更抗 CI/负载抖动）。 */
+async function waitFor(fn, timeoutMs = 2000, stepMs = 10) {
+  const t0 = Date.now();
+  for (;;) {
+    if (fn()) return true;
+    if (Date.now() - t0 > timeoutMs) return false;
+    await tick(stepMs);
+  }
+}
+
 test('P0-3 miss≥6 帧分级引导文案：先距离提示，持续 miss 升级拿远提示', async () => {
   const { document: d, cam } = setup({ intervalMs: 1, decode: async () => null });
   await cam.open({});
-  await tick(30);   // ~30 帧 → ≥6 应已提示第一级
-  const s1 = d.getElementById('scanCamStatus').textContent;
-  assert.match(s1, /请将码放入框内|靠太近了|暂未识别/);
-  await tick(60);   // 更多帧 → ≥18 应升级第二级
-  const s2 = d.getElementById('scanCamStatus').textContent;
-  assert.match(s2, /靠太近了|请将码放入框内|暂未识别/);
+  assert.ok(await waitFor(() => /请将码放入框内|暂未识别/.test(d.getElementById('scanCamStatus').textContent)),
+    '≥6 帧 miss 应给出第一级引导');
+  assert.ok(await waitFor(() => /靠太近了/.test(d.getElementById('scanCamStatus').textContent)),
+    '≥18 帧 miss 应升级第二级引导');
   cam.close('test');
 });
 
@@ -548,7 +548,7 @@ test('P0-4 close 后 window.__scanPerf 有完整累计（captureMs/decodeMs/miss
     decode: async () => { n++; return n >= 3 ? { text: 'LOC:L-A', format: '二维码' } : null; }
   });
   await cam.open({});
-  await tick(60);
+  assert.ok(await waitFor(() => n >= 3, 3000), '应至少 decode 3 次，实测 ' + n);
   cam.close('test');
   const p = win.__scanPerf;
   assert.ok(p, 'close 后应发布 __scanPerf');

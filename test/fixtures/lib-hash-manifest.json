@@ -1,6 +1,6 @@
 {
   "APP_VERSION": "2.84.0",
-  "generatedAt": "2026-09-21T10:21:53.187Z",
+  "generatedAt": "2026-09-21T11:45:45.318Z",
   "hashes": {
     "nec-gallery.js?v=2.84.0": "efbb620e319efe9cc7d5107715ae77722ad97b27f7a141ec6c2204e0555ed23b",
     "jsqr.min.js?v=2.84.0": "bc40c8a15196236b2314db0856f72ca0b49980cd5413b8c852a7349f5fee0859",
@@ -12,7 +12,7 @@
     "lib/item-sync.js?v=2.84.0": "20f33b244e444df2fcaf98322f70b91e78190ef8ce76a9778bb93d877410fb16",
     "vendor/zxing-0.21.3.min.js": "d7cc8f69dd70bdcf3ac00c9ae572bf2acb9f4132ba379c72df842e4db918652d",
     "lib/item-barcode.js?v=2.84.0": "f0b6e3c6046be8fe47a8dbbe31ae1e9b2ad995fab3acffd6a8378e76a033c369",
-    "lib/scan-camera.js?v=2.84.0": "bd4a18d0b58f0d76ec5792c966f5df610d93d5244de5fe61f0e9313faf3dfcc8",
+    "lib/scan-camera.js?v=2.84.0": "b215cf14111fee41cb46dae7d7da2b56a47013d9aa845b547f2e27e490e74150",
     "lib/item-link.js?v=2.84.0": "c615e83753d38e5a26ae8bff3fb2d33621ba9bb50826f3519f3d22cba3b36430",
     "lib/item-scan.js?v=2.84.0": "3c901bd577c2330f2dc1c6d7ca7fd957825ad1c241a6b19bd1f1b6113c57b984",
     "lib/item-client.js?v=2.84.0": "b3a838d1513b7bc87805c23901fcafc0b451e18b2bf1df2c784998a19ce6b4f5",
