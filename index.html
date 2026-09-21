@@ -3595,14 +3595,22 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('cl
         if (m && m[1] !== APP_VERSION && !document.getElementById('pgFreshBar')) {
           const bar = document.createElement('div');
           bar.id = 'pgFreshBar';
-          bar.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:9998;background:#7f1d1d;color:#fff;padding:8px 12px;font-size:13px;text-align:center';
-          bar.textContent = '416MES 有新版本 v' + m[1] + '（当前 v' + APP_VERSION + '）—— 请刷新页面（Ctrl+F5）后再用';
+          bar.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:9998;background:#7f1d1d;color:#fff;padding:10px 12px;font-size:13px;text-align:center';
+          bar.textContent = '416MES 有新版本 v' + m[1] + '（当前 v' + APP_VERSION + '）';
+          const b = document.createElement('button');
+          b.textContent = '↻ 立即更新';
+          b.style.cssText = 'margin-left:10px;padding:4px 14px;border:none;border-radius:999px;background:#fff;color:#7f1d1d;font-size:13px;font-weight:700;cursor:pointer';
+          b.addEventListener('click', () => location.reload());
+          bar.appendChild(b);
           document.body.appendChild(bar);
         }
       }).catch(() => {});
     } catch (_) {}
   }
   checkFresh();
+  /* 手机从主屏图标重开=恢复内存里的旧标签页，不发请求、什么修复都到不了 ——
+     切回前台的那一刻立即比对版本（用户实测「改了没效果」的最后一块拼图） */
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkFresh(); });
   setInterval(checkFresh, 30 * 60 * 1000);
 })();
 
