@@ -2478,31 +2478,63 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
 }
 
 /* ============================================================
-   20 DESIGN-LAYOUT · P0（父代理自研 · 纯 CSS，零 DOM/JS 改动）
-   排版工具页：页头节奏 / 工具条对齐 / 图库空态 / iframe 容器。
-   只管 index.html 的 tab-design 段；iframe 内部不在范围。
+   20 DESIGN-LAYOUT · P0（tab-design 排版工具页 · 纯 CSS，零 DOM/JS 改动）
+   依据：.ui-research/page-design.md。复用 12 LEDGER-ARCHIVE / 19 PAGE-LABEL
+   已上线语言：页头眉题化 / 工具条主次 / L4 空框空态。
+   ① L0 页头：page-purpose 眉题化 + h2 微缝隙 + panel1 用法 hint 卡片化
+   ② 工具条主次：复制排版文本=主键 40px（仅 ≥768 桌面升档，手机 44px 底线不动）
+   ③ 空记录态：「（无记录）」option（renderDesign 4462 写入）为精确信号 → 引导行
+   ④ 图库：触屏常显「加入画板」徽标 + 空清单 L4 空框 + 圆角 token 对齐
+   ⑤ 画板面板：≥900 纯 CSS 标题条；≤899 画板被 08 块隐藏时整面板一并隐藏
+   范围红线：iframe 内部 UI 不碰；#dsFrame 内联 height 不对抗；
+   打印域零触碰；id 零改动。:has() 降级 = 对应规则整体不生效，回现状无破版。
    ============================================================ */
 @media screen{
-  #tab-design>.page-purpose{margin:-4px 0 8px}
-  #tab-design>.page-purpose>span:first-child{font-size:12px;font-weight:700;
-    letter-spacing:.12em;color:var(--cyan-ink)}
+  /* ---- ① L0 页头（对齐 12 LEDGER-ARCHIVE 1851 同款刻度） ---- */
+  #tab-design>.page-purpose{margin:-4px 0 8px;font-size:12px;font-weight:700;
+    color:var(--cyan-ink)}
+  #tab-design>.page-purpose>span:first-child{letter-spacing:.12em}
   #tab-design .panel>h2{margin-bottom:6px}
-  /* 工具条：裸「类型/记录」文字节点小字化（无法包裹 → 用 font-size 继承面的近似：
-     select 前的文本节点无法单独选 —— 改为给 toolbar 内 select 加 40px 高与 margin，
-     文本节点视觉上成为小标签的近似处理是给 toolbar 统一 13px 行高） */
-  #tab-design .toolbar{font-size:13px;color:var(--text-sub);gap:8px}
-  #tab-design .toolbar select.field,#tab-design .toolbar select{min-height:40px}
-  #tab-design .toolbar .btn{min-height:40px}
-  #tab-design .toolbar .spacer{flex:1 1 auto}
-  #tab-design .panel>p.hint{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);
-    line-height:1.7}
-  /* 图库空态 */
-  #tab-design .nec-gallery:empty::before{content:"图库加载中，或当前专辑暂无图 —— 点「加载更多」试试";
-    display:block;text-align:center;padding:30px 14px;color:var(--text-muted);font-size:13px;
+  #tab-design .panel>.toolbar{margin-bottom:10px}
+  /* panel1 直系用法 hint（3044「用法：选记录 → …」）→ 浅底说明条 */
+  #tab-design .panel>p.hint{margin:0;padding:9px 12px;background:var(--surface-2);
+    border-radius:var(--r-md);font-size:12.5px;line-height:1.7;color:var(--text-sub)}
+
+  /* ---- ② 工具条主次（收 ≥768：不与手机 .btn.small 44px(1319)、select 44px(1157) 相交） ---- */
+  @media (min-width:768px){
+    #btnDsCopy{min-height:40px;padding:0 16px;font-size:14px;font-weight:700}
+    #tab-design .toolbar>select{min-height:38px}
+  }
+
+  /* ---- ③ 空记录态：option[value=""] 仅在 recs.length===0 时存在（4462），信号精确 ---- */
+  #tab-design .toolbar:has(#dsRec>option[value=""])::after{
+    flex:1 1 100%;content:"当前类型暂无记录 —— 换个类型，或先去「建档管理 / 库存工单」建记录";
+    font-size:12px;font-weight:600;color:var(--doing-fg)}
+  #tab-design #dsRec:has(>option[value=""]){color:var(--text-muted)}
+
+  /* ---- ④ 图库（1055 基础块之上的增量；配色不动，只对齐 token 与触屏可达） ---- */
+  #tab-design .nec-gallery{gap:10px}
+  #tab-design .nec-gallery .g-item{border-radius:var(--r-md)}
+  @media screen and (hover:none){
+    #tab-design .nec-gallery .g-item .g-dl{opacity:1}  /* 触屏无 hover：徽标常显（g-item 整体可点） */
+  }
+  /* 空清单（renderGalGrid 4526 注入的唯一 span.hint）→ L4 空框（对齐 19 块预览空态） */
+  #galGrid>.hint:only-child{display:flex;align-items:center;justify-content:center;
+    min-height:120px;margin:8px 0 0;text-align:center;font-size:13px;
     border:1.5px dashed var(--line-strong);border-radius:var(--r-lg);background:var(--surface-2)}
-  /* iframe 容器：细边框 + 圆角下缘（内联 padding:0 保留） */
-  #tab-design .panel:has(>#dsFrame){padding:0}
-  #tab-design #dsFrame{border-top:1px solid var(--line)}
+
+  /* ---- ⑤ 画板面板标题条（3058 裸 panel；≥900 才有画板，08 块 1355 口径） ---- */
+  @media (min-width:900px){
+    #tab-design>.panel:has(>#dsFrame)::before{
+      content:"画板 · Zonlin 自动排版工具（复制 / 下载的素材已在上方就绪）";
+      display:block;padding:8px 14px;font-size:12px;font-weight:700;letter-spacing:.04em;
+      color:var(--text-sub);background:var(--surface-2);border-bottom:1px solid var(--line)}
+  }
+}
+/* ---- ⑤-b ≤899：08 块已 display:none 掉 #dsFrame，裸 panel 只剩一条 2px 边框残线；
+   用 :has 一并隐藏整面板。:has 不支持时回现状（残线无害）。 ---- */
+@media screen and (max-width:899px){
+  #tab-design>.panel:has(>#dsFrame){display:none}
 }
 
 /* ============================================================
@@ -11741,6 +11773,7 @@ function mountItemPage() {
 }
 load(); restoreSyncUiState(); renderDataStoreHint(); renderLedger(); renderRes(); refreshMatDatalist(); refreshMemberDatalist(); refreshItemCodeDatalist(); renderNec(); renderOperators(); renderTxns(); renderWip(); renderCtxBar(); renderStatusBar();
 mountItemPage();   /* 默认落地页=items（用户指定「一开始是查询」）：查询页 UI 由 ItemUI 驱动，启动必须挂载（幂等，深链场景已是挂载态时为 no-op） */
+if (document.querySelector('#tab-design.on')) { renderDesign(); renderGalAlbums(); }   /* 深链直载 #design：applyHash 早于异步 load()，首渲染曾拿到 null state 抛错中断（子代理实测复现）——就绪后补渲染 */
 stocktakeSyncBanner();   // G2：盘点会话随 state 持久化 —— load() 之后才能做刷新恢复（脚本装载时 state 还是 null）
 // 阶段13：为初始当前页签补 aria-current（深链进入时也要正确）
 (function () { const on = document.querySelector('nav.tabs button.on'); if (on) on.setAttribute('aria-current', 'page'); })();
