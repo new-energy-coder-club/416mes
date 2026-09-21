@@ -1677,6 +1677,120 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
     box-shadow:var(--shadow-btn);font-weight:700}
   #itmConflictRefresh{grid-column:1/-1;width:100%;min-height:46px}
 }
+
+/* ============================================================
+   11 LAYOUT-SYSTEM · P0（子代理 layout-system.md · 纯 CSS，零 DOM/JS 改动）
+   页头节奏 / 分区条 / 工具条主次 / 空态 / 结果卡 / 步骤卡 / 待处理卡。
+   全部 @media screen；打印域零触碰；不新增 fixed 元素（不打架 09 PAGE-TOC FAB）。
+   原型期已验证：选择器与真实 DOM 逐一命中；:not(.itm-control)/:empty 单列两 bug 已修。
+   ============================================================ */
+@media screen{
+/* ---- L0 页头节奏：对齐 10 REGISTER-REDESIGN ---- */
+:is(#tab-items,#tab-item-work) .itm-eyebrow{font-size:12px;font-weight:700;letter-spacing:.12em;
+  color:var(--cyan-ink);margin:0 0 6px}
+:is(#tab-items,#tab-item-work) .panel>h2{margin-bottom:4px}
+:is(#tab-items,#tab-item-work) .panel>h2+.hint{margin:0 0 18px;font-size:12.5px;line-height:1.6}
+
+/* ---- L1 分区条（步骤头，强变体；h3 文本冻结=toc 标签来源） ---- */
+#tab-item-work .panel>h3{display:flex;align-items:center;gap:8px;margin:24px 0 12px;
+  font-size:14px;font-weight:700;letter-spacing:.04em;color:var(--ink-strong)}
+#tab-item-work .panel>h3::before{content:"";width:3px;height:13px;border-radius:2px;
+  background:var(--cyan-ink);flex:none}
+#tab-item-work .panel>h3::after{content:"";flex:1;height:1px;background:var(--line)}
+
+/* ---- L2 工具条：聚簇 + 主次 ---- */
+:is(#tab-items,#tab-item-work) .itm-toolbar{margin:14px 0 0}
+:is(#tab-items,#tab-item-work) .itm-toolbar+.itm-toolbar{margin-top:10px}
+:is(#tab-items,#tab-item-work) .itm-toolbar:has(:is(#itmSearchCamera,#itmCamera)){margin-top:8px}
+:is(#tab-items,#tab-item-work) .itm-toolbar:has(:is(#itmSearchCamera,#itmCamera))>.btn{min-height:44px;font-size:13px;font-weight:600}
+:is(#tab-items,#tab-item-work) .itm-toolbar:has(#itmRowDelete){margin-top:0;justify-content:flex-end}
+:is(#tab-items,#tab-item-work) .itm-toolbar:has(#itmRowDelete)>.btn{flex:0 1 auto;min-height:44px;font-size:13px}
+:is(#tab-items,#tab-item-work) .itm-toolbar>:is(#itmSearchBtn,#itmScanBtn,#itmConfirm){font-size:15px;font-weight:700}
+
+/* ---- L3 表单标签（裸 label 统一；:not 防止覆盖 .itm-control 的纵向 flex） ---- */
+:is(#tab-items,#tab-item-work) .panel>label:not(.itm-control){display:block;font-size:12.5px;font-weight:600;
+  color:var(--text-sub);margin:14px 0 0}
+:is(#tab-items,#tab-item-work) .itm-control{gap:6px;font-size:13px;font-weight:600;color:var(--text-sub)}
+
+/* ---- L4 空态（纯 CSS） ---- */
+#itmResults:empty{grid-template-columns:1fr}
+#itmResults:empty::before{content:"输入编码，或点「相机查询」对准标签\A前缀：LOC: 库位 · CTN: 容器 · ITM: 物品";
+  white-space:pre-line;display:block;text-align:center;padding:34px 16px;color:var(--text-muted);
+  font-size:13px;line-height:2;border:1.5px dashed var(--line-strong);border-radius:var(--r-lg);
+  background:var(--surface-2)}
+#itmPending>p:only-child{margin:0;padding:22px 16px;text-align:center;border:1.5px dashed var(--line-strong);
+  border-radius:var(--r-lg);background:var(--surface-2);color:var(--text-muted);font-size:13px}
+
+/* ---- L5 结果卡（search()/detail() 输出结构固定，故 p 序稳定） ---- */
+:is(#tab-items,#tab-item-work) .itm-result-card{padding:14px 16px;transition:box-shadow .15s ease,border-color .15s ease}
+@media screen and (hover:hover){
+  :is(#tab-items,#tab-item-work) .itm-result-card:hover{box-shadow:var(--shadow-2);border-color:var(--line-strong)}
+}
+:is(#tab-items,#tab-item-work) .itm-result-card>h3{font-size:15px;line-height:1.5;margin:0 0 8px}
+:is(#tab-items,#tab-item-work) .itm-result-card>p:first-of-type{display:inline-block;margin:0;
+  font-family:var(--font-mono);font-size:13px;font-weight:700;color:var(--ink-strong);
+  background:var(--surface-3);border-radius:var(--r-sm);padding:2px 8px}
+:is(#tab-items,#tab-item-work) .itm-result-card>p:nth-of-type(2){margin:8px 0 2px;font-size:12.5px;color:var(--text-sub)}
+:is(#tab-items,#tab-item-work) .itm-result-card>.btn{margin:10px 8px 0 0}
+:is(#tab-items,#tab-item-work) .itm-result-card>.btn:first-of-type{border-color:transparent;
+  background:var(--primary-050);color:var(--primary-active);box-shadow:none}
+@media screen and (hover:hover){
+  :is(#tab-items,#tab-item-work) .itm-result-card>.btn:first-of-type:hover{background:var(--primary-100);filter:none}
+}
+@media (min-width:900px){
+  #itmResults{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #itmResults:has(>.itm-result-card:only-child){grid-template-columns:1fr}
+}
+
+/* ---- L6 状态条（statusAction 注入的引导按钮通栏） ---- */
+:is(#tab-items,#tab-item-work) .itm-status{background:var(--surface-2);border:1px solid var(--line);
+  border-radius:var(--r-md);font-size:13px;line-height:1.6;color:var(--ink-strong);padding:10px 14px;margin:14px 0 0}
+:is(#tab-items,#tab-item-work) .itm-status>.btn{width:100%;min-height:46px;margin:8px 0 0}
+
+/* ---- L7 步骤卡 + chips ---- */
+#tab-item-work .itm-step{border:1px solid var(--primary-100);border-left:3px solid var(--color-primary);
+  border-radius:var(--r-lg);background:linear-gradient(90deg,var(--primary-050),var(--surface) 72%);
+  padding:14px 16px;box-shadow:var(--shadow-1);margin-top:14px}
+#tab-item-work .itm-step>p{margin:0;font-size:13px;color:var(--text-sub);line-height:1.6}
+#tab-item-work .itm-step>p:first-child{font-size:14px;font-weight:700;color:var(--ink-strong)}
+#tab-item-work .itm-step>ol{margin:12px 0 2px}
+#tab-item-work .itm-step li{display:inline-flex;align-items:center;min-height:34px;padding:4px 12px;
+  border:1px solid var(--line);border-radius:var(--r-pill);background:var(--surface);
+  color:var(--text-muted);font-size:13px}
+#tab-item-work .itm-step li[aria-current=step]{border-color:var(--color-primary);background:var(--primary-050);
+  color:var(--primary-active);font-weight:700}
+#tab-item-work .itm-step>p:last-child{margin-top:10px;padding-top:10px;border-top:1px dashed var(--primary-100);
+  color:var(--primary-active);font-weight:600}
+
+/* ---- L8 待处理卡（按钮序被测试锁定：[0]=主键 → :first-of-type 恰好对齐） ---- */
+.itm-pending-summary{display:inline-block;font-size:12.5px;font-weight:600;color:var(--text-sub);
+  background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-pill);padding:5px 12px;
+  margin:0 0 4px}
+#itmPending .itm-result-card{display:flex;flex-direction:column;align-items:stretch}
+#itmPending .itm-result-card>.btn{width:100%;margin:8px 0 0}
+#itmPending .itm-result-card>.btn:first-of-type{border-color:transparent;color:#fff;
+  background:linear-gradient(180deg,var(--primary-bright) 0%,var(--color-primary) 55%,#1C66C2 100%);
+  box-shadow:var(--shadow-btn);font-weight:700;min-height:48px}
+@media screen and (hover:hover){
+  #itmPending .itm-result-card>.btn:first-of-type:hover{filter:brightness(1.06)}
+}
+#itmPending .itm-result-card>p:first-of-type{align-self:flex-start}
+@media (min-width:900px){#itmPending{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* ---- L9 尾注面板（安静的结束；文本冻结不动） ---- */
+#tab-item-work .panel:has(>p.hint:only-child){background:transparent;border:1px dashed var(--line);
+  box-shadow:none;padding:10px 14px;text-align:center}
+
+/* ---- L10 阅读列（向导/表单页，桌面；查询页不适用） ---- */
+@media (min-width:1024px){
+  #tab-item-work>.panel{max-width:880px;margin-left:0}
+  :is(#tab-items,#tab-item-work) .itm-toolbar>:is(#itmSearchBtn,#itmScanBtn,#itmConfirm){min-height:48px}
+}
+}
+@media screen and (max-width:600px){
+  :is(#tab-items,#tab-item-work) .itm-toolbar:has(#itmCamera)>.btn{flex:1 1 calc(33.33% - 7px)}
+  :is(#tab-items,#tab-item-work) .itm-toolbar>:is(#itmSearchBtn,#itmScanBtn,#itmConfirm){min-height:52px}
+}
 </style>
 </head>
 <body>
