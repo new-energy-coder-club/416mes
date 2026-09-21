@@ -3494,6 +3494,11 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('cl
     });
   }
   window.addEventListener('resize', pgTocPlaceFabs);
+  /* 头部高度会异步变化（「飞书真源已连接」徽标渲染后换行长高）——
+     高度一变 FAB 的 fixed top 就过期，被压在深蓝头部底下（蓝对蓝≈隐形，用户实测「目录消失」）。
+     ResizeObserver 盯住头部，高度变化即重新放置。 */
+  const _hdr = document.querySelector('header');
+  if (_hdr && window.ResizeObserver) new ResizeObserver(pgTocPlaceFabs).observe(_hdr);
 
   function pgTocCloseAll() {
     document.querySelectorAll('.pg-toc.is-open').forEach(p => p.classList.remove('is-open'));
