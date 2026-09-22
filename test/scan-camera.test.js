@@ -1918,7 +1918,7 @@ test('2.94 项 2：sessionStorage 预置标记 → 兼容模式禁用 worker + �
   video.play = async () => {};
   const track = { stop() {} };
   const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
-  const store = { 'mes.scanActive': '1' };
+  const store = { 'mes.scanStage': '1' };
   const fakeSS = {
     getItem: k => (k in store ? store[k] : null),
     setItem: (k, v) => { store[k] = String(v); },
@@ -1940,7 +1940,7 @@ test('2.94 项 2：sessionStorage 预置标记 → 兼容模式禁用 worker + �
   assert.equal(workerConstructed, false, '兼容模式不得构造 worker');
   assert.match(document.getElementById('scanCamHint').textContent, /兼容模式/, '提示区应显示兼容模式文案');
   cam.close('test');
-  assert.equal(store['mes.scanActive'], undefined, 'close() 应清除崩溃标记');
+  assert.equal(store['mes.scanStage'], undefined, 'close() 应清除崩溃标记');
 });
 
 /* 项 2：无标记 → 全功能（worker 正常构造）；sessionStorage 抛错 → 静默。 */
@@ -1977,6 +1977,146 @@ test('2.94 项 2：无标记全功能 + sessionStorage 抛错静默', async () =
   });
   await cam.open({});
   assert.equal(workerConstructed, true, '无标记且 sessionStorage 抛错时应正常构造 worker（机制静默跳过）');
+  assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 3000), '应正常出卡');
+  cam.close('test');
+});
+
+/* ================= 2.96：崩溃自愈 v2（stage 三态 + 标记前置） ================= */
+
+function makeSS(store) {
+  return {
+    getItem: k => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = String(v); },
+    removeItem: k => { delete store[k]; }
+  };
+}
+
+/* 标记前置：open 崩在 getUserMedia（reject）→ 标记已写入且值='1'。 */
+test('2.96：标记前置 —— getUserMedia reject 时 mes.scanStage 已写入 1', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.play = async () => {};
+  const store = {};
+  const win = Object.assign({}, document.defaultView, { sessionStorage: makeSS(store) });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => { throw new Error('boom'); } },
+    intervalMs: 2, legacyLoop: true
+  });
+  await cam.open({});
+  assert.equal(store['mes.scanStage'], '1', '崩在取流阶段标记也应已写入（前置），实测 ' + store['mes.scanStage']);
+  cam.close('test');
+});
+
+/* stage=1：兼容模式（worker 未构造 + hint 文案 + 主线程链出卡）；clean close → key 清除。 */
+test('2.96：stage=1 兼容模式 —— worker 未构造、hint 提示、clean close 归零', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 640; video.videoHeight = 480;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const store = { 'mes.scanStage': '1' };
+  let workerConstructed = false;
+  class FakeWorker { constructor() { workerConstructed = true; } postMessage() {} terminate() {} }
+  const win = Object.assign({}, document.defaultView, { Worker: FakeWorker, sessionStorage: makeSS(store) });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1,
+    decodeAll: async () => []
+  });
+  await cam.open({});
+  assert.equal(workerConstructed, false, 'stage=1 不得构造 worker');
+  assert.match(document.getElementById('scanCamHint').textContent, /兼容模式/, 'hint 应提示兼容模式');
+  cam.close('test');
+  assert.equal(store['mes.scanStage'], undefined, 'clean close 应清除 stage 标记');
+});
+
+/* stage=2：不调 getUserMedia、err 文案、关闭后 key 仍在；「仍要尝试」→ 归零 + getUserMedia 被调。 */
+test('2.96：stage=2 拦截 —— 不取流、引导文案、关闭不归零、仍要尝试脱困', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.play = async () => {};
+  const store = { 'mes.scanStage': '2' };
+  let gUMCalls = 0;
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const win = Object.assign({}, document.defaultView, { sessionStorage: makeSS(store) });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => { gUMCalls++; return stream; } },
+    intervalMs: 2, legacyLoop: true
+  });
+  await cam.open({});
+  assert.equal(gUMCalls, 0, 'stage≥2 不得调用 getUserMedia，实测 ' + gUMCalls);
+  assert.match(document.getElementById('scanCamErr').textContent, /无法使用相机扫码|连续异常退出/, 'err 应显示引导文案');
+  /* 关闭（拦截路径不算 clean close → key 保持）。 */
+  cam.close('test');
+  assert.equal(store['mes.scanStage'], '2', 'stage≥2 拦截路径关闭后 key 应保持不归零（防崩溃循环），实测 ' + store['mes.scanStage']);
+  /* 「仍要尝试」→ 归零 + 重新 open（全功能取流）。 */
+  const retry = [...document.querySelectorAll('#scanCamOverlay button')].find(b => /仍要尝试/.test(b.textContent));
+  assert.ok(retry, '应有「仍要尝试打开相机」按钮');
+  retry.click();
+  await tick(30);
+  assert.equal(store['mes.scanStage'], '1', '仍要尝试后重新 open 应写入新标记（前置），实测 ' + store['mes.scanStage']);
+  assert.ok(gUMCalls >= 1, '仍要尝试后应调用 getUserMedia（全功能），实测 ' + gUMCalls);
+  cam.close('test');
+});
+
+/* 迁移：旧 key mes.scanActive → attach 后旧 key 被清理。 */
+test('2.96：旧 key mes.scanActive 迁移清理', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const store = { 'mes.scanActive': '1' };
+  const win = Object.assign({}, document.defaultView, { sessionStorage: makeSS(store) });
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true
+  });
+  assert.equal(store['mes.scanActive'], undefined, 'attach 应清理旧 key mes.scanActive');
+  cam.close('test');
+});
+
+/* sessionStorage 抛错 → 全功能、零异常（stage 机制整体跳过）。 */
+test('2.96：sessionStorage 抛错 → 机制静默跳过、全功能', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 640; video.videoHeight = 480;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  let workerConstructed = false;
+  class FakeWorker { constructor() { workerConstructed = true; this.onmessage = null; } postMessage(p) { const id = p.id; setTimeout(() => this.onmessage && this.onmessage({ data: { id, hits: [{ text: 'LOC:SS', format: '二维码' }] } }), 1); } terminate() {} }
+  const create = document.createElement.bind(document);
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: () => {},
+        getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      });
+    }
+    return elc;
+  };
+  const win = Object.assign({}, document.defaultView, {
+    Worker: FakeWorker,
+    sessionStorage: { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } }
+  });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1
+  });
+  await cam.open({});
+  assert.equal(workerConstructed, true, 'sessionStorage 抛错时应全功能（worker 正常构造）');
   assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 3000), '应正常出卡');
   cam.close('test');
 });
