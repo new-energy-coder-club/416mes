@@ -377,3 +377,36 @@ test('manual item code is canonicalized before enqueue (wp-ts-999 → WP-TS-999,
  assert.equal(queued.entity.code,'WP-TS-777','入队前规范形化，服务端必收且短链可用');
  assert.match(d.getElementById('itmRegisterResult').textContent,/已规范为标准写法/);
 });
+
+/* ================= BUG-C/D 修复回归（全链路实测报告 v3.1.1 发现） =================
+   BUG-C：批量模式拒裸码，与 placeholder「WP-…」承诺矛盾——裸码按台账归属推断类型。
+   BUG-D：批量命令入队后批量模式不退出，旧面板/sticky 遮挡单行作业。 */
+function setupBatchCD(){const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document}=parseHTML(html);let n=0;const state={locations:[{code:'L-A',status:'active'}],containers:[{code:'C-A',loc:'L-A',status:'active',version:2}],items:[{code:'I-P',name:'part',status:'pending',version:0}]};let enqueued=null;const persistence={async enqueue(r){enqueued=r;},async saveDraft(){},async recover(){return{drafts:[],commands:[]}}};const page=UI.mount({document,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>[],id:()=>'cd-'+(++n)});const fill=async t=>{document.getElementById('itmCode').value=t;document.getElementById('itmScanBtn').click();await tickN();};return {document,state,page,fill,get enqueued(){return enqueued}};}
+
+test('BUG-C 批量模式裸码兜底：裸库位/容器码锚定 + 裸 WP 码入批 + 未建档裸码仍拒',async()=>{
+ const {document:d,page,fill}=setupBatchCD();
+ d.getElementById('itmBatchStart-receive').click();await tickN();
+ await fill('L-A');                                    /* 裸库位码（无 LOC: 前缀） */
+ assert.equal(page.scan.batchState()._loc.code,'L-A');
+ await fill('C-A');                                    /* 裸容器码 */
+ assert.equal(page.scan.batchState().anchor.loc,'L-A');
+ assert.equal(page.scan.batchState().anchor.ctn,'C-A');
+ page.scan.setBatchQty(1);
+ await fill('i-p');                                    /* 裸物品码（小写也命中） */
+ assert.match(d.getElementById('itmStatus').textContent,/I-P 已入批/);
+ await fill('NOPE-404');                               /* 未建档裸码仍明确拒绝 */
+ assert.match(d.getElementById('itmStatus').textContent,/无法识别编码/);
+});
+
+test('BUG-D 批量提交入队后自动退出批量模式，单行作业界面恢复',async()=>{
+ const {document:d,page,fill,enqueued:_e}=setupBatchCD();
+ d.getElementById('itmBatchStart-receive').click();await tickN();
+ await fill('LOC:L-A');await fill('CTN:C-A');
+ page.scan.setBatchQty(1);
+ await fill('ITM:I-P');
+ d.getElementById('itmConfirm').click();await tickN();   /* 批量模式下 = 提交本批 */
+ assert.equal(page.scan.batchState(),null,'命令入队后批量会话必须结束');
+ assert.match(d.getElementById('itmStatus').textContent,/已退出批量模式/);
+ assert.equal(d.getElementById('itmConfirm').textContent,'确认本行，保存待提交','确认键恢复单行语义');
+ assert.equal(d.getElementById('itmBatchAbandon').style.display,'none','放弃本批按钮收起');
+});
