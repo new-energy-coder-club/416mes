@@ -1774,7 +1774,8 @@ test('2.94 项 1：原生 miss 时 wasm fire-and-forget（节流 250ms + 在途�
     }
     return elc;
   };
-  /* 假原生：恒 miss。假 worker：decode 可控（第 1 次调用挂起，放行后返回命中）。 */
+  /* 假原生：恒 miss。autoApproach:false 关闭 3.1 推近扫描/中心裁切（防其
+     decodeAllVia 抢本测试的 worker 调用计数）。 */
   const FakeBD = Object.assign(function () {
     return { detect: async () => [] };
   }, { getSupportedFormats: () => ['qr_code'] });
@@ -1801,7 +1802,7 @@ test('2.94 项 1：原生 miss 时 wasm fire-and-forget（节流 250ms + 在途�
   const cam = ScanCamera.attach({
     document, win,
     mediaDevices: { getUserMedia: async () => stream },
-    intervalMs: 2, legacyLoop: true, voteThreshold: 1
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1, autoApproach: false
   });
   await cam.open({});
   /* 等首帧 wasm 启动（原生 miss → fire-and-forget）。 */
@@ -2350,10 +2351,11 @@ test('2.99 项 1b：zoom 能力存在 → 脉冲/回退/限 2 次', async () => 
   video.videoWidth = 1920; video.videoHeight = 1080;
   video.play = async () => {};
   const zoomCalls = [];
+  let curZoom = 1;   // 有状态：getSettings 返回上次 applyConstraints 的值
   const track = {
     stop() {},
-    getSettings: () => ({ zoom: 1 }),
-    applyConstraints: c => { zoomCalls.push(c.advanced[0].zoom); return Promise.resolve(); }
+    getSettings: () => ({ zoom: curZoom }),
+    applyConstraints: c => { curZoom = c.advanced[0].zoom; zoomCalls.push(curZoom); return Promise.resolve(); }
   };
   const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
   const create = document.createElement.bind(document);
@@ -2374,7 +2376,8 @@ test('2.99 项 1b：zoom 能力存在 → 脉冲/回退/限 2 次', async () => 
   const cam = ScanCamera.attach({
     document, win,
     mediaDevices: { getUserMedia: async () => stream },
-    intervalMs: 2, legacyLoop: true, voteThreshold: 1
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1,
+    autoApproach: false   // 3.1：关闭推近扫描，本例只测对焦脉冲
   });
   await cam.open({});
   /* 注入 camCaps：通过 getUserMedia 后 applyCameraEnhancements 读 track.getCapabilities。 */
@@ -2382,16 +2385,14 @@ test('2.99 项 1b：zoom 能力存在 → 脉冲/回退/限 2 次', async () => 
   /* 重新 open 让能力探测生效。 */
   cam.close('reopen');
   await cam.open({});
-  await tick(200);   // ≥12 miss（intervalMs=2）+ ≥2s？openAt 重置——脉冲需 ≥2s，200ms 不够。
-  /* 推进伪时间：直接等 2.2s。 */
+  await tick(200);
   await tick(2900);   // 脉冲最早 2s 触发 + 700ms 回退
   cam.close('test');
-  /* 断言：至少一次脉冲（zoom>1），700ms 后回退（zoom=1）。 */
-  const pumped = zoomCalls.filter(z => z > 1);
+  /* 断言：脉冲特征 = 1<z<1.4。 */
+  const pumped = zoomCalls.filter(z => z > 1 && z < 1.4);
   const restored = zoomCalls.filter(z => z === 1);
   assert.ok(pumped.length >= 1, '应有脉冲放大调用，实测 ' + JSON.stringify(zoomCalls));
   assert.ok(restored.length >= 1, '应有回退调用，实测 ' + JSON.stringify(zoomCalls));
-  /* 每 miss 段限 2 次：脉冲次数 ≤2（单段内）。 */
   assert.ok(pumped.length <= 2, '单 miss 段脉冲应 ≤2 次，实测 ' + pumped.length);
 });
 
@@ -2739,4 +2740,188 @@ test('3.0 项 2b：连续 3 个 ok:false → status 显示 action 文案', async
   assert.ok(await waitFor(() => /类型不符，请重扫/.test(document.getElementById('scanCamStatus').textContent), 3000),
     '连续 3 个 ok:false 应显示 action 文案，实测 ' + document.getElementById('scanCamStatus').textContent);
   cam.close('test');
+});
+
+/* ================= 3.1：miss 渐进光学推近 + 中心裁切放大重解 ================= */
+
+/* 项 1：16 miss + zoom 能力 → ×1.5 → +1.2s ×2.0 → +1.2s 回 1×；hit 打断停当前。 */
+test('3.1 项 1：变焦扫描序列 ×1.5→×2.0→回 1×', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 1920; video.videoHeight = 1080;
+  video.play = async () => {};
+  const zoomCalls = [];
+  let curZoom = 1;
+  const track = {
+    stop() {},
+    getSettings: () => ({ zoom: curZoom }),
+    getCapabilities: () => ({ zoom: { min: 1, max: 4 }, torch: false }),
+    applyConstraints: c => { curZoom = c.advanced[0].zoom; zoomCalls.push(curZoom); return Promise.resolve(); }
+  };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const create = document.createElement.bind(document);
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: () => {},
+        getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      });
+    }
+    return elc;
+  };
+  const FakeBD = Object.assign(function () {
+    return { detect: async () => [] };   // 恒 miss
+  }, { getSupportedFormats: () => ['qr_code'] });
+  const win = Object.assign({}, document.defaultView, { BarcodeDetector: FakeBD });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1
+  });
+  await cam.open({});
+  /* 等 ×1.5（miss≥16 且 ≥3s 冷却——openAt 起算，真时间约 3s+）。 */
+  assert.ok(await waitFor(() => zoomCalls.includes(1.5), 8000), '应触发 ×1.5，实测 ' + JSON.stringify(zoomCalls));
+  /* status 可能被下一帧 missGuide 覆盖 —— 用 waitFor 重试匹配。 */
+  assert.ok(await waitFor(() => /自动拉近/.test(document.getElementById('scanCamStatus').textContent), 1500),
+    '推近期间应显示引导文案，实测 ' + document.getElementById('scanCamStatus').textContent);
+  /* +1.2s → ×2.0。 */
+  assert.ok(await waitFor(() => zoomCalls.includes(2), 8000), '应触发 ×2.0，实测 ' + JSON.stringify(zoomCalls));
+  /* +1.2s → 回 1×。 */
+  assert.ok(await waitFor(() => zoomCalls.filter(z => z === 1).length >= 1, 8000), '序列完应回 1×，实测 ' + JSON.stringify(zoomCalls));
+  cam.close('test');
+});
+
+/* 项 1b：hit 打断 —— 停当前 zoom 不再继续升。 */
+test('3.1 项 1b：hit 打断推近扫描，停当前 zoom', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 1920; video.videoHeight = 1080;
+  video.play = async () => {};
+  const zoomCalls = [];
+  let curZoom = 1;
+  const track = {
+    stop() {},
+    getSettings: () => ({ zoom: curZoom }),
+    getCapabilities: () => ({ zoom: { min: 1, max: 4 }, torch: false }),
+    applyConstraints: c => { curZoom = c.advanced[0].zoom; zoomCalls.push(curZoom); return Promise.resolve(); }
+  };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const create = document.createElement.bind(document);
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: () => {},
+        getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      });
+    }
+    return elc;
+  };
+  /* ×1.5 之后第 5 次 detect 命中（打断在 ×2.0 之前）。 */
+  let call = 0;
+  const FakeBD = Object.assign(function () {
+    return { detect: async () => { call++; return call === 25 ? [{ rawValue: 'LOC:BRK', format: 'qr_code' }] : []; } };
+  }, { getSupportedFormats: () => ['qr_code'] });
+  const win = Object.assign({}, document.defaultView, { BarcodeDetector: FakeBD });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => zoomCalls.includes(1.5), 8000), '应先 ×1.5');
+  assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 8000), 'hit 应出卡');
+  await tick(1300);   // 跨过 ×2.0 的 1.2s 停留点
+  assert.ok(!zoomCalls.includes(2), 'hit 打断后不应再升 ×2.0，实测 ' + JSON.stringify(zoomCalls));
+  cam.close('test');
+});
+
+/* 项 2：无 zoom 能力 + 16 miss → 中心裁切重解（decode 被调）。 */
+test('3.1 项 2：无 zoom 时中心裁切放大重解触发', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 1920; video.videoHeight = 1080;
+  video.play = async () => {};
+  const track = { stop() {}, getCapabilities: () => ({}) };   // 无 zoom 能力
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  let cropDraws = 0;
+  const decodeSizes = [];
+  const create = document.createElement.bind(document);
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: (_v, a, b, c2, d2) => { if (elc.width === 1920 && elc.height === 1080) cropDraws++; },
+        getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      });
+    }
+    return elc;
+  };
+  const FakeBD = Object.assign(function () {
+    return { detect: async () => [] };
+  }, { getSupportedFormats: () => ['qr_code'] });
+  const win = Object.assign({}, document.defaultView, { BarcodeDetector: FakeBD });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1,
+    decode: async image => { decodeSizes.push(image.width + 'x' + image.height); return null; }
+  });
+  await cam.open({});
+  /* 中心裁切：1/2 视野 960×540 → 放大 2× = 1920×1080 decode。 */
+  assert.ok(await waitFor(() => decodeSizes.includes('1920x1080'), 8000),
+    '中心裁切应产生 1920×1080 decode，实测 ' + JSON.stringify(decodeSizes.slice(0, 8)));
+  cam.close('test');
+});
+
+/* 项 3：推近期间对焦脉冲暂停（脉冲特征 1<z<1.4 不出现）。 */
+test('3.1 项 3：推近期间对焦脉冲暂停', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 1920; video.videoHeight = 1080;
+  video.play = async () => {};
+  const zoomCalls = [];
+  let curZoom = 1;
+  const track = {
+    stop() {},
+    getSettings: () => ({ zoom: curZoom }),
+    getCapabilities: () => ({ zoom: { min: 1, max: 4 }, torch: false }),
+    applyConstraints: c => { curZoom = c.advanced[0].zoom; zoomCalls.push(curZoom); return Promise.resolve(); }
+  };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const create = document.createElement.bind(document);
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: () => {},
+        getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      });
+    }
+    return elc;
+  };
+  const FakeBD = Object.assign(function () {
+    return { detect: async () => [] };
+  }, { getSupportedFormats: () => ['qr_code'] });
+  const win = Object.assign({}, document.defaultView, { BarcodeDetector: FakeBD });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1
+  });
+  await cam.open({});
+  /* 等推近结束（回 1× 出现 = 序列走完）。 */
+  assert.ok(await waitFor(() => zoomCalls.includes(1.5), 8000), '应触发推近');
+  assert.ok(await waitFor(() => zoomCalls.filter(z => z === 1).length >= 1, 8000), '推近应走完回 1×');
+  cam.close('test');
+  /* 只断言推近开始（首个 1.5）之后无脉冲 —— 推近前脉冲允许。 */
+  const i15 = zoomCalls.indexOf(1.5);
+  const duringZscan = i15 >= 0 ? zoomCalls.slice(i15) : zoomCalls;
+  const pulseLike = duringZscan.filter(z => z > 1 && z < 1.4);
+  assert.equal(pulseLike.length, 0, '推近期间不应有对焦脉冲（1<z<1.4），实测 ' + JSON.stringify(zoomCalls));
 });
