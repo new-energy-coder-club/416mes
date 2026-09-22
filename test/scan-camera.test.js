@@ -2418,7 +2418,8 @@ test('2.99 项 2：miss 自动升清 540p→720p + hit 降回', async () => {
   };
   let call = 0;
   const FakeBD = Object.assign(function () {
-    return { detect: async () => { call++; return call <= 15 ? [] : [{ rawValue: 'LOC:HIT', format: 'qr_code' }]; } };
+    /* 400 次内全 miss（覆盖升清窗口 + 首个 HUD 500ms 刷新），之后才命中。 */
+    return { detect: async () => { call++; return call <= 400 ? [] : [{ rawValue: 'LOC:HIT', format: 'qr_code' }]; } };
   }, { getSupportedFormats: () => ['qr_code'] });
   const win = Object.assign({}, document.defaultView, { BarcodeDetector: FakeBD });
   const cam = ScanCamera.attach({
@@ -2429,13 +2430,11 @@ test('2.99 项 2：miss 自动升清 540p→720p + hit 降回', async () => {
   await cam.open({});
   /* 等升清：miss ≥10 后 wasm 兜底帧（buildFastImage）应画 1280×720。 */
   assert.ok(await waitFor(() => draws.some(d => d.dw === 1280 && d.dh === 720), 3000), 'miss 升清后应有 1280×720 兜底帧，实测 ' + JSON.stringify(draws));
-  assert.match(win.__scanPerf.tier, /720p/, 'perf.tier 应含 720p，实测 ' + (win.__scanPerf && win.__scanPerf.tier));
-  /* 等 hit 降回：detect 第 16 次起命中 → 升清帧应消失（draws 不再新增 1280）。 */
-  const n1280 = draws.filter(d => d.dw === 1280).length;
+  /* __scanPerf 仅 close 时发布 —— 升清态读 HUD 行（500ms 刷新）。 */
+  assert.ok(await waitFor(() => /720p/.test(document.getElementById('scanCamHud').textContent), 3000), 'HUD 档位应含 720p，实测 ' + document.getElementById('scanCamHud').textContent);
+  /* 等 hit 降回：出卡后 HUD 档位应回 540p（慢车道 720p 与升清无关，不看 draws）。 */
   assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 3000), 'hit 后应出卡');
-  await tick(50);
-  const n1280After = draws.filter(d => d.dw === 1280).length;
-  assert.ok(n1280After <= n1280 + 1, 'hit 后不应再新增升清帧（允许在途 1 帧），实测 ' + (n1280After - n1280));
+  assert.ok(await waitFor(() => /档位 540p/.test(document.getElementById('scanCamHud').textContent), 3000), 'hit 后 HUD 应回 540p，实测 ' + document.getElementById('scanCamHud').textContent);
   cam.close('test');
 });
 
