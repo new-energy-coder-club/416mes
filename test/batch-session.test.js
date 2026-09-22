@@ -42,9 +42,11 @@ test('S1 入库锚点批量：LOC→CTN 锚定 → 连扫合成完整行', () =>
   assert.match(s.acceptBatchCode({ type: 'ITM', code: 'I-1' }).text, /第 1 件/);
   assert.match(s.acceptBatchCode({ type: 'ITM', code: 'I-2' }).text, /第 2 件/);
   const rows = s.snapshot().rows;
-  assert.equal(rows.length, 2);
-  assert.deepEqual(rows[0].values.map(v => v.type + v.code), ['LOCL-1', 'CTNC-1', 'ITMI-1'], '合成行是完整行');
-  s.select(0);
+  /* F1 后 startBatch 保留一个空占位行——物品行是最后两行 */
+  const itemRows = rows.filter(r => r.values.some(v => v.type === 'ITM'));
+  assert.equal(itemRows.length, 2);
+  assert.deepEqual(itemRows[0].values.map(v => v.type + v.code), ['LOCL-1', 'CTNC-1', 'ITMI-1'], '合成行是完整行');
+  s.select(rows.findIndex(r => r.values.some(v => v.type === 'ITM')));
   const q = s.request();
   assert.equal(q.kind, 'receive', '合成行可直接 request（草稿兼容）');
 });

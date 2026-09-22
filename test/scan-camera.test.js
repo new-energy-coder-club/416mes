@@ -2820,10 +2820,12 @@ test('3.1 项 1b：hit 打断推近扫描，停当前 zoom', async () => {
     }
     return elc;
   };
-  /* ×1.5 之后第 5 次 detect 命中（打断在 ×2.0 之前）。 */
-  let call = 0;
+  /* ×1.5 触发后（3s 冷却 + 16 miss）某次 detect 命中 —— 打断在 ×2.0 之前。
+     detect 调用计数不可靠（事件循环负载影响帧率）——用 zoomCalls.includes(1.5)
+     门控后再让后续 detect 命中。 */
+  let armed = false;
   const FakeBD = Object.assign(function () {
-    return { detect: async () => { call++; return call === 25 ? [{ rawValue: 'LOC:BRK', format: 'qr_code' }] : []; } };
+    return { detect: async () => (armed ? [{ rawValue: 'LOC:BRK', format: 'qr_code' }] : []) };
   }, { getSupportedFormats: () => ['qr_code'] });
   const win = Object.assign({}, document.defaultView, { BarcodeDetector: FakeBD });
   const cam = ScanCamera.attach({
@@ -2833,6 +2835,7 @@ test('3.1 项 1b：hit 打断推近扫描，停当前 zoom', async () => {
   });
   await cam.open({});
   assert.ok(await waitFor(() => zoomCalls.includes(1.5), 8000), '应先 ×1.5');
+  armed = true;   // ×1.5 已到位 → 下一帧 detect 命中打断
   assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 8000), 'hit 应出卡');
   await tick(1300);   // 跨过 ×2.0 的 1.2s 停留点
   assert.ok(!zoomCalls.includes(2), 'hit 打断后不应再升 ×2.0，实测 ' + JSON.stringify(zoomCalls));
