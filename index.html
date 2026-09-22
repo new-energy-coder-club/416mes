@@ -2847,6 +2847,39 @@ body:has(#tab-item-work.on) .itm-batch-sticky.batch-on{display:flex}
   /* 空态沿用 19②（2437 content）+ 19②-560（2442 display:block），无需新增 */
 }
 }
+
+/* ============================================================
+   25 CONFLICT-CLEAR（用户指定「尽量可视化」· 纯 CSS）
+   待清除矛盾面板：表格化勾选清单 + 类型徽 + 全选/清除按钮。
+   ============================================================ */
+@media screen{
+  .cc-box{margin-top:14px;border:1.5px solid var(--accent-warn);border-radius:var(--r-lg);
+    background:var(--todo-bg);overflow:hidden}
+  .cc-box__head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    padding:12px 14px;background:var(--surface);border-bottom:1px solid var(--line)}
+  .cc-box__head>b{font-size:14px;color:var(--ink-strong)}
+  .cc-box__head .cc-act{margin-left:auto;display:flex;gap:8px}
+  .cc-box__head .cc-act .btn{min-height:32px;font-size:12px}
+  .cc-groups{padding:4px 10px 10px;max-height:320px;overflow:auto}
+  .cc-group{margin-top:8px}
+  .cc-group__t{font-size:12px;font-weight:700;letter-spacing:.06em;color:var(--text-muted);
+    padding:4px 4px 2px}
+  .cc-row{display:flex;align-items:center;gap:10px;padding:7px 10px;margin:4px 0;
+    background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);
+    cursor:pointer;user-select:none}
+  .cc-row:hover{border-color:var(--line-strong);background:var(--surface-hover)}
+  .cc-row input{width:18px;height:18px;flex:none;cursor:pointer}
+  .cc-row .cc-kind{flex:none;font-size:11px;font-weight:700;border-radius:var(--r-pill);
+    padding:2px 8px}
+  .cc-kind--local{background:var(--doing-bg);color:var(--doing-fg)}
+  .cc-kind--diff{background:var(--primary-050);color:var(--primary-active)}
+  .cc-row code{font-family:var(--font-mono);font-size:12.5px;color:var(--ink-strong);
+    overflow-wrap:anywhere;word-break:break-all}
+  .cc-box__foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+    padding:10px 14px;border-top:1px dashed var(--line-strong);background:var(--surface)}
+  .cc-box__foot .btn{min-height:44px;font-weight:700}
+  .cc-box__foot .hint{font-size:12px}
+}
 </style>
 </head>
 <body>
@@ -9736,6 +9769,9 @@ function renderAlignBox() {
   }
 
   let html = dataConsistencyHtml() + identityHtml() + duplicateHtml();
+  /* 待清除矛盾可视面板（用户指定「尽量可视化」）：每条矛盾一行带勾选，
+     类型徽（本地独有/内容差异），全选/全不选，清除已选 N 条。 */
+  html += conflictClearPanelHtml();
   /* B10 后续收场：远端重复审计只能看见「飞书多行」，而用户现场是相反方向 ——
      本地 6 行同工单号、飞书 upsert 折叠成 1 行。它既不属于 pending、也不属于 pendingDelete，
      旧面对只报「本地多 5」却没有任何可执行动作。这里单独扫描原始本地数组，不能走按键索引
@@ -9890,6 +9926,32 @@ function renderAlignBox() {
   /* 一键清除矛盾（删除本地，飞书为事实）：矛盾的本质是本地有"错误/草稿数据没跟飞书协同"，
      飞书才是事实 —— 直接删除本地这些矛盾记录（localOnly 本地独有 + 内容差异的本地错误版本），
      然后拉飞书真值对齐。受保护表（itemOperations/workorders）走凭据删除留痕，普通表走 deleteOneLocalRecord。 */
+  /* 待清除矛盾可视面板 HTML：每条矛盾一行（表名+类型徽+键+勾选框），按表分组。 */
+  function conflictClearPanelHtml() {
+    const targets = conflictTargets();
+    if (!targets.length) return '';
+    const byTable = {};
+    targets.forEach(tg => {
+      const t = TABLE_LABEL[tg.table] || tg.table;
+      byTable[t] = byTable[t] || [];
+      byTable[t].push(tg);
+    });
+    const groups = Object.keys(byTable).map(t => {
+      const rows = byTable[t].map(tg =>
+        '<label class="cc-row"><input type="checkbox" class="ccSel" data-table="' + esc(tg.table) + '" data-key="' + esc(tg.key) + '" data-kind="' + tg.kind + '" checked>' +
+        '<span class="cc-kind cc-kind--' + (tg.kind === 'localOnly' ? 'local' : 'diff') + '">' + (tg.kind === 'localOnly' ? '本地独有' : '内容差异') + '</span>' +
+        '<code>' + esc(tg.key) + '</code></label>').join('');
+      return '<div class="cc-group"><div class="cc-group__t">' + esc(t) + ' · ' + byTable[t].length + ' 条</div>' + rows + '</div>';
+    }).join('');
+    return '<div class="cc-box" id="ccBox">' +
+      '<div class="cc-box__head"><b>⚠ 待清除矛盾 · 本地错误/草稿数据（飞书为事实）</b>' +
+      '<span class="cc-act"><button type="button" class="btn tiny ghost" data-cc-all="1">全选</button>' +
+      '<button type="button" class="btn tiny ghost" data-cc-none="1">全不选</button></span></div>' +
+      '<div class="cc-groups">' + groups + '</div>' +
+      '<div class="cc-box__foot"><button type="button" class="btn danger" id="btnCcClear">🧹 清除已选 <span id="ccCount">0</span> 条</button>' +
+      '<span class="hint">飞书不动；清除后自动拉取飞书真值对齐</span></div></div>';
+  }
+
   /* 收集全部本地矛盾目标（localOnly 本地独有 + 内容差异的本地错误版本），按表分组。 */
   function conflictTargets() {
     const rep = _lastReport;
@@ -9904,8 +9966,8 @@ function renderAlignBox() {
     return targets;
   }
 
-  async function clearConflictsDeleteLocal() {
-    const targets = conflictTargets();
+  async function clearConflictsDeleteLocal(targetsOpt) {
+    const targets = targetsOpt || conflictTargets();
     if (!targets.length) return { ok: false, error: '没有可清除的矛盾' };
     let deleted = 0; const skipped = [];
     for (const tg of targets) {
@@ -9921,6 +9983,43 @@ function renderAlignBox() {
       } catch (e) { skipped.push(tg.key.slice(0, 8) + '（异常）'); }
     }
     return { ok: true, deleted, total: targets.length, skipped };
+  }
+
+  /* 待清除矛盾可视面板：全选/全不选/勾选计数/清除已选 */
+  const ccBox = box.querySelector('#ccBox');
+  if (ccBox) {
+    const ccSyncCount = () => {
+      const n = ccBox.querySelectorAll('.ccSel:checked').length;
+      const c = ccBox.querySelector('#ccCount'); if (c) c.textContent = n;
+    };
+    ccBox.querySelectorAll('.ccSel').forEach(cb => cb.addEventListener('change', ccSyncCount));
+    const all = ccBox.querySelector('[data-cc-all]'); if (all) all.addEventListener('click', () => {
+      ccBox.querySelectorAll('.ccSel').forEach(cb => { cb.checked = true; }); ccSyncCount();
+    });
+    const none = ccBox.querySelector('[data-cc-none]'); if (none) none.addEventListener('click', () => {
+      ccBox.querySelectorAll('.ccSel').forEach(cb => { cb.checked = false; }); ccSyncCount();
+    });
+    ccSyncCount();
+    const clr = ccBox.querySelector('#btnCcClear');
+    if (clr) clr.addEventListener('click', async () => {
+      const targets = [...ccBox.querySelectorAll('.ccSel:checked')].map(cb =>
+        ({ table: cb.dataset.table, key: cb.dataset.key, kind: cb.dataset.kind }));
+      if (!targets.length) { alert('先勾选要清除的矛盾。'); return; }
+      if (!confirm('清除已选 ' + targets.length + ' 条本地矛盾数据？\n\n飞书不动（以飞书为事实），删除后自动拉取飞书真值对齐。')) return;
+      clr.disabled = true; clr.textContent = '清除中…';
+      try {
+        const r = await clearConflictsDeleteLocal(targets);
+        if (!r.ok) { alert('清除失败：' + r.error); clr.disabled = false; clr.textContent = '🧹 清除已选'; return; }
+        log('🧹 清除矛盾：删除本地 ' + r.deleted + '/' + r.total + ' 条' +
+          (r.skipped.length ? '，跳过 ' + r.skipped.length + ' 条' : ''));
+        if (cloudOnline || fsOnline) { await cloudSync({ silent: true }); }
+        else await runReconcile();
+        log('✅ 矛盾已清除，飞书真值已对齐');
+      } catch (e) {
+        alert('清除失败：' + ((e && e.message) || e));
+        clr.disabled = false; clr.textContent = '🧹 清除已选';
+      }
+    });
   }
 
   box.querySelectorAll('[data-itmop-clear-all]').forEach(btn => btn.addEventListener('click', async () => {
