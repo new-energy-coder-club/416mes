@@ -2689,10 +2689,9 @@ test('3.0 项 2：连续 3 个 describe ok:false → 定向提示；ok:true 插�
   const cam = ScanCamera.attach({
     document, win,
     mediaDevices: { getUserMedia: async () => stream },
-    intervalMs: 2, legacyLoop: true, voteThreshold: 1,
-    describe
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1
   });
-  await cam.open({});
+  await cam.open({ describe });
   /* BAD1/BAD2 后 GOOD（清零）再 BAD3 —— 永远凑不齐连续 3 个。 */
   await tick(120);
   const statusText = document.getElementById('scanCamStatus').textContent;
@@ -2734,10 +2733,9 @@ test('3.0 项 2b：连续 3 个 ok:false → status 显示 action 文案', async
   const cam = ScanCamera.attach({
     document, win,
     mediaDevices: { getUserMedia: async () => stream },
-    intervalMs: 2, legacyLoop: true, voteThreshold: 1,
-    describe
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1
   });
-  await cam.open({});
+  await cam.open({ describe });
   assert.ok(await waitFor(() => /类型不符，请重扫/.test(document.getElementById('scanCamStatus').textContent), 3000),
     '连续 3 个 ok:false 应显示 action 文案，实测 ' + document.getElementById('scanCamStatus').textContent);
   cam.close('test');
