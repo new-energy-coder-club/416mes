@@ -1301,6 +1301,15 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   nav.tabs a.tab-link{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;
     gap:2px;min-width:58px;min-height:52px;padding:5px 8px;font-size:11px;color:var(--text-muted);
     border:none;border-radius:var(--r-md);}
+  /* 阶段33（用户实测「底栏不全」· 子代理 nav-mobile-overflow.md）：
+     360px 实测 scrollWidth 579 vs clientWidth 345，溢出 234px —— 三根因：
+     ① 全长名（已由 syncNavLabels 短名化解决）；② 首页/宣传页 .tab-link 在折叠态
+     白占 124px（它们本就该只在「全部」抽屉里）；③ 按钮 flex:none 不收缩。
+     修复：折叠态隐藏 tab-link + 主入口五等分收缩，任何宽度全显、免横滚。 */
+  nav.tabs a.tab-link{display:none;}
+  body.nav-all-open nav.tabs a.tab-link{display:flex;}
+  nav.tabs button[data-primary]{flex:1 1 0;min-width:0;padding:5px 4px;white-space:nowrap;overflow:hidden;}
+  body.nav-all-open nav.tabs button[data-primary]{flex:none;}
   body{padding-bottom:66px;}
   #appFooter{margin-bottom:66px;}
   /* 顶栏与主区收紧 */
@@ -1435,6 +1444,12 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   :is(#tab-items,#tab-item-work) .itm-toolbar>.itm-btn-primary{flex:1 1 100%}
   :is(#tab-items,#tab-item-work) .itm-toolbar>.field+.btn{flex:1 1 100%}
   :is(#tab-items,#tab-item-work) .itm-toolbar>.itm-control+.btn{flex:1 1 100%}
+  /* 阶段33（用户实测：连扫批量提示与「开始批量入库」挤同一行 · 子代理 item-work-batch-row.md）：
+     提示独占一行，入/出库按钮下一行并排各半宽（半宽规则见上 1434 行），放弃本批独占整行。
+     #itmBatchStart 是 lib/item-ui.js 动态生成的 span.itm-toolbar，DOM 不动、纯 CSS。 */
+  #itmBatchStart{flex:1 1 100%;align-items:center}
+  #itmBatchStart>.hint{flex:1 1 100%;margin:0}
+  #itmBatchAbandon{flex:1 1 100%}
   #tab-item-work .itm-grid,#tab-item-work .itm-grid tbody{display:block;width:100%}
   #tab-item-work .itm-grid thead{display:none}
   #tab-item-work .itm-grid tr{display:block;border:1px solid var(--line);border-radius:8px;margin:10px 0;padding:6px}
@@ -1908,6 +1923,47 @@ body:has(#tab-item-work.on) .itm-batch-sticky.batch-on{display:flex}
   #tab-ledger .toolbar--main .toolbar__group+.toolbar__group,
   #tab-ledger .toolbar--data .toolbar__group+.toolbar__group{
     border-left-color:var(--line-strong)}
+}
+
+/* ---- 阶段33：手机工具区（≤767 · 子代理 ledger-toolbar-mobile.md · 纯 CSS 零 DOM 改动）----
+   根因：① .btn--download 分裂绿按钮的 42px 图标块绝对定位，手机无 hover 永久遮挡文字；
+   ② 旧规则仅把组堆叠，label 仍与按钮混排、无卡片容器。
+   修复：搜索同行（sticky 条 110→60px）+ 数据维护整卡分组 + 绿按钮图标块还原。
+   所有 id / file input / JS 绑定不动；≥768 媒体查询不相交，桌面零变化。 */
+@media screen and (max-width:767px){
+  /* 搜索行：搜索框与列开关同一行 */
+  #tab-ledger .toolbar--main .toolbar__group{flex-wrap:nowrap;width:100%}
+  #tab-ledger #matSearch{flex:1 1 auto;width:auto;min-width:0}
+  #tab-ledger #btnColsMore{flex:0 0 auto}
+
+  /* 数据维护：整张浅底卡，组=小节，label 独占一行，按钮等分 */
+  #tab-ledger .toolbar--data{flex-direction:column;align-items:stretch;gap:0;
+    background:var(--surface-2);border:1px solid var(--line);
+    border-radius:var(--r-md);padding:4px 12px}
+  #tab-ledger .toolbar--data .spacer{display:none}
+  #tab-ledger .toolbar--data .toolbar__group{display:flex;flex-wrap:wrap;gap:8px;
+    width:100%;padding-block:10px}
+  #tab-ledger .toolbar--data .toolbar__group+.toolbar__group{
+    padding-left:0;border-left:none;border-top:1px dashed var(--line)}
+  #tab-ledger .toolbar--data .toolbar__label{flex:0 0 100%;font-size:11px;
+    font-weight:700;letter-spacing:.08em;color:var(--text-muted)}
+  #tab-ledger .toolbar--data .toolbar__group .btn{flex:1 1 0;min-height:44px;
+    justify-content:center;white-space:nowrap;padding-inline:8px}
+
+  /* 手机端还原绿分裂按钮：图标块脱离绝对定位，不再遮挡文字 */
+  #tab-ledger .btn.btn--download{display:inline-flex;align-items:center;gap:6px;
+    padding:0 12px}
+  #tab-ledger .btn--download__text{padding:0;flex:1 1 auto;justify-content:center}
+  #tab-ledger .btn--download__icon{position:static;width:auto;height:auto;
+    background:none;color:#fff;flex:0 0 auto}
+
+  /* 云端同步：整行入口 */
+  #tab-ledger #lnkSyncFromLedger{width:100%}
+}
+/* 带鼠标的小屏设备（hover:hover）防旧 hover 规则把文字再藏起来 */
+@media screen and (max-width:767px) and (hover:hover){
+  #tab-ledger .btn.btn--download:not(:disabled):hover .btn--download__text{opacity:1}
+  #tab-ledger .btn.btn--download:not(:disabled):hover .btn--download__icon{width:auto}
 }
 
 /* ---- 宽屏列宽（main 已 1560） ---- */
@@ -2899,9 +2955,9 @@ body:has(#tab-item-work.on) .itm-batch-sticky.batch-on{display:flex}
 <header><img class="nec-logo" id="hdrLogo" alt="NEC"><div><div class="slogan">BUILT TO DAWN · KEEP BUILDING&#9608;</div><h1>416MES 仓储管理系统</h1></div><span class="sub">七类标签 · Excel 台账 · 扫码工作台（查询只读 / 执行需确认）（单机离线版）</span><span class="queue-chip visually-hidden" id="fsQueueChip" title="离线期间的库存变动，联网后自动冲刷到飞书"></span><span class="hdr-operator">操作人 <select class="field--xs" id="selOperator"></select></span></header>
 <nav class="tabs" id="mainTabs">
   <div class="nav-group">现场作业</div>
-  <button data-tab="items" class="on" data-primary="1">库位/容器/物品查询</button><button data-tab="item-work" data-primary="1" data-label="ITM作业" data-short="物品作业">ITM作业</button><button data-tab="register" data-primary="1" data-label="建档管理" data-short="建档">建档管理</button>
-  <button data-tab="scan" data-primary="1">扫码工作台</button>
-  <button data-tab="wip" data-primary="1" data-label="库存工单（WIP）" data-short="库存工单">库存工单（WIP）</button>
+  <button data-tab="items" class="on" data-primary="1" data-label="库位/容器/物品查询" data-short="查询">库位/容器/物品查询</button><button data-tab="item-work" data-primary="1" data-label="ITM作业" data-short="作业">ITM作业</button><button data-tab="register" data-primary="1" data-label="建档管理" data-short="建档">建档管理</button>
+  <button data-tab="scan" data-primary="1" data-label="扫码工作台" data-short="扫码">扫码工作台</button>
+  <button data-tab="wip" data-primary="1" data-label="库存工单（WIP）" data-short="工单">库存工单（WIP）</button>
   <div class="nav-group">台账与建档</div>
   <button data-tab="ledger" data-label="物料台账·历史" data-short="台账">物料台账·历史</button>
   <button data-tab="txn" data-label="库存流水" data-short="流水">库存流水</button>
