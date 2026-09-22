@@ -1498,11 +1498,15 @@ test('项 2b：慢帧 decode 挂起期间快帧照常出卡（独立通道）', 
   const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
   let slowRelease; const slowHold = new Promise(r => { slowRelease = r; });
   let slowStarted = false;
-  /* 假原生 BarcodeDetector：detect 挂起直到放行。 */
+  /* 假原生 BarcodeDetector：慢帧（≥1280）detect 挂起直到放行；快帧先 miss 后命中
+     （2.94 快车道原生 await，不再走注入 decodeAll）。 */
+  let fastDetectCalls = 0;
   const FakeBD = Object.assign(function () {
     return { detect: async canvas => {
       if (canvas.width >= 1280) { slowStarted = true; await slowHold; return []; }
-      return [];   // 快帧原生确定性 miss → 落到注入 decodeAll
+      fastDetectCalls++;
+      if (fastDetectCalls === 1) return [];
+      return [{ rawValue: 'LOC:FAST', format: 'qr_code', boundingBox: { x: 10, y: 10, width: 100, height: 100 } }];
     } };
   }, { getSupportedFormats: () => ['qr_code'] });
   const create = document.createElement.bind(document);
@@ -1517,17 +1521,10 @@ test('项 2b：慢帧 decode 挂起期间快帧照常出卡（独立通道）', 
     return elc;
   };
   const win = Object.assign({}, document.defaultView, { BarcodeDetector: FakeBD });
-  let fastDecodes = 0;
   const cam = ScanCamera.attach({
     document, win,
     mediaDevices: { getUserMedia: async () => stream },
-    intervalMs: 2, legacyLoop: true, voteThreshold: 1, fullFrameEvery: 2,
-    decodeAll: async image => {
-      fastDecodes++;
-      /* 第 1 帧快路径 miss（保持 awaiting=false 让慢帧触发）；之后快路径命中。 */
-      if (fastDecodes === 1) return [];
-      return [{ text: 'LOC:FAST', format: '二维码' }];
-    }
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1, fullFrameEvery: 2
   });
   await cam.open({});
   /* 等慢帧进入挂起。 */
@@ -1535,7 +1532,7 @@ test('项 2b：慢帧 decode 挂起期间快帧照常出卡（独立通道）', 
   /* 慢帧挂起期间快帧应继续出卡。 */
   assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 3000),
     '慢帧挂起期间快帧应照常出卡（慢不阻快）');
-  assert.ok(fastDecodes >= 1, '快通道 decode 应被调用，实测 ' + fastDecodes);
+  assert.ok(fastDetectCalls >= 1, '快通道原生 detect 应被调用，实测 ' + fastDetectCalls);
   slowRelease([]);
   cam.close('test');
 });
@@ -1750,5 +1747,236 @@ test('2.93 项 3：慢通道（全帧）命中小码 → 变焦被触发', async
   assert.ok(await waitFor(() => applied.length >= 1, 5000),
     '慢通道全帧命中 300px/1920px=15.6% 小码近中心应触发变焦，实测 constraints=' + JSON.stringify(applied));
   assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 3000), '慢通道命中应出卡');
+  cam.close('test');
+});
+
+/* ================= 2.94：三车道分级调度 + 崩溃自愈 ================= */
+
+/* 项 1：原生 miss×N → wasm 只在首帧启动（250ms 节流 + 在途去重），结果异步到达仍出卡。 */
+test('2.94 项 1：原生 miss 时 wasm fire-and-forget（节流 250ms + 在途不排队 + 异步出卡）', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 640; video.videoHeight = 480;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const create = document.createElement.bind(document);
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: () => {},
+        getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      });
+    }
+    return elc;
+  };
+  /* 假原生：恒 miss。假 worker：decode 可控（第 1 次调用挂起，放行后返回命中）。 */
+  const FakeBD = Object.assign(function () {
+    return { detect: async () => [] };
+  }, { getSupportedFormats: () => ['qr_code'] });
+  let workerCalls = 0, releaseWorker; const workerHold = new Promise(r => { releaseWorker = r; });
+  class FakeWorker {
+    constructor() { this.onmessage = null; }
+    postMessage(payload) {
+      const id = payload.id;
+      /* selfTest（116×116 合成帧）立即回命中让桥活着；真实帧计数并挂起。 */
+      if (payload.image && payload.image.width === 116) {
+        setTimeout(() => this.onmessage && this.onmessage({ data: { id, hits: [{ text: 'SCAN-SELFTEST', format: '二维码' }] } }), 1);
+        return;
+      }
+      workerCalls++;
+      setTimeout(() => {
+        Promise.resolve(workerHold).then(() => {
+          this.onmessage && this.onmessage({ data: { id, hits: [{ text: 'LOC:ASYNC', format: '二维码' }] } });
+        });
+      }, 1);
+    }
+    terminate() {}
+  }
+  const win = Object.assign({}, document.defaultView, { Worker: FakeWorker, BarcodeDetector: FakeBD });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1
+  });
+  await cam.open({});
+  /* 等首帧 wasm 启动（原生 miss → fire-and-forget）。 */
+  assert.ok(await waitFor(() => workerCalls >= 1, 3000), '原生 miss 首帧应启动 wasm 兜底');
+  /* 在途期间再打几帧：wasm 不得重复启动（在途去重）。 */
+  await tick(60);
+  assert.equal(workerCalls, 1, 'wasm 在途期间不得重复启动（不排队），实测 ' + workerCalls);
+  /* 放行 worker → 异步结果应出卡。 */
+  releaseWorker();
+  assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 3000),
+    'wasm 异步结果到达应出卡');
+  assert.equal(document.getElementById('scanCamValue').textContent, 'LOC:ASYNC');
+  cam.close('test');
+  const p = win.__scanPerf;
+  assert.ok(p.workerHit >= 1, 'perf.workerHit 应 ≥1，实测 ' + p.workerHit);
+});
+
+/* 项 1：原生第 3 帧命中 → 原生出卡且不再发 worker。 */
+test('2.94 项 1：原生中途命中 → 原生出卡、wasm 不再启动', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 640; video.videoHeight = 480;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const create = document.createElement.bind(document);
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: () => {},
+        getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      });
+    }
+    return elc;
+  };
+  let detectCalls = 0;
+  const FakeBD = Object.assign(function () {
+    return { detect: async () => {
+      detectCalls++;
+      if (detectCalls < 3) return [];
+      return [{ rawValue: 'LOC:N3', format: 'qr_code', boundingBox: { x: 5, y: 5, width: 80, height: 80 } }];
+    } };
+  }, { getSupportedFormats: () => ['qr_code'] });
+  let workerCalls = 0;
+  class FakeWorker { constructor() { this.onmessage = null; } postMessage() { workerCalls++; } terminate() {} }
+  const win = Object.assign({}, document.defaultView, { Worker: FakeWorker, BarcodeDetector: FakeBD });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 3000), '原生第 3 帧命中应出卡');
+  assert.equal(document.getElementById('scanCamValue').textContent, 'LOC:N3');
+  await tick(50);
+  assert.equal(workerCalls, 0, '原生命中后不得再发 worker，实测 ' + workerCalls);
+  cam.close('test');
+  assert.ok(win.__scanPerf.nativeHit >= 1, 'perf.nativeHit 应 ≥1');
+});
+
+/* 项 1：原生不可用 → worker 每帧串行（现状回归）。 */
+test('2.94 项 1：原生不可用（nativeDead）→ worker 每帧串行', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 640; video.videoHeight = 480;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const create = document.createElement.bind(document);
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: () => {},
+        getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      });
+    }
+    return elc;
+  };
+  /* 原生抛错 → nativeDead → 快通道落 decodeAllVia 串行 worker。 */
+  const FakeBD = Object.assign(function () {
+    return { detect: async () => { throw new Error('boom'); } };
+  }, { getSupportedFormats: () => ['qr_code'] });
+  let workerCalls = 0;
+  class FakeWorker {
+    constructor() { this.onmessage = null; }
+    postMessage(payload) {
+      workerCalls++;
+      const id = payload.id;
+      setTimeout(() => this.onmessage && this.onmessage({ data: { id, hits: [{ text: 'LOC:SER', format: '二维码' }] } }), 1);
+    }
+    terminate() {}
+  }
+  const win = Object.assign({}, document.defaultView, { Worker: FakeWorker, BarcodeDetector: FakeBD });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 3000),
+    'nativeDead 后 worker 串行应出卡');
+  assert.ok(workerCalls >= 1, 'worker 应被串行调用，实测 ' + workerCalls);
+  cam.close('test');
+});
+
+/* 项 2：预置标记 → 兼容模式（worker 未构造 + 文案），close 清标记。 */
+test('2.94 项 2：sessionStorage 预置标记 → 兼容模式禁用 worker + 文案提示', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 640; video.videoHeight = 480;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const store = { 'mes.scanActive': '1' };
+  const fakeSS = {
+    getItem: k => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = String(v); },
+    removeItem: k => { delete store[k]; }
+  };
+  let workerConstructed = false;
+  class FakeWorker { constructor() { workerConstructed = true; } postMessage() {} terminate() {} }
+  const win = Object.assign({}, document.defaultView, {
+    Worker: FakeWorker,
+    sessionStorage: fakeSS
+  });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1,
+    decodeAll: async () => []   // 持续 miss：状态不被「已识别」覆盖，便于断言兼容文案
+  });
+  await cam.open({});
+  assert.equal(workerConstructed, false, '兼容模式不得构造 worker');
+  assert.match(document.getElementById('scanCamHint').textContent, /兼容模式/, '提示区应显示兼容模式文案');
+  cam.close('test');
+  assert.equal(store['mes.scanActive'], undefined, 'close() 应清除崩溃标记');
+});
+
+/* 项 2：无标记 → 全功能（worker 正常构造）；sessionStorage 抛错 → 静默。 */
+test('2.94 项 2：无标记全功能 + sessionStorage 抛错静默', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 640; video.videoHeight = 480;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  let workerConstructed = false;
+  class FakeWorker { constructor() { workerConstructed = true; this.onmessage = null; } postMessage(p) { const id = p.id; setTimeout(() => this.onmessage && this.onmessage({ data: { id, hits: [{ text: 'LOC:FULL', format: '二维码' }] } }), 1); } terminate() {} }
+  const create = document.createElement.bind(document);
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: () => {},
+        getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      });
+    }
+    return elc;
+  };
+  /* sessionStorage 抛错（隐私模式）。 */
+  const win = Object.assign({}, document.defaultView, {
+    Worker: FakeWorker,
+    sessionStorage: { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } }
+  });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1
+  });
+  await cam.open({});
+  assert.equal(workerConstructed, true, '无标记且 sessionStorage 抛错时应正常构造 worker（机制静默跳过）');
+  assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 3000), '应正常出卡');
   cam.close('test');
 });
