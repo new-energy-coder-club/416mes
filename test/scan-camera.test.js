@@ -2205,3 +2205,88 @@ test('2.97 项 3：localStorage stage=2 → 拦截；clean close 归零', async 
   cam.close('test');
   assert.equal(lsStore['mes.scanStage'], '2', '拦截路径 close 不归零');
 });
+
+/* ================= 2.98：UA 相机门禁（已知崩溃浏览器默认不碰相机） ================= */
+
+function makeUACam(document, ua, lsStore, gUMCounter) {
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 640; video.videoHeight = 480;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  let workerConstructed = false;
+  class FakeWorker { constructor() { workerConstructed = true; } postMessage() {} terminate() {} }
+  const win = Object.assign({}, document.defaultView, {
+    Worker: FakeWorker,
+    navigator: Object.assign({}, document.defaultView.navigator, { userAgent: ua }),
+    localStorage: makeSS(lsStore)
+  });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => { gUMCounter.n++; return stream; } },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1
+  });
+  return { cam, win, workerConstructed: () => workerConstructed };
+}
+
+test('2.98：baidu UA → 拦截（不调 getUserMedia、引导文案、worker 未构造）', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const gUM = { n: 0 };
+  const { cam, workerConstructed } = makeUACam(document, 'Mozilla/5.0 (Linux; Android 10) BaiduBrowser/12.0', {}, gUM);
+  await cam.open({});
+  assert.equal(gUM.n, 0, 'baidu UA 应拦截 getUserMedia，实测 ' + gUM.n);
+  assert.equal(workerConstructed(), false, '拦截路径不得构造 worker');
+  assert.match(document.getElementById('scanCamErr').textContent, /百度系|相机扫码会崩溃|已默认停用相机/);
+  cam.close('test');
+});
+
+test('2.98：baidu UA 点「仍要尝试」→ localStorage 写 1 + getUserMedia 被调', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const lsStore = {};
+  const gUM = { n: 0 };
+  const { cam } = makeUACam(document, 'Mozilla/5.0 Baidubrowser/7.0', lsStore, gUM);
+  await cam.open({});
+  const retry = [...document.querySelectorAll('#scanCamOverlay button')].find(b => /仍要尝试/.test(b.textContent));
+  assert.ok(retry, '应有「仍要尝试打开相机」按钮');
+  retry.click();
+  await tick(30);
+  assert.equal(lsStore['mes.scanForceCamera'], '1', '仍要尝试应写入 mes.scanForceCamera=1，实测 ' + lsStore['mes.scanForceCamera']);
+  assert.ok(gUM.n >= 1, '仍要尝试后应调用 getUserMedia，实测 ' + gUM.n);
+  cam.close('test');
+});
+
+test('2.98：localStorage 已有 force=1 → baidu UA 不拦截直接全功能', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const gUM = { n: 0 };
+  const { cam } = makeUACam(document, 'Mozilla/5.0 BaiduBrowser/12.0', { 'mes.scanForceCamera': '1' }, gUM);
+  await cam.open({});
+  await tick(40);
+  assert.ok(gUM.n >= 1, 'force=1 后 baidu UA 应全功能取流，实测 ' + gUM.n);
+  cam.close('test');
+});
+
+test('2.98：localStorage 抛错 + baidu UA → 拦截生效且无异常', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  let gUMCalls = 0;
+  const win = Object.assign({}, document.defaultView, {
+    navigator: Object.assign({}, document.defaultView.navigator, { userAgent: 'BaiduBrowser/12.0' }),
+    localStorage: { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } }
+  });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => { gUMCalls++; return stream; } },
+    intervalMs: 2, legacyLoop: true
+  });
+  await cam.open({});   // 不得抛异常
+  assert.equal(gUMCalls, 0, 'localStorage 抛错 + baidu UA 应拦截（安全方向），实测 ' + gUMCalls);
+  assert.match(document.getElementById('scanCamErr').textContent, /百度系|已默认停用相机/);
+  cam.close('test');
+});
