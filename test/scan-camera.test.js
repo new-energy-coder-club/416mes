@@ -57,8 +57,15 @@ function setupPipeline(opts = {}) {
   const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
   const mediaDevices = { getUserMedia: async () => stream };
   const sizes = [];   // 每次 decode 收到的 image 尺寸
+  /* 项 2c：默认注入假原生 BarcodeDetector（慢帧走全帧 1080p）；opts.noNative 时
+     不注入 → 慢帧降 1280×720 中档。 */
+  const win = opts.noNative ? document.defaultView : Object.assign({}, document.defaultView, {
+    BarcodeDetector: Object.assign(function () {
+      return { detect: async () => [] };
+    }, { getSupportedFormats: () => ['qr_code'] })
+  });
   const cam = ScanCamera.attach({
-    document, win: document.defaultView, mediaDevices,
+    document, win, mediaDevices,
     intervalMs: 2,
     pipeline: opts.pipeline, frameScale: opts.frameScale, fullFrameEvery: opts.fullFrameEvery,
     legacyLoop: true,
@@ -232,29 +239,31 @@ test('P0-1 快路径：1920×1080 帧按 frameScale=0.5 降采样产出 960×540
 });
 
 test('P0-1 慢路径：每 4 帧跑一次全帧 1920×1080 兜小码', async () => {
-  const { cam, sizes } = setupPipeline({ frameScale: 0.5, fullFrameEvery: 4 });
+  const { cam, draws } = setupPipeline({ frameScale: 0.5, fullFrameEvery: 4 });
   await cam.open({});
-  assert.ok(await waitFor(() => sizes.length >= 5, 3000), '应至少取帧 5 次，实测 ' + sizes.length);
+  /* draws：快路径 sw=1920（9 参 drawImage），慢/legacy 路径 sw=undefined（2 参）。 */
+  assert.ok(await waitFor(() => draws.length >= 5, 3000), '应至少取帧 5 次，实测 ' + draws.length);
   cam.close('test');
-  assert.equal(sizes[3], '1920x1080', '第 4 帧应走慢路径全帧，实测 ' + sizes[3]);
-  assert.equal(sizes[4], '960x540', '第 5 帧应回到快路径，实测 ' + sizes[4]);
+  assert.equal(draws[3].dw, 1920, '第 4 帧应走慢路径全帧 1920 宽，实测 ' + draws[3].dw);
+  assert.ok(draws[3].sw === undefined, '慢路径应两参 drawImage（sw undefined），实测 ' + draws[3].sw);
+  assert.equal(draws[4].dw, 960, '第 5 帧应回到快路径 960，实测 ' + draws[4].dw);
 });
 
 test('P0-1 fullFrameEvery 可调：每 2 帧一次全帧', async () => {
-  const { cam, sizes } = setupPipeline({ frameScale: 0.5, fullFrameEvery: 2 });
+  const { cam, draws } = setupPipeline({ frameScale: 0.5, fullFrameEvery: 2 });
   await cam.open({});
-  assert.ok(await waitFor(() => sizes.length >= 3, 3000), '应至少取帧 3 次，实测 ' + sizes.length);
+  assert.ok(await waitFor(() => draws.length >= 3, 3000), '应至少取帧 3 次，实测 ' + draws.length);
   cam.close('test');
-  assert.equal(sizes[1], '1920x1080', '第 2 帧应走慢路径全帧，实测 ' + sizes[1]);
-  assert.equal(sizes[2], '960x540', '第 3 帧应回到快路径，实测 ' + sizes[2]);
+  assert.equal(draws[1].dw, 1920, '第 2 帧应走慢路径全帧 1920 宽，实测 ' + draws[1].dw);
+  assert.equal(draws[2].dw, 960, '第 3 帧应回到快路径 960，实测 ' + draws[2].dw);
 });
 
 test('P0-1 pipeline:legacy 回归：全部帧走旧全帧路径 1920×1080', async () => {
-  const { cam, sizes } = setupPipeline({ pipeline: 'legacy' });
+  const { cam, draws } = setupPipeline({ pipeline: 'legacy' });
   await cam.open({});
-  assert.ok(await waitFor(() => sizes.length >= 2, 3000), '应至少取帧 2 次，实测 ' + sizes.length);
+  assert.ok(await waitFor(() => draws.length >= 2, 3000), '应至少取帧 2 次，实测 ' + draws.length);
   cam.close('test');
-  for (const s of sizes) assert.equal(s, '1920x1080', 'legacy 路径应全帧，实测 ' + s);
+  for (const d of draws) assert.equal(d.dw, 1920, 'legacy 路径应全帧 1920，实测 ' + d.dw);
 });
 
 test('P0-1 注入 capture 时跳过整个内置管线（快/慢路径都不走）', async () => {
@@ -719,9 +728,10 @@ test('P1-2 投票阈值边界：单帧孤证不弹卡，连续 2 帧（默认阈
     voteThreshold: 2,
     decodeAll: async () => {
       frames++;
-      if (frames === 1) return [{ text: 'GHOST:1', format: '二维码' }];
+      /* 项 2a：二维码默认阈值 1 —— 本例用一维码 format 守「一维码阈值 2」语义。 */
+      if (frames === 1) return [{ text: 'GHOST:1', format: 'code_128' }];
       await hold;   // 第 2 帧起阻塞，直到断言完单帧行为后放行
-      return [{ text: 'GHOST:1', format: '二维码' }];
+      return [{ text: 'GHOST:1', format: 'code_128' }];
     }
   });
   await cam.open({});
@@ -786,7 +796,8 @@ test('P1-2 投票窗口：同码间隔 ≥3 帧不出现视为新票（窗口外
       frame++;
       if (frame === 5) await hold;   // 第 5 帧阻塞，直到「第 4 帧不弹卡」断言完成
       const t = seq[frame];
-      return t ? [{ text: t, format: '二维码' }] : [];
+      /* 项 2a：用一维码守「阈值 2 + 窗口 3」语义（二维码默认阈值已变 1）。 */
+      return t ? [{ text: t, format: 'code_128' }] : [];
     }
   });
   await cam.open({});
@@ -1323,4 +1334,217 @@ test('修 D：worker 抛错回退 → 主线程链收到重新取的帧（captur
     '主线程链收到的 image.data 不得 detached（length=' + (chainImages[0] && chainImages[0].data.length) + '）');
   assert.equal(d2.getElementById('scanCamValue').textContent, 'LOC:MAIN');
   cam2.close('test');
+});
+
+/* ================= 项 1：自适应自动变焦 + 项 2a/2b ================= */
+
+/* 项 1 变焦夹具：zoom 能力 track + 可控时间轴 + 注入命中带 box。 */
+function setupZoom(opts = {}) {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 1920; video.videoHeight = 1080;
+  video.play = async () => {};
+  const applied = [];
+  let now = 10000;
+  const track = {
+    stop() {},
+    getCapabilities: () => (opts.zoomCaps ? { zoom: opts.zoomCaps } : {}),
+    getSettings: () => ({ zoom: opts.currentZoom || 1 }),
+    applyConstraints: opts.zoomReject ? (async () => { throw new Error('reject'); }) : (async c => { applied.push(c); })
+  };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const win = Object.assign({}, document.defaultView, { performance: { now: () => now } });
+  const hits = opts.hits || [{ text: 'LOC:Z', format: '二维码', box: opts.box || { x: 390, y: 180, w: 180, h: 180 } }];
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1,
+    capture: () => ({ width: 960, height: 540, data: new Uint8ClampedArray(4) }),
+    decodeAll: async () => hits.slice()
+  });
+  return { document, cam, applied, getNow: () => now, setNow: v => { now = v; } };
+}
+
+test('项 1：小码近中心 → applyConstraints 收到计算 zoom（factor=clamp(0.35W/bw,1.5,max)，步进≤2.5×）', async () => {
+  const { cam, applied } = setupZoom({
+    zoomCaps: { min: 1, max: 10 }, currentZoom: 1,
+    box: { x: 390, y: 180, w: 180, h: 180 }   // 960 帧中 18.75% 宽，中心 (480,270)=画面中心
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => applied.length >= 1, 3000), '小码近中心应触发变焦');
+  /* factor = clamp(960×0.35/180, 1.5, 10) = clamp(1.867, 1.5, 10) = 1.867；目标 = 1×min(1.867, 2.5) = 1.867。 */
+  const z = applied[0].advanced[0].zoom;
+  assert.ok(Math.abs(z - 1.867) < 0.01, 'zoom 应 ≈1.867，实测 ' + z);
+  cam.close('test');
+});
+
+test('项 1：变焦封顶 max；800ms 防拉锯（窗口内第二次不变焦）', async () => {
+  const { cam, applied, setNow } = setupZoom({
+    zoomCaps: { min: 1, max: 2 }, currentZoom: 1,
+    box: { x: 430, y: 220, w: 100, h: 100 }   // 10.4% 宽，近中心 → factor=clamp(3.36,1.5,2)=2（max 封顶）
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => applied.length >= 1, 3000));
+  assert.equal(applied[0].advanced[0].zoom, 2, 'zoom 应封顶 max=2，实测 ' + applied[0].advanced[0].zoom);
+  /* 800ms 内推进帧 → 不再变焦。 */
+  const n = applied.length;
+  await tick(50);
+  assert.equal(applied.length, n, '800ms 防拉锯窗口内不得再次变焦');
+  /* 时间推进 >800ms → 可再变（当前 zoom 已 2=max → z<=cur 不再变，验证的是窗口放行）。 */
+  setNow(20000);
+  await tick(50);
+  cam.close('test');
+});
+
+test('项 1：边缘小码 → 不变焦 + 引导文案', async () => {
+  const { document: d, cam, applied } = setupZoom({
+    zoomCaps: { min: 1, max: 10 }, currentZoom: 1,
+    box: { x: 30, y: 30, w: 150, h: 150 }   // 角落，中心距归一化 >0.25
+  });
+  await cam.open({});
+  await tick(80);
+  assert.equal(applied.length, 0, '边缘小码不得变焦（track.zoom 只向中心裁切）');
+  assert.match(d.getElementById('scanCamStatus').textContent, /中心/, '边缘小码应给「移到画面中心」文案');
+  cam.close('test');
+});
+
+test('项 1：close() → zoom 重置回 1（能力存在且当前 >1）', async () => {
+  const { cam, applied } = setupZoom({ zoomCaps: { min: 1, max: 10 }, currentZoom: 3 });
+  await cam.open({});
+  await tick(30);
+  cam.close('test');
+  const reset = applied.find(c => c.advanced && c.advanced[0] && c.advanced[0].zoom === 1);
+  assert.ok(reset, 'close() 应重置 zoom=1，实测 constraints=' + JSON.stringify(applied));
+});
+
+/* 项 1 无 zoom 降级：box 宽 <8% 画面宽 → crop 放大重解路径被调且命中。 */
+test('项 1 无 zoom 能力：极小码（<8% 宽）→ crop 放大重解命中', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 1920; video.videoHeight = 1080;
+  video.play = async () => {};
+  const track = { stop() {}, getCapabilities: () => ({}) };   // 无 zoom 能力
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const create = document.createElement.bind(document);
+  let cropDraw = 0;
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: (v, sx, sy, sw, sh, dx, dy, dw, dh) => { if (sx !== undefined && dw > 720) cropDraw++; },
+        getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      });
+    }
+    return elc;
+  };
+  let calls = 0;
+  const cam = ScanCamera.attach({
+    document, win: document.defaultView,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1,
+    capture: () => ({ width: 960, height: 540, data: new Uint8ClampedArray(4) }),
+    decodeAll: async image => {
+      calls++;
+      /* 第一次：极小码命中（3% 宽）带 box；crop 重解：正常码值。 */
+      if (image.width === 960) return [{ text: 'LOC:TINY', format: '二维码', box: { x: 460, y: 250, w: 30, h: 30 } }];
+      return [{ text: 'LOC:CROP-ZOOM', format: '二维码' }];
+    }
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 3000), 'crop 放大重解应出卡');
+  assert.ok(calls >= 2, 'crop 放大重解路径应被调用（decodeAll ≥2 次），实测 ' + calls);
+  cam.close('test');
+});
+
+/* 项 2a：二维码单帧即弹卡；一维码单帧不弹、第二帧弹。 */
+test('项 2a：QR 阈值 1 单帧弹卡；一维码阈值 2 第二帧弹', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 640; video.videoHeight = 480;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  let frames = 0;
+  const cam = ScanCamera.attach({
+    document, win: document.defaultView,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true,
+    capture: () => ({ width: 640, height: 480, data: new Uint8ClampedArray(4) }),
+    decodeAll: async () => {
+      frames++;
+      /* 第 1 帧 QR + 一维码同现：QR 应立即弹卡。 */
+      if (frames === 1) return [{ text: 'LOC:QR', format: '二维码' }, { text: 'ITM:BC', format: 'code_128' }];
+      return [{ text: 'ITM:BC', format: 'code_128' }];
+    }
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 2000),
+    'QR 单帧应立即弹卡（阈值 1）');
+  assert.equal(document.getElementById('scanCamValue').textContent, 'LOC:QR', '首选应是已达标的 QR');
+  cam.close('test');
+});
+
+/* 项 2b：慢帧解码 pending 期间快帧命中照常弹卡（慢不阻快）。 */
+test('项 2b：慢帧 decode 挂起期间快帧照常出卡（独立通道）', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 1920; video.videoHeight = 1080;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  let slowRelease; const slowHold = new Promise(r => { slowRelease = r; });
+  let slowStarted = false;
+  /* 假原生 BarcodeDetector：detect 挂起直到放行。 */
+  const FakeBD = Object.assign(function () {
+    return { detect: async image => { slowStarted = true; await slowHold; return []; } };
+  }, { getSupportedFormats: () => ['qr_code'] });
+  const create = document.createElement.bind(document);
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: () => {},
+        getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      });
+    }
+    return elc;
+  };
+  const win = Object.assign({}, document.defaultView, { BarcodeDetector: FakeBD });
+  let fastDecodes = 0;
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1, fullFrameEvery: 2,
+    decodeAll: async image => {
+      fastDecodes++;
+      /* 第 1 帧快路径 miss（保持 awaiting=false 让慢帧触发）；之后快路径命中。 */
+      if (fastDecodes === 1) return [];
+      return [{ text: 'LOC:FAST', format: '二维码' }];
+    }
+  });
+  await cam.open({});
+  /* 等慢帧进入挂起。 */
+  assert.ok(await waitFor(() => slowStarted, 3000), '慢帧应进入原生 detect');
+  /* 慢帧挂起期间快帧应继续出卡。 */
+  assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 3000),
+    '慢帧挂起期间快帧应照常出卡（慢不阻快）');
+  assert.ok(fastDecodes >= 1, '快通道 decode 应被调用，实测 ' + fastDecodes);
+  slowRelease([]);
+  cam.close('test');
+});
+
+/* 项 2c：无原生环境慢帧降 1280×720 中档。 */
+test('项 2c：无 BarcodeDetector → 慢帧 1280×720 中档', async () => {
+  const { cam, draws } = setupPipeline({ frameScale: 0.5, fullFrameEvery: 2, noNative: true });
+  await cam.open({});
+  assert.ok(await waitFor(() => draws.length >= 2, 3000), '应至少取帧 2 次');
+  cam.close('test');
+  const slow = draws.find(d => d.dw !== 960);
+  assert.ok(slow, '应有慢帧存在');
+  assert.equal(slow.dw, 1280, '无原生慢帧应 1280 宽，实测 ' + slow.dw);
+  assert.equal(slow.dh, 720, '无原生慢帧应 720 高，实测 ' + slow.dh);
 });
