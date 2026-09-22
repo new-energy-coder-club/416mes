@@ -30,6 +30,15 @@ test('S1 入库锚点批量：LOC→CTN 锚定 → 连扫合成完整行', () =>
   s.startBatch('receive');
   assert.match(s.acceptBatchCode({ type: 'LOC', code: 'L-1' }).text, /库位锚点/);
   assert.match(s.acceptBatchCode({ type: 'CTN', code: 'C-1' }).text, /开始连扫/);
+  /* 2.99.4 数量先行：先定数量再连扫 */
+  s.batchState; const _b = s.snapshot().batch || {};
+  // 通过公开接口设定数量（生产由 UI 数量输入设置）
+  s.startBatch === undefined || null;
+  // 直接操作会话 batch 字段设定 targetQty（测试夹具）
+  const batchRef = (function(){ const snap = s.snapshot(); return snap.batch; })();
+  // snapshot 是深拷贝——用 startBatch 后 acceptBatchCode 的错误验证数量门槛，或直接调内部
+  // 最简：重新 startBatch 不行（已有 anchor）——用 restore 写回
+  const snap = s.snapshot(); snap.batch.targetQty = 3; s.restore(snap);
   assert.match(s.acceptBatchCode({ type: 'ITM', code: 'I-1' }).text, /第 1 件/);
   assert.match(s.acceptBatchCode({ type: 'ITM', code: 'I-2' }).text, /第 2 件/);
   const rows = s.snapshot().rows;
@@ -60,6 +69,7 @@ test('S4 重复物品静默忽略；已在库物品拒绝', () => {
   s.startBatch('receive');
   s.acceptBatchCode({ type: 'LOC', code: 'L-1' });
   s.acceptBatchCode({ type: 'CTN', code: 'C-1' });
+  { const snap = s.snapshot(); snap.batch.targetQty = 3; s.restore(snap); }
   s.acceptBatchCode({ type: 'ITM', code: 'I-1' });
   assert.equal(s.acceptBatchCode({ type: 'ITM', code: 'I-1' }).duplicate, true);
   assert.throws(() => s.acceptBatchCode({ type: 'ITM', code: 'I-3' }), /已在库/);
@@ -68,6 +78,7 @@ test('S4 重复物品静默忽略；已在库物品拒绝', () => {
 test('S5 出库批量：首件派生锚点、异库位件拒绝', () => {
   const s = mk(mkState());
   s.startBatch('issue');
+  { const snap = s.snapshot(); snap.batch.targetQty = 3; s.restore(snap); }
   assert.match(s.acceptBatchCode({ type: 'ITM', code: 'I-3' }).text, /锚点库位 L-1 已派生/);
   assert.throws(() => s.acceptBatchCode({ type: 'ITM', code: 'I-4' }), /不在本批库位/);
 });
