@@ -9890,16 +9890,22 @@ function renderAlignBox() {
   /* 一键清除矛盾（删除本地，飞书为事实）：矛盾的本质是本地有"错误/草稿数据没跟飞书协同"，
      飞书才是事实 —— 直接删除本地这些矛盾记录（localOnly 本地独有 + 内容差异的本地错误版本），
      然后拉飞书真值对齐。受保护表（itemOperations/workorders）走凭据删除留痕，普通表走 deleteOneLocalRecord。 */
-  async function clearConflictsDeleteLocal() {
+  /* 收集全部本地矛盾目标（localOnly 本地独有 + 内容差异的本地错误版本），按表分组。 */
+  function conflictTargets() {
     const rep = _lastReport;
-    if (!rep || !rep.tables) return { ok: false, error: '先点「重新核对」' };
-    const targets = [];   // {table, key, kind:'localOnly'|'diff'}
+    if (!rep || !rep.tables) return [];
+    const targets = [];
     Object.keys(rep.tables).forEach(t => {
       const tb = rep.tables[t];
       (tb.localOnly || []).forEach(k => targets.push({ table: t, key: String(k), kind: 'localOnly' }));
       const diffKeys = new Set((tb.diffs || []).map(d => String(d.key)));
       diffKeys.forEach(k => targets.push({ table: t, key: k, kind: 'diff' }));
     });
+    return targets;
+  }
+
+  async function clearConflictsDeleteLocal() {
+    const targets = conflictTargets();
     if (!targets.length) return { ok: false, error: '没有可清除的矛盾' };
     let deleted = 0; const skipped = [];
     for (const tg of targets) {
@@ -9918,7 +9924,24 @@ function renderAlignBox() {
   }
 
   box.querySelectorAll('[data-itmop-clear-all]').forEach(btn => btn.addEventListener('click', async () => {
-    if (!confirm('一键清除矛盾？\n\n这些矛盾是本地的错误/草稿数据（没跟飞书协同）。\n将删除本地这些记录（飞书不动，以飞书为事实），随后拉取飞书真值对齐。')) return;
+    const targets = conflictTargets();
+    if (!targets.length) { alert('没有可清除的矛盾。'); return; }
+    /* 清单式预览：按表列出每张表要删哪些（localOnly 几条哪几个键 / 内容差异几条哪几个键），
+       让用户先看到具体要清什么，再决定是否一键清除。 */
+    const byTable = {};
+    targets.forEach(tg => {
+      const t = TABLE_LABEL[tg.table] || tg.table;
+      byTable[t] = byTable[t] || { localOnly: [], diff: [] };
+      byTable[t][tg.kind].push(tg.key);
+    });
+    const lines = ['将删除以下本地矛盾数据（飞书不动，以飞书为事实）：', ''];
+    Object.keys(byTable).forEach(t => {
+      const g = byTable[t];
+      if (g.localOnly.length) lines.push('· ' + t + ' · 本地独有 ' + g.localOnly.length + ' 条：' + g.localOnly.slice(0, 6).join('、') + (g.localOnly.length > 6 ? ' 等' : ''));
+      if (g.diff.length) lines.push('· ' + t + ' · 内容差异 ' + g.diff.length + ' 条：' + g.diff.slice(0, 6).join('、') + (g.diff.length > 6 ? ' 等' : ''));
+    });
+    lines.push('', '共 ' + targets.length + ' 条。确定清除？（删除后自动拉取飞书真值对齐）');
+    if (!confirm(lines.join('\n'))) return;
     btn.disabled = true; btn.textContent = '清除中…';
     try {
       const r = await clearConflictsDeleteLocal();
