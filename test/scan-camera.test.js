@@ -230,12 +230,12 @@ test('describe 拒绝时可自定义按钮文案（如「本行已填齐，无�
 /* ================= P0-1 帧管线：降采样快路径 + 全帧慢路径 ================= */
 
 test('P0-1 快路径：1920×1080 帧按 frameScale=0.5 降采样产出 960×540', async () => {
-  const { cam, sizes } = setupPipeline({ frameScale: 0.5, fullFrameEvery: 4 });
+  const { cam, draws } = setupPipeline({ frameScale: 0.5, fullFrameEvery: 4 });
   await cam.open({});
-  assert.ok(await waitFor(() => sizes.length >= 2, 3000), '应至少取帧 2 次，实测 ' + sizes.length);
+  assert.ok(await waitFor(() => draws.length >= 2, 3000), '应至少取帧 2 次，实测 ' + draws.length);
   cam.close('test');
-  assert.equal(sizes[0], '960x540', '首帧应走快路径 960×540，实测 ' + sizes[0]);
-  assert.equal(sizes[1], '960x540', '第 2 帧应走快路径 960×540，实测 ' + sizes[1]);
+  assert.equal(draws[0].dw, 960, '首帧应走快路径 960 宽，实测 ' + draws[0].dw);
+  assert.equal(draws[1].dw, 960, '第 2 帧应走快路径 960 宽，实测 ' + draws[1].dw);
 });
 
 test('P0-1 慢路径：每 4 帧跑一次全帧 1920×1080 兜小码', async () => {
@@ -1500,7 +1500,10 @@ test('项 2b：慢帧 decode 挂起期间快帧照常出卡（独立通道）', 
   let slowStarted = false;
   /* 假原生 BarcodeDetector：detect 挂起直到放行。 */
   const FakeBD = Object.assign(function () {
-    return { detect: async image => { slowStarted = true; await slowHold; return []; } };
+    return { detect: async canvas => {
+      if (canvas.width >= 1280) { slowStarted = true; await slowHold; return []; }
+      return [];   // 快帧原生确定性 miss → 落到注入 decodeAll
+    } };
   }, { getSupportedFormats: () => ['qr_code'] });
   const create = document.createElement.bind(document);
   document.createElement = tag => {
@@ -1547,4 +1550,205 @@ test('项 2c：无 BarcodeDetector → 慢帧 1280×720 中档', async () => {
   assert.ok(slow, '应有慢帧存在');
   assert.equal(slow.dw, 1280, '无原生慢帧应 1280 宽，实测 ' + slow.dw);
   assert.equal(slow.dh, 720, '无原生慢帧应 720 高，实测 ' + slow.dh);
+});
+
+/* ================= 2.93：原生优先 / 诊断行 / 变焦补漏 ================= */
+
+/* 项 1：原生命中 → worker 未被调用、engineName='BarcodeDetector'、未 getImageData。 */
+test('2.93 项 1：原生 BarcodeDetector 命中 → worker 未调用 + 免 getImageData', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 1920; video.videoHeight = 1080;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  let getImageDataCalls = 0;
+  const create = document.createElement.bind(document);
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: () => {},
+        getImageData: (x, y, w, h) => { getImageDataCalls++; return { width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }; }
+      });
+    }
+    return elc;
+  };
+  let workerPosted = 0;
+  class FakeWorker { constructor() {} postMessage() { workerPosted++; } terminate() {} }
+  const FakeBD = Object.assign(function () {
+    return { detect: async canvas => [{ rawValue: 'LOC:NATIVE', format: 'qr_code', boundingBox: { x: 10, y: 10, width: 100, height: 100 } }] };
+  }, { getSupportedFormats: () => ['qr_code'] });
+  const win = Object.assign({}, document.defaultView, { Worker: FakeWorker, BarcodeDetector: FakeBD });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 3000), '原生命中应出卡');
+  assert.equal(document.getElementById('scanCamValue').textContent, 'LOC:NATIVE');
+  assert.equal(workerPosted, 0, '原生命中时不得向 worker 发解码消息（selfTest 外），实测 ' + workerPosted);
+  assert.equal(getImageDataCalls, 0, '原生路径应零 getImageData（detect 直接吃 canvas），实测 ' + getImageDataCalls);
+  cam.close('test');
+  const p = win.__scanPerf;
+  assert.equal(p.engineName, 'BarcodeDetector', 'engineName 应为 BarcodeDetector，实测 ' + p.engineName);
+});
+
+/* 项 1：原生 miss → 落到 worker；原生抛错 → nativeDead 后续直接 worker。 */
+test('2.93 项 1：原生 miss 落 worker；抛错后 nativeDead 不再探测', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 640; video.videoHeight = 480;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const create = document.createElement.bind(document);
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: () => {},
+        getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      });
+    }
+    return elc;
+  };
+  let detectCalls = 0;
+  const FakeBD = Object.assign(function () {
+    return { detect: async () => {
+      detectCalls++;
+      if (detectCalls === 1) return [];          // 第 1 帧 miss
+      throw new Error('boom');                    // 第 2 帧抛错 → nativeDead
+    } };
+  }, { getSupportedFormats: () => ['qr_code'] });
+  const win = Object.assign({}, document.defaultView, { BarcodeDetector: FakeBD });
+  let workerCalls = 0;
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1,
+    decodeAll: async () => { workerCalls++; return [{ text: 'LOC:W' + workerCalls, format: '二维码' }]; }
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => workerCalls >= 1, 3000), '原生 miss 应落到注入 decodeAll（worker 位）');
+  /* 等 nativeDead 发生（miss + 抛错 = 2 次 detect）后再观察稳定。 */
+  assert.ok(await waitFor(() => detectCalls >= 2, 5000), '应发生 miss+抛错两次 detect，实测 ' + detectCalls);
+  const callsAtDead = detectCalls;
+  await tick(300);
+  assert.ok(detectCalls <= callsAtDead, 'nativeDead 后不得再探测 detect，实测 ' + detectCalls + ' > ' + callsAtDead);
+  cam.close('test');
+});
+
+/* 项 2：诊断行存在 → 文本含引擎名与 ms；debugHud:false → 不刷新。 */
+test('2.93 项 2：诊断行 500ms 刷新（引擎名 + ms），debugHud=false 关闭', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 640; video.videoHeight = 480;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const cam = ScanCamera.attach({
+    document, win: document.defaultView,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1,
+    capture: () => ({ width: 640, height: 480, data: new Uint8ClampedArray(4) }),
+    decodeAll: async () => [{ text: 'LOC:HUD', format: '二维码' }]
+  });
+  await cam.open({});
+  const hud = document.getElementById('scanCamHud');
+  assert.ok(hud, 'index.html 应有 scanCamHud 节点');
+  assert.ok(await waitFor(() => /引擎 .+ · 解码 \d+ms · 档位 \S+ · 已识别 \d+/.test(hud.textContent), 3000),
+    '诊断行应含「引擎 · 解码 Nms · 档位 · 已识别」，实测 "' + hud.textContent + '"');
+  cam.close('test');
+  const textAfterClose = hud.textContent;
+  await tick(600);
+  assert.equal(hud.textContent, textAfterClose, 'close() 后诊断行应停止刷新');
+});
+
+/* 项 3：无 zoom 能力 + box=15%（旧 8% 阈值不触发，新 20% 应触发 crop 重解）。 */
+test('2.93 项 3：box=15% 宽无 zoom 能力 → crop 放大重解触发（阈值 8%→20% 防回归）', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 1920; video.videoHeight = 1080;
+  video.play = async () => {};
+  const track = { stop() {}, getCapabilities: () => ({}) };   // 无 zoom
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const create = document.createElement.bind(document);
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: () => {},
+        getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      });
+    }
+    return elc;
+  };
+  let calls = 0;
+  const cam = ScanCamera.attach({
+    document, win: document.defaultView,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1,
+    capture: () => ({ width: 960, height: 540, data: new Uint8ClampedArray(4) }),
+    decodeAll: async image => {
+      calls++;
+      if (image.width === 960) return [{ text: 'LOC:SMALL', format: '二维码', box: { x: 340, y: 160, w: 144, h: 144 } }];
+      return [{ text: 'LOC:CROPPED', format: '二维码' }];
+    }
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 3000), 'crop 重解应出卡');
+  assert.ok(calls >= 2, 'box=15%（>8% 旧阈值）也应触发 crop 重解（decodeAll ≥2），实测 ' + calls);
+  cam.close('test');
+});
+
+/* 项 3：慢通道命中带小 box → maybeAutoZoom 被调（变焦或 crop 分支）。 */
+test('2.93 项 3：慢通道（全帧）命中小码 → 变焦被触发', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 1920; video.videoHeight = 1080;
+  video.play = async () => {};
+  const applied = [];
+  const track = {
+    stop() {},
+    getCapabilities: () => ({ zoom: { min: 1, max: 10 } }),
+    getSettings: () => ({ zoom: 1 }),
+    applyConstraints: async c => { applied.push(c); }
+  };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const create = document.createElement.bind(document);
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: () => {},
+        getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      });
+    }
+    return elc;
+  };
+  /* 假原生：全帧（慢）detect 命中带小 box；快帧 miss。 */
+  const FakeBD = Object.assign(function () {
+    return { detect: async canvas => {
+      if (canvas.width >= 1900) return [{ rawValue: 'LOC:FAR', format: 'qr_code', boundingBox: { x: 850, y: 470, width: 300, height: 300 } }];
+      return [];
+    } };
+  }, { getSupportedFormats: () => ['qr_code'] });
+  const win = Object.assign({}, document.defaultView, { BarcodeDetector: FakeBD });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1, fullFrameEvery: 2
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => applied.length >= 1, 5000),
+    '慢通道全帧命中 300px/1920px=15.6% 小码近中心应触发变焦，实测 constraints=' + JSON.stringify(applied));
+  assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 3000), '慢通道命中应出卡');
+  cam.close('test');
 });
