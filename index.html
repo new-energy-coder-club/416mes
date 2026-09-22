@@ -9587,7 +9587,7 @@ function dataConsistencyHtml() {
         '<td class="diff-local">' + (d.local === '' ? '<span class="hint">（空）</span>' : esc(d.local)) + '</td>' +
         '<td class="diff-remote">' + (d.feishu === '' ? '<span class="hint">（空）</span>' : esc(d.feishu)) + '</td>' +
         '<td>' + (k === 'itemOperations'
-          ? '<span class="hint" title="物品操作表只许专用接口写入（服务端拒收通用 upsert），通用覆盖会让多设备命令仲裁失真">⚠ 物品操作请到「物品作业 · 待处理区」核对原命令</span>'
+          ? '<button class="btn tiny ghost" data-itmop-inspect="' + esc(d.key) + '" title="走物品操作协议：查询这条命令在飞书侧的真实终态（多设备仲裁），并据此对齐本地">🔍 查询原命令结果</button>'
           : '<button class="btn tiny ghost" data-diff-keep-local="' + esc(k) + '" data-diff-key="' + esc(d.key) + '" data-diff-field="' + esc(d.field) + '" title="把本机这条记录重新推给飞书，让飞书改成和本地一样">推本地值→飞书</button>') + '</td></tr>').join('');
       detail += '<div class="reconcile-keys"><b>内容差异 ' + t.diffCount + ' 处'
         + (t.diffCount > (t.diffs || []).length ? '（仅展示前 ' + (t.diffs || []).length + ' 处）' : '') + '：</b>' +
@@ -9883,6 +9883,51 @@ function renderAlignBox() {
     if (!r.ok) { btn.disabled = false; alert('推送失败：' + r.error); return; }
     log('☁️ 人工按本地值覆盖飞书：' + (TABLE_LABEL[table] || table) + ' ' + key);
   }));
+  /* 方案B·协议正解：物品操作内容差异行「查询原命令结果」——
+     走物品操作协议（/api/feishu/item-operation GET，inspect）拿飞书侧真实终态，
+     让本地对齐到那个终态（绝不通用盲盖，多设备命令仲裁保真）。 */
+  box.querySelectorAll('[data-itmop-inspect]').forEach(btn => btn.addEventListener('click', async () => {
+    const opId = btn.dataset.itmopInspect;
+    btn.disabled = true; btn.textContent = '查询中…';
+    try {
+      const client = window.ItemClient.create({ persistence: itmPersistence, fetch: window.fetch.bind(window) });
+      const op = await client.inspect(opId);   // GET 只读，永不重放 apply（服务端 get 严格 read-only）
+      const local = (state.itemOperations || []).find(x => x.code === opId);
+      const remotePhase = op && op.phase;
+      const localPhase = local && local.phase;
+      /* 对齐规则：飞书是权威终态源（REJECTED/APPLIED）。本地与飞书终态不一致时，
+         把本地如实对齐为飞书终态 —— 这是「查询原命令结果」的收口，不是覆盖飞书。 */
+      if (local && remotePhase && localPhase !== remotePhase &&
+          ['APPLIED', 'REJECTED'].includes(remotePhase)) {
+        const ok = confirm('物品操作协议核对结果：\n\n飞书终态：' + remotePhase + (op.error ? '（' + op.error + '）' : '') +
+          '\n本地现态：' + localPhase + '\n\n把本地对齐为飞书终态「' + remotePhase + '」？' +
+          '\n（如实记录多设备仲裁结果，差异消除；不改动飞书。）');
+        if (ok) {
+          local.phase = remotePhase;
+          local.error = op.error;
+          if (op.finishedAt) local.finishedAt = op.finishedAt;
+          if (op.progress) local.progress = Object.assign({}, local.progress, op.progress);
+          save();
+          log('🔍 物品操作协议对齐：' + opId + ' → 本地随飞书终态 ' + remotePhase);
+          await runReconcile();
+          return;
+        }
+      } else {
+        alert('物品操作协议核对结果：\n\n飞书终态：' + (remotePhase || '（未决/未返回）') +
+          (op && op.error ? '\n飞书错误：' + op.error : '') +
+          '\n本地现态：' + (localPhase || '（本地无此记录）') +
+          '\n\n' + (localPhase === remotePhase
+            ? '两侧终态一致，无需处理。'
+            : (remotePhase ? '该命令飞书已终结；请到「物品作业 · 待处理区」进一步处理。'
+                            : '该命令飞书侧未决，请到「物品作业 · 待处理区」用「查询原命令结果 / settle」收口。')));
+      }
+    } catch (e) {
+      alert('查询原命令结果失败：' + ((e && e.message) || e) + '\n\n若命令结果未知，请到「物品作业 · 待处理区」处理。');
+    } finally {
+      btn.disabled = false; btn.textContent = '🔍 查询原命令结果';
+    }
+  }));
+
   box.querySelectorAll('[data-reconcile-del]').forEach(btn => btn.addEventListener('click', async () => {
     const table = btn.dataset.table, key = btn.dataset.key, rec = findRec(table, key);
     if (!rec) { alert('记录已不存在，请重新核对。'); return; }
