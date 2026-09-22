@@ -9591,7 +9591,7 @@ function dataConsistencyHtml() {
           : '<button class="btn tiny ghost" data-diff-keep-local="' + esc(k) + '" data-diff-key="' + esc(d.key) + '" data-diff-field="' + esc(d.field) + '" title="把本机这条记录重新推给飞书，让飞书改成和本地一样">推本地值→飞书</button>') + '</td></tr>').join('');
       detail += '<div class="reconcile-keys">' +
         (k === 'itemOperations' && t.diffCount
-          ? '<div style="margin-bottom:8px"><button class="btn small danger" data-itmop-clear-all="1" title="这些是测试遗留的矛盾。以飞书为事实：把本地这些记录一次性对齐为飞书侧的真实终态（多设备仲裁），消除全部矛盾。">🧹 一键清除矛盾（以飞书为事实）</button></div>'
+          ? '<div style="margin-bottom:8px"><button class="btn small danger" data-itmop-clear-all="1" title="这些矛盾是本地的错误/草稿数据（没跟飞书协同）。删除本地这些记录（飞书不动，以飞书为事实），随后拉飞书真值对齐。">🧹 一键清除矛盾（删除本地）</button></div>'
           : '') +
         '<b>内容差异 ' + t.diffCount + ' 处'
         + (t.diffCount > (t.diffs || []).length ? '（仅展示前 ' + (t.diffs || []).length + ' 处）' : '') + '：</b>' +
@@ -9887,45 +9887,51 @@ function renderAlignBox() {
     if (!r.ok) { btn.disabled = false; alert('推送失败：' + r.error); return; }
     log('☁️ 人工按本地值覆盖飞书：' + (TABLE_LABEL[table] || table) + ' ' + key);
   }));
-  /* 一键清除矛盾（以飞书为事实）：测试遗留的物品操作矛盾，本地一次性对齐为飞书终态。
-     逐个 opId 走物品操作协议（inspect GET 只读）拿飞书权威终态，本地如实对齐。 */
-  async function itmopClearAllToFeishu() {
+  /* 一键清除矛盾（删除本地，飞书为事实）：矛盾的本质是本地有"错误/草稿数据没跟飞书协同"，
+     飞书才是事实 —— 直接删除本地这些矛盾记录（localOnly 本地独有 + 内容差异的本地错误版本），
+     然后拉飞书真值对齐。受保护表（itemOperations/workorders）走凭据删除留痕，普通表走 deleteOneLocalRecord。 */
+  async function clearConflictsDeleteLocal() {
     const rep = _lastReport;
-    if (!rep || !rep.tables || !rep.tables.itemOperations) return { ok: false, error: '先点「重新核对」' };
-    const keys = [...new Set((rep.tables.itemOperations.diffs || []).map(d => String(d.key)))];
-    if (!keys.length) return { ok: false, error: '没有物品操作矛盾' };
-    const client = window.ItemClient.create({ persistence: itmPersistence, fetch: window.fetch.bind(window) });
-    let n = 0, failed = [];
-    for (const opId of keys) {
+    if (!rep || !rep.tables) return { ok: false, error: '先点「重新核对」' };
+    const targets = [];   // {table, key, kind:'localOnly'|'diff'}
+    Object.keys(rep.tables).forEach(t => {
+      const tb = rep.tables[t];
+      (tb.localOnly || []).forEach(k => targets.push({ table: t, key: String(k), kind: 'localOnly' }));
+      const diffKeys = new Set((tb.diffs || []).map(d => String(d.key)));
+      diffKeys.forEach(k => targets.push({ table: t, key: k, kind: 'diff' }));
+    });
+    if (!targets.length) return { ok: false, error: '没有可清除的矛盾' };
+    let deleted = 0; const skipped = [];
+    for (const tg of targets) {
       try {
-        const op = await client.inspect(opId);   // 飞书权威终态（GET 严格只读）
-        const rec = (state.itemOperations || []).find(x => x.code === opId);
-        if (rec && op && op.phase) {
-          rec.phase = op.phase;                                    // 以飞书为事实
-          rec.error = op.error;
-          if (op.finishedAt) rec.finishedAt = op.finishedAt;
-          if (op.requestedAt) rec.requestedAt = op.requestedAt;
-          if (op.progress) rec.progress = Object.assign({}, rec.progress, op.progress);
-          n++;
+        if (tg.table === 'itemOperations') {
+          /* 物品操作是审计链日志，删除要凭据留痕 + 不破坏引用它的实体凭据 */
+          const r = await deleteOneLocalRecord('itemOperations', tg.key);
+          if (r.ok) deleted++; else skipped.push(tg.key.slice(0, 8) + '（' + (r.error || '').slice(0, 20) + '）');
+        } else {
+          const r = await deleteOneLocalRecord(tg.table, tg.key);
+          if (r.ok) deleted++; else skipped.push(tg.key.slice(0, 8) + '（' + (r.error || '').slice(0, 20) + '）');
         }
-      } catch (e) { failed.push(opId.slice(0, 8)); }
+      } catch (e) { skipped.push(tg.key.slice(0, 8) + '（异常）'); }
     }
-    if (n) save();
-    return { ok: true, count: n, total: keys.length, failed };
+    return { ok: true, deleted, total: targets.length, skipped };
   }
 
   box.querySelectorAll('[data-itmop-clear-all]').forEach(btn => btn.addEventListener('click', async () => {
-    if (!confirm('一键清除物品操作矛盾？\n\n这些是测试遗留的矛盾，以飞书为事实：\n本地这些记录会一次性对齐为飞书侧的真实终态（REJECTED/APPLIED），消除全部矛盾。\n不改动飞书。')) return;
+    if (!confirm('一键清除矛盾？\n\n这些矛盾是本地的错误/草稿数据（没跟飞书协同）。\n将删除本地这些记录（飞书不动，以飞书为事实），随后拉取飞书真值对齐。')) return;
     btn.disabled = true; btn.textContent = '清除中…';
     try {
-      const r = await itmopClearAllToFeishu();
-      if (!r.ok) { alert('清除失败：' + r.error); btn.disabled = false; btn.textContent = '🧹 一键清除矛盾（以飞书为事实）'; return; }
-      log('🧹 一键清除矛盾：' + r.count + '/' + r.total + ' 条物品操作本地已对齐为飞书终态' +
-        (r.failed.length ? '（' + r.failed.length + ' 条查询失败：' + r.failed.join('、') + '）' : ''));
-      await runReconcile();
+      const r = await clearConflictsDeleteLocal();
+      if (!r.ok) { alert('清除失败：' + r.error); btn.disabled = false; btn.textContent = '🧹 一键清除矛盾（删除本地）'; return; }
+      log('🧹 一键清除矛盾：删除本地 ' + r.deleted + '/' + r.total + ' 条' +
+        (r.skipped.length ? '，跳过 ' + r.skipped.length + ' 条：' + r.skipped.join('、') : ''));
+      /* 删除后拉飞书真值：内容差异删掉本地错误版本后，把飞书的真值拉回本地，达成真一致。 */
+      if (cloudOnline || fsOnline) { await cloudSync({ silent: true }); }
+      else await runReconcile();
+      log('✅ 本地矛盾已清除，飞书真值已对齐');
     } catch (e) {
       alert('清除失败：' + ((e && e.message) || e));
-      btn.disabled = false; btn.textContent = '🧹 一键清除矛盾（以飞书为事实）';
+      btn.disabled = false; btn.textContent = '🧹 一键清除矛盾（删除本地）';
     }
   }));
 
