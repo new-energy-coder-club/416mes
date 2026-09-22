@@ -9969,20 +9969,38 @@ function renderAlignBox() {
   async function clearConflictsDeleteLocal(targetsOpt) {
     const targets = targetsOpt || conflictTargets();
     if (!targets.length) return { ok: false, error: '没有可清除的矛盾' };
-    let deleted = 0; const skipped = [];
+    let deleted = 0, aligned = 0; const skipped = [];
     for (const tg of targets) {
       try {
         if (tg.table === 'itemOperations') {
-          /* 物品操作是审计链日志，删除要凭据留痕 + 不破坏引用它的实体凭据 */
           const r = await deleteOneLocalRecord('itemOperations', tg.key);
-          if (r.ok) deleted++; else skipped.push(tg.key.slice(0, 8) + '（' + (r.error || '').slice(0, 20) + '）');
+          if (r.ok) { deleted++; continue; }
+          /* 被实体引用为凭据而挡删 → 这是测试遗留的矛盾命令。
+             以飞书为事实：把本地这条操作对齐为飞书终态（本地 APPLIED 错误 → 飞书 REJECTED 真值），
+             并清空引用它的实体的凭据 lastOpId（这条命令本就无效，实体回到未核验等待正确处理，
+             不留死引用 → 矛盾消除且实体不被死凭据锁死）。 */
+          const rec = (state.itemOperations || []).find(x => x.code === tg.key);
+          const rep2 = _lastReport && _lastReport.tables && _lastReport.tables.itemOperations;
+          const diffRow = rec && rep2 && (rep2.diffs || []).find(d => String(d.key) === tg.key);
+          if (rec && diffRow) {
+            rec.phase = diffRow.feishu || rec.phase;      // 对齐为飞书终态（REJECTED 等）
+            rec.error = (rep2.diffs.find(d => String(d.key) === tg.key && d.field === 'error') || {}).feishu || rec.error;
+            /* 清空引用这条无效命令的实体凭据（让它回到未核验，下次同步/核实重新走正确流程） */
+            (state.items || []).forEach(it => { if (it.lastOpId === tg.key) { it.lastOpId = ''; it.status = it.status === 'active' ? 'unknown' : it.status; } });
+            (state.containers || []).forEach(ct => { if (ct.lastOpId === tg.key) { ct.lastOpId = ''; ct.status = ct.status === 'active' ? 'unknown' : ct.status; } });
+            (state.locations || []).forEach(lc => { if (lc.lastOpId === tg.key) { lc.lastOpId = ''; lc.status = lc.status === 'active' ? 'unknown' : lc.status; } });
+            aligned++;
+          } else {
+            skipped.push(tg.key.slice(0, 8) + '（凭据保护，已留作审计）');
+          }
         } else {
           const r = await deleteOneLocalRecord(tg.table, tg.key);
           if (r.ok) deleted++; else skipped.push(tg.key.slice(0, 8) + '（' + (r.error || '').slice(0, 20) + '）');
         }
       } catch (e) { skipped.push(tg.key.slice(0, 8) + '（异常）'); }
     }
-    return { ok: true, deleted, total: targets.length, skipped };
+    if (deleted || aligned) save();
+    return { ok: true, deleted, aligned, total: targets.length, skipped };
   }
 
   /* 待清除矛盾可视面板：全选/全不选/勾选计数/清除已选 */
