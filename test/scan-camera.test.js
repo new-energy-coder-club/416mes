@@ -238,32 +238,31 @@ test('P0-1 快路径：1920×1080 帧按 frameScale=0.5 降采样产出 960×540
   assert.equal(draws[1].dw, 960, '第 2 帧应走快路径 960 宽，实测 ' + draws[1].dw);
 });
 
-test('P0-1 慢路径：每 4 帧跑一次全帧 1920×1080 兜小码', async () => {
+test('P0-1 慢路径：原生时每 6 帧 720p 兜小码（2.97 减负）', async () => {
   const { cam, draws } = setupPipeline({ frameScale: 0.5, fullFrameEvery: 4 });
   await cam.open({});
-  /* draws：快路径 sw=1920（9 参 drawImage），慢/legacy 路径 sw=undefined（2 参）。 */
-  assert.ok(await waitFor(() => draws.length >= 5, 3000), '应至少取帧 5 次，实测 ' + draws.length);
+  /* 2.97：原生慢车道 720p + 每 6 帧（draws：快 9 参 sw=1920，慢/legacy 2 参 sw=undefined）。 */
+  assert.ok(await waitFor(() => draws.length >= 7, 3000), '应至少取帧 7 次，实测 ' + draws.length);
   cam.close('test');
-  assert.equal(draws[3].dw, 1920, '第 4 帧应走慢路径全帧 1920 宽，实测 ' + draws[3].dw);
-  assert.ok(draws[3].sw === undefined, '慢路径应两参 drawImage（sw undefined），实测 ' + draws[3].sw);
-  assert.equal(draws[4].dw, 960, '第 5 帧应回到快路径 960，实测 ' + draws[4].dw);
+  assert.equal(draws[5].dw, 1280, '第 6 帧应走慢路径 1280 宽（720p），实测 ' + draws[5].dw);
+  assert.equal(draws[6].dw, 960, '第 7 帧应回到快路径 960，实测 ' + draws[6].dw);
 });
 
-test('P0-1 fullFrameEvery 可调：每 2 帧一次全帧', async () => {
-  const { cam, draws } = setupPipeline({ frameScale: 0.5, fullFrameEvery: 2 });
+test('P0-1 fullFrameEvery 可调：wasm（无原生）慢帧仍按 fullFrameEvery=2 且 720p', async () => {
+  const { cam, draws } = setupPipeline({ frameScale: 0.5, fullFrameEvery: 2, noNative: true });
   await cam.open({});
   assert.ok(await waitFor(() => draws.length >= 3, 3000), '应至少取帧 3 次，实测 ' + draws.length);
   cam.close('test');
-  assert.equal(draws[1].dw, 1920, '第 2 帧应走慢路径全帧 1920 宽，实测 ' + draws[1].dw);
+  assert.equal(draws[1].dw, 1280, '第 2 帧应走慢路径 1280 宽（720p），实测 ' + draws[1].dw);
   assert.equal(draws[2].dw, 960, '第 3 帧应回到快路径 960，实测 ' + draws[2].dw);
 });
 
-test('P0-1 pipeline:legacy 回归：全部帧走旧全帧路径 1920×1080', async () => {
+test('P0-1 pipeline:legacy 回归：全部帧走慢路径（2.97 统一 720p）', async () => {
   const { cam, draws } = setupPipeline({ pipeline: 'legacy' });
   await cam.open({});
   assert.ok(await waitFor(() => draws.length >= 2, 3000), '应至少取帧 2 次，实测 ' + draws.length);
   cam.close('test');
-  for (const d of draws) assert.equal(d.dw, 1920, 'legacy 路径应全帧 1920，实测 ' + d.dw);
+  for (const d of draws) assert.equal(d.dw, 1280, 'legacy 路径应统一 1280 宽（720p），实测 ' + d.dw);
 });
 
 test('P0-1 注入 capture 时跳过整个内置管线（快/慢路径都不走）', async () => {
@@ -1505,7 +1504,8 @@ test('项 2b：慢帧 decode 挂起期间快帧照常出卡（独立通道）', 
     return { detect: async canvas => {
       if (canvas.width >= 1280) { slowStarted = true; await slowHold; return []; }
       fastDetectCalls++;
-      if (fastDetectCalls === 1) return [];
+      /* 慢帧触发前快帧持续 miss（保持 awaiting=false）；慢帧挂起后快帧命中出卡。 */
+      if (!slowStarted) return [];
       return [{ rawValue: 'LOC:FAST', format: 'qr_code', boundingBox: { x: 10, y: 10, width: 100, height: 100 } }];
     } };
   }, { getSupportedFormats: () => ['qr_code'] });
@@ -1733,7 +1733,7 @@ test('2.93 项 3：慢通道（全帧）命中小码 → 变焦被触发', async
   /* 假原生：全帧（慢）detect 命中带小 box；快帧 miss。 */
   const FakeBD = Object.assign(function () {
     return { detect: async canvas => {
-      if (canvas.width >= 1900) return [{ rawValue: 'LOC:FAR', format: 'qr_code', boundingBox: { x: 850, y: 470, width: 300, height: 300 } }];
+      if (canvas.width >= 1280) return [{ rawValue: 'LOC:FAR', format: 'qr_code', boundingBox: { x: 560, y: 300, width: 200, height: 200 } }];
       return [];
     } };
   }, { getSupportedFormats: () => ['qr_code'] });
@@ -1928,7 +1928,7 @@ test('2.94 项 2：sessionStorage 预置标记 → 兼容模式禁用 worker + �
   class FakeWorker { constructor() { workerConstructed = true; } postMessage() {} terminate() {} }
   const win = Object.assign({}, document.defaultView, {
     Worker: FakeWorker,
-    sessionStorage: fakeSS
+    localStorage: fakeSS
   });
   const cam = ScanCamera.attach({
     document, win,
@@ -1965,10 +1965,10 @@ test('2.94 项 2：无标记全功能 + sessionStorage 抛错静默', async () =
     }
     return elc;
   };
-  /* sessionStorage 抛错（隐私模式）。 */
+  /* localStorage 抛错（隐私模式）。 */
   const win = Object.assign({}, document.defaultView, {
     Worker: FakeWorker,
-    sessionStorage: { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } }
+    localStorage: { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } }
   });
   const cam = ScanCamera.attach({
     document, win,
@@ -1976,7 +1976,7 @@ test('2.94 项 2：无标记全功能 + sessionStorage 抛错静默', async () =
     intervalMs: 2, legacyLoop: true, voteThreshold: 1
   });
   await cam.open({});
-  assert.equal(workerConstructed, true, '无标记且 sessionStorage 抛错时应正常构造 worker（机制静默跳过）');
+  assert.equal(workerConstructed, true, '无标记且 localStorage 抛错时应正常构造 worker（机制静默跳过）');
   assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 3000), '应正常出卡');
   cam.close('test');
 });
@@ -1998,7 +1998,7 @@ test('2.96：标记前置 —— getUserMedia reject 时 mes.scanStage 已写入
   const video = document.getElementById('scanCamVideo');
   video.play = async () => {};
   const store = {};
-  const win = Object.assign({}, document.defaultView, { sessionStorage: makeSS(store) });
+  const win = Object.assign({}, document.defaultView, { localStorage: makeSS(store) });
   const cam = ScanCamera.attach({
     document, win,
     mediaDevices: { getUserMedia: async () => { throw new Error('boom'); } },
@@ -2021,7 +2021,7 @@ test('2.96：stage=1 兼容模式 —— worker 未构造、hint 提示、clean 
   const store = { 'mes.scanStage': '1' };
   let workerConstructed = false;
   class FakeWorker { constructor() { workerConstructed = true; } postMessage() {} terminate() {} }
-  const win = Object.assign({}, document.defaultView, { Worker: FakeWorker, sessionStorage: makeSS(store) });
+  const win = Object.assign({}, document.defaultView, { Worker: FakeWorker, localStorage: makeSS(store) });
   const cam = ScanCamera.attach({
     document, win,
     mediaDevices: { getUserMedia: async () => stream },
@@ -2045,7 +2045,7 @@ test('2.96：stage=2 拦截 —— 不取流、引导文案、关闭不归零、
   let gUMCalls = 0;
   const track = { stop() {} };
   const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
-  const win = Object.assign({}, document.defaultView, { sessionStorage: makeSS(store) });
+  const win = Object.assign({}, document.defaultView, { localStorage: makeSS(store) });
   const cam = ScanCamera.attach({
     document, win,
     mediaDevices: { getUserMedia: async () => { gUMCalls++; return stream; } },
@@ -2068,11 +2068,15 @@ test('2.96：stage=2 拦截 —— 不取流、引导文案、关闭不归零、
 });
 
 /* 迁移：旧 key mes.scanActive → attach 后旧 key 被清理。 */
-test('2.96：旧 key mes.scanActive 迁移清理', async () => {
+test('2.96：旧 key 迁移清理（localStorage+sessionStorage 双清）', async () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   const { document } = parseHTML(html);
-  const store = { 'mes.scanActive': '1' };
-  const win = Object.assign({}, document.defaultView, { sessionStorage: makeSS(store) });
+  const lsStore = { 'mes.scanActive': '1' };
+  const ssStore = { 'mes.scanActive': '1', 'mes.scanStage': '2' };   // v2.96 遗留
+  const win = Object.assign({}, document.defaultView, {
+    localStorage: makeSS(lsStore),
+    sessionStorage: makeSS(ssStore)
+  });
   const track = { stop() {} };
   const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
   const cam = ScanCamera.attach({
@@ -2080,7 +2084,9 @@ test('2.96：旧 key mes.scanActive 迁移清理', async () => {
     mediaDevices: { getUserMedia: async () => stream },
     intervalMs: 2, legacyLoop: true
   });
-  assert.equal(store['mes.scanActive'], undefined, 'attach 应清理旧 key mes.scanActive');
+  assert.equal(lsStore['mes.scanActive'], undefined, 'attach 应清理 localStorage 旧 key');
+  assert.equal(ssStore['mes.scanActive'], undefined, 'attach 应清理 sessionStorage 旧 key');
+  assert.equal(ssStore['mes.scanStage'], undefined, 'attach 应清理 sessionStorage 遗留 mes.scanStage');
   cam.close('test');
 });
 
@@ -2108,7 +2114,7 @@ test('2.96：sessionStorage 抛错 → 机制静默跳过、全功能', async ()
   };
   const win = Object.assign({}, document.defaultView, {
     Worker: FakeWorker,
-    sessionStorage: { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } }
+    localStorage: { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } }
   });
   const cam = ScanCamera.attach({
     document, win,
@@ -2119,4 +2125,83 @@ test('2.96：sessionStorage 抛错 → 机制静默跳过、全功能', async ()
   assert.equal(workerConstructed, true, 'sessionStorage 抛错时应全功能（worker 正常构造）');
   assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 3000), '应正常出卡');
   cam.close('test');
+});
+
+/* ================= 2.97：QR-only 快车道 + 慢车道减负 + localStorage stage ================= */
+
+/* 项 1：快车道 detector 构造 formats 仅 qr_code；慢车道收到全量码制。 */
+test('2.97 项 1：快车道 QR-only detector；慢车道全量码制独立实例', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 1920; video.videoHeight = 1080;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const create = document.createElement.bind(document);
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: () => {},
+        getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      });
+    }
+    return elc;
+  };
+  const constructed = [];
+  const FakeBD = Object.assign(function (opts) {
+    constructed.push((opts && opts.formats) || null);
+    return { detect: async () => [] };
+  }, { getSupportedFormats: () => ['qr_code', 'code_128', 'ean_13'] });
+  const win = Object.assign({}, document.defaultView, { BarcodeDetector: FakeBD });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1
+  });
+  await cam.open({});
+  await tick(80);   // 快帧（fast detector）+ 慢帧（slow detector）都构造
+  cam.close('test');
+  const fast = constructed.find(f => f && f.length === 1 && f[0] === 'qr_code');
+  const slow = constructed.find(f => f && f.length > 1 && f.indexOf('code_128') >= 0);
+  assert.ok(fast, '快车道 detector 应仅 qr_code，实测 constructed=' + JSON.stringify(constructed));
+  assert.ok(slow, '慢车道 detector 应含全量码制（含 code_128），实测 constructed=' + JSON.stringify(constructed));
+});
+
+/* 项 2：原生慢帧尺寸 720p（1280×720）+ 间隔 6。 */
+test('2.97 项 2：原生慢车道 720p + 每 6 帧（减负）', async () => {
+  const { cam, draws } = setupPipeline({ frameScale: 0.5, fullFrameEvery: 4 });
+  await cam.open({});
+  assert.ok(await waitFor(() => draws.length >= 13, 3000), '应至少取帧 13 次（验证间隔 6），实测 ' + draws.length);
+  cam.close('test');
+  const slowIdx = draws.findIndex(d => d.dw === 1280);
+  assert.ok(slowIdx >= 0, '应有 1280 宽慢帧');
+  assert.equal(draws[slowIdx].dh, 720, '慢帧应 720 高，实测 ' + draws[slowIdx].dh);
+  /* 间隔 6：下一慢帧在第 6 帧之后。 */
+  const nextSlow = draws.findIndex((d, i) => i > slowIdx && d.dw === 1280);
+  assert.equal(nextSlow - slowIdx, 6, '原生慢帧间隔应为 6，实测 ' + (nextSlow - slowIdx));
+});
+
+/* 项 3：localStorage 预置 stage=2 → 拦截生效；clean close 归零。 */
+test('2.97 项 3：localStorage stage=2 → 拦截；clean close 归零', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.play = async () => {};
+  const lsStore = { 'mes.scanStage': '2' };
+  let gUMCalls = 0;
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const win = Object.assign({}, document.defaultView, { localStorage: makeSS(lsStore) });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => { gUMCalls++; return stream; } },
+    intervalMs: 2, legacyLoop: true
+  });
+  await cam.open({});
+  assert.equal(gUMCalls, 0, 'localStorage stage=2 应拦截 getUserMedia，实测 ' + gUMCalls);
+  assert.match(document.getElementById('scanCamErr').textContent, /无法使用相机扫码|连续异常退出/);
+  cam.close('test');
+  assert.equal(lsStore['mes.scanStage'], '2', '拦截路径 close 不归零');
 });
