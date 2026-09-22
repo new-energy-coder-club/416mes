@@ -1086,3 +1086,241 @@ test('P1-4 worker 解码超时（>2s）→ 回退主线程链', async () => {
   assert.equal(d.getElementById('scanCamValue').textContent, 'LOC:TIMEOUT');
   cam.close('test');
 });
+
+/* ================= 修 A/B/C/D：确认卡性能回归 ================= */
+
+/* 修 A：renderConfirm 签名去重 —— 相同候选集连续帧只渲染 1 次；候选集变化再渲染。 */
+test('修 A：相同候选集连续帧 renderConfirm 只渲染 1 次（replaceChildren 计数）', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 640; video.videoHeight = 480;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  let replaceCount = 0;
+  const origReplace = document.getElementById('scanCamCandidates').replaceChildren.bind(document.getElementById('scanCamCandidates'));
+  document.getElementById('scanCamCandidates').replaceChildren = (...a) => { replaceCount++; return origReplace(...a); };
+  const hits = [{ text: 'LOC:L-A', format: '二维码' }];
+  const cam = ScanCamera.attach({
+    document, win: document.defaultView,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1,
+    capture: () => ({ width: 640, height: 480, data: new Uint8ClampedArray(4) }),
+    decodeAll: async () => hits.slice()
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => replaceCount >= 1, 3000), '首帧候选应渲染 1 次');
+  const afterFirst = replaceCount;
+  await tick(100);   // 后续帧同候选集，签名相同 → 不再渲染
+  assert.equal(replaceCount, afterFirst, '相同候选集不得重复渲染（修 A 签名去重），实测 ' + replaceCount + ' vs ' + afterFirst);
+  cam.close('test');
+});
+
+test('修 A：候选集变化（新码达标）触发第 2 次渲染', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 640; video.videoHeight = 480;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  let replaceCount = 0;
+  const origReplace = document.getElementById('scanCamCandidates').replaceChildren.bind(document.getElementById('scanCamCandidates'));
+  document.getElementById('scanCamCandidates').replaceChildren = (...a) => { replaceCount++; return origReplace(...a); };
+  let two = false;
+  const cam = ScanCamera.attach({
+    document, win: document.defaultView,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1,
+    capture: () => ({ width: 640, height: 480, data: new Uint8ClampedArray(4) }),
+    decodeAll: async () => two
+      ? [{ text: 'LOC:L-A', format: '二维码' }, { text: 'ITM:WP-001', format: '二维码' }]
+      : [{ text: 'LOC:L-A', format: '二维码' }]
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => replaceCount >= 1, 3000));
+  two = true;
+  assert.ok(await waitFor(() => replaceCount >= 2, 3000), '候选集变化应触发第 2 次渲染');
+  cam.close('test');
+});
+
+/* 修 B：awaiting 期间 200ms 节流 —— 5 帧 rapid 只处理第 1 帧；>200ms 后恢复。 */
+test('修 B：awaiting 确认期间 <200ms 的帧被跳过（capture 计数）', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 640; video.videoHeight = 480;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  let captures = 0, decodes = 0;
+  let now = 1000;
+  const fakeWin = Object.assign({}, document.defaultView, {
+    performance: { now: () => now }
+  });
+  const cam = ScanCamera.attach({
+    document, win: fakeWin,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1,
+    capture: () => { captures++; return { width: 640, height: 480, data: new Uint8ClampedArray(4) }; },
+    decodeAll: async () => { decodes++; return [{ text: 'LOC:L-A', format: '二维码' }]; }
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => decodes >= 1, 3000), '第 1 帧应处理');
+  const capAfterFirst = captures, decAfterFirst = decodes;
+  /* rapid 推 5 帧（时间不动，<200ms 窗口内）→ 全被节流跳过。 */
+  for (let i = 0; i < 5; i++) await tick(15);
+  assert.equal(captures, capAfterFirst, 'awaiting 期间 <200ms 帧不得 capture（修 B），实测 ' + captures);
+  assert.equal(decodes, decAfterFirst, 'awaiting 期间 <200ms 帧不得 decode（修 B），实测 ' + decodes);
+  /* 时间推进 >200ms → 恢复处理。 */
+  now += 250;
+  await tick(15);
+  assert.ok(await waitFor(() => decodes > decAfterFirst, 3000), '>200ms 后应恢复处理');
+  cam.close('test');
+});
+
+/* 修 C：awaiting 期间不走全帧慢路径（fullFrameEvery 边界帧也走快路径尺寸）。 */
+test('修 C：awaiting 期间 fullFrameEvery 边界帧仍走快路径（capture 尺寸 960×540）', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 1920; video.videoHeight = 1080;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const create = document.createElement.bind(document);
+  const sizes = [];
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: (v, sx, sy, sw, sh, dx, dy, dw, dh) => sizes.push({ sw: sh === undefined ? undefined : sw, sh, dw: dh === undefined ? undefined : dw, dh }),
+        getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      });
+    }
+    return elc;
+  };
+  const cam = ScanCamera.attach({
+    document, win: document.defaultView,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1,
+    fullFrameEvery: 2,
+    decodeAll: async () => [{ text: 'LOC:L-A', format: '二维码' }]
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 3000), '应进入 awaiting');
+  sizes.length = 0;
+  /* 修 B 节流：awaiting 中 <200ms 帧被跳过——等 >200ms 让 1 帧通过再断言尺寸。 */
+  await tick(280);
+  const fullSizes = sizes.filter(s => s.dw === undefined);
+  assert.equal(fullSizes.length, 0, 'awaiting 期间不得有全帧 drawImage(video,0,0) 两参调用（修 C），实测 ' + fullSizes.length + ' 次，sizes=' + JSON.stringify(sizes));
+  assert.ok(sizes.some(s => s.dw === 960), 'awaiting 期间应走 960×540 快路径（drawImage 8 参带目标尺寸），实测 sizes=' + JSON.stringify(sizes.slice(0, 3)));
+  cam.close('test');
+});
+
+/* 修 D：worker 直 transfer（payload.data === image.data.buffer 同引用，发送后原 data
+   detached）；worker 抛错回退时主线程链收到的是重新取的帧（capture 2 次，data 非空）。 */
+test('修 D：worker 正常 → 直 transfer 不 slice（payload.data 同引用 + 发送后 detached）', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 640; video.videoHeight = 480;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const instances = [];
+  let lastPayload = null, lastTransfer = null;
+  class FakeWorker {
+    constructor(url) { this.onmessage = null; this.terminated = false; instances.push(this); }
+    postMessage(payload, transfer) {
+      lastPayload = payload; lastTransfer = transfer;
+      /* 模拟真实 structured-clone transfer：detach transfer 列表里的每个 buffer。 */
+      if (transfer) for (const buf of transfer) {
+        if (buf && typeof buf.transfer === 'function') buf.transfer();
+      }
+      setTimeout(() => this.onmessage && this.onmessage({ data: { id: payload.id, hits: [{ text: 'LOC:W', format: '二维码' }] } }), 1);
+    }
+    terminate() { this.terminated = true; }
+  }
+  const win = Object.assign({}, document.defaultView, { Worker: FakeWorker });
+  let capturedImage = null;
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1,
+    capture: () => { capturedImage = { width: 640, height: 480, data: new Uint8ClampedArray(4) }; return capturedImage; },
+    worker: true
+  });
+  await cam.open({});
+  assert.ok(await waitFor(() => lastPayload !== null, 3000), '应有 postMessage 发出');
+  assert.equal(lastPayload.image.data, capturedImage.data.buffer,
+    '修 D：payload.data 必须 === image.data.buffer（直 transfer 不 slice），实测不同引用');
+  assert.ok(lastTransfer && lastTransfer[0] === capturedImage.data.buffer, 'transfer 列表应含同一 buffer');
+  assert.equal(capturedImage.data.length, 0, '发送后原 image.data 应 detached（length 0）');
+  cam.close('test');
+});
+
+test('修 D：worker 抛错回退 → 主线程链收到重新取的帧（capture 2 次，data 非 detached）', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 640; video.videoHeight = 480;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  class FakeWorker {
+    constructor() { this.onmessage = null; this.terminated = false; }
+    postMessage(payload) {
+      setTimeout(() => this.onmessage && this.onmessage({ data: { id: payload.id, error: 'boom' } }), 1);
+    }
+    terminate() { this.terminated = true; }
+  }
+  const win = Object.assign({}, document.defaultView, { Worker: FakeWorker });
+  let captures = 0;
+  const chainImages = [];
+  let firstDetachedOk = false;
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1,
+    capture: () => {
+      captures++;
+      return { width: 640, height: 480, data: new Uint8ClampedArray(4) };
+    },
+    decodeAll: async image => {
+      chainImages.push(image);
+      return [{ text: 'LOC:MAIN', format: '二维码' }];
+    }
+  });
+  /* decodeAll 注入时 bridge 不启用——改用 worker:true + jsQR 主链 spy。
+     这里用 decode 注入（单结果）会禁用 worker；正确做法：不注入 decode，给 win.jsQR。 */
+  cam.close('test');
+  /* 重建：不注入 decode/decodeAll，worker 抛错 → 回退主线程 jsQR 链。 */
+  const { document: d2 } = parseHTML(html);
+  const video2 = d2.getElementById('scanCamVideo');
+  video2.videoWidth = 640; video2.videoHeight = 480;
+  video2.play = async () => {};
+  const win2 = Object.assign({}, d2.defaultView, {
+    Worker: FakeWorker,
+    jsQR: (data, w, h) => {
+      chainImages.push({ data, w, h });
+      return { data: 'LOC:MAIN' };
+    }
+  });
+  let captures2 = 0;
+  const cam2 = ScanCamera.attach({
+    document: d2, win: win2,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1,
+    capture: () => { captures2++; return { width: 640, height: 480, data: new Uint8ClampedArray(4) }; }
+  });
+  await cam2.open({});
+  assert.ok(await waitFor(() => !d2.getElementById('scanCamConfirm').hidden, 5000),
+    'worker 抛错回退主线程链应出卡');
+  assert.ok(captures2 >= 2, '回退必须重新取帧（capture ≥2：worker 帧 1 + 回退新帧 1），实测 ' + captures2);
+  assert.ok(chainImages.length >= 1 && chainImages[0].data.length > 0,
+    '主线程链收到的 image.data 不得 detached（length=' + (chainImages[0] && chainImages[0].data.length) + '）');
+  assert.equal(d2.getElementById('scanCamValue').textContent, 'LOC:MAIN');
+  cam2.close('test');
+});
