@@ -9970,8 +9970,19 @@ function renderAlignBox() {
     const targets = targetsOpt || conflictTargets();
     if (!targets.length) return { ok: false, error: '没有可清除的矛盾' };
     let deleted = 0, aligned = 0; const skipped = [];
+    const journal = [];   // 删除凭据：谁在什么时候因为什么删了哪些
     for (const tg of targets) {
       try {
+        /* transactions（流水，append-only 审计账本）与 workorders（工单）等 deleteOneLocalRecord
+           硬拦的表：矛盾是"飞书侧已不存在/测试遗留"，走直接过滤 + 删除凭据（与「确认删除这 N 条」同路） */
+        if (tg.table === 'transactions') {
+          const rec = findRec('transactions', tg.key);
+          if (!rec) { skipped.push(tg.key.slice(0, 8) + '（已不在）'); continue; }
+          state.transactions = (state.transactions || []).filter(x => String(x[TABLE_KEY_FIELD.transactions]) !== String(tg.key));
+          state.__syncedKeys.transactions = (state.__syncedKeys.transactions || []).filter(x => String(x) !== String(tg.key));
+          journal.push({ table: 'transactions', key: String(tg.key) });
+          deleted++; continue;
+        }
         if (tg.table === 'itemOperations') {
           const r = await deleteOneLocalRecord('itemOperations', tg.key);
           if (r.ok) { deleted++; continue; }
@@ -9999,7 +10010,12 @@ function renderAlignBox() {
         }
       } catch (e) { skipped.push(tg.key.slice(0, 8) + '（异常）'); }
     }
-    if (deleted || aligned) save();
+    if (deleted || aligned) {
+      if (journal.length) {
+        try { await fsJournalDeletion(journal, '一键清除矛盾：删除本地矛盾数据（飞书为事实）', 'conflict-clear'); } catch (_) {}
+      }
+      save(); renderTxns(); renderLedger();
+    }
     return { ok: true, deleted, aligned, total: targets.length, skipped };
   }
 
