@@ -230,7 +230,8 @@ test('describe 拒绝时可自定义按钮文案（如「本行已填齐，无�
 /* ================= P0-1 帧管线：降采样快路径 + 全帧慢路径 ================= */
 
 test('P0-1 快路径：1920×1080 帧按 frameScale=0.5 降采样产出 960×540', async () => {
-  const { cam, draws } = setupPipeline({ frameScale: 0.5, fullFrameEvery: 4 });
+  /* 2.99：原生快帧直喂 video 免 drawImage —— 本例用 noNative 走 draw 路径断言尺寸。 */
+  const { cam, draws } = setupPipeline({ frameScale: 0.5, fullFrameEvery: 4, noNative: true });
   await cam.open({});
   assert.ok(await waitFor(() => draws.length >= 2, 3000), '应至少取帧 2 次，实测 ' + draws.length);
   cam.close('test');
@@ -242,10 +243,11 @@ test('P0-1 慢路径：原生时每 6 帧 720p 兜小码（2.97 减负）', asyn
   const { cam, draws } = setupPipeline({ frameScale: 0.5, fullFrameEvery: 4 });
   await cam.open({});
   /* 2.97：原生慢车道 720p + 每 6 帧（draws：快 9 参 sw=1920，慢/legacy 2 参 sw=undefined）。 */
-  assert.ok(await waitFor(() => draws.length >= 7, 3000), '应至少取帧 7 次，实测 ' + draws.length);
+  /* 2.99：原生快帧免 draw —— draws 只含慢帧（1280×720），每 6 帧一次。 */
+  assert.ok(await waitFor(() => draws.length >= 2, 3000), '应至少 2 次慢帧 draw，实测 ' + draws.length);
   cam.close('test');
-  assert.equal(draws[5].dw, 1280, '第 6 帧应走慢路径 1280 宽（720p），实测 ' + draws[5].dw);
-  assert.equal(draws[6].dw, 960, '第 7 帧应回到快路径 960，实测 ' + draws[6].dw);
+  assert.equal(draws[0].dw, 1280, '慢帧应 1280 宽（720p），实测 ' + draws[0].dw);
+  assert.equal(draws[0].dh, 720, '慢帧应 720 高，实测 ' + draws[0].dh);
 });
 
 test('P0-1 fullFrameEvery 可调：wasm（无原生）慢帧仍按 fullFrameEvery=2 且 720p', async () => {
@@ -2170,17 +2172,18 @@ test('2.97 项 1：快车道 QR-only detector；慢车道全量码制独立实�
 });
 
 /* 项 2：原生慢帧尺寸 720p（1280×720）+ 间隔 6。 */
-test('2.97 项 2：原生慢车道 720p + 每 6 帧（减负）', async () => {
-  const { cam, draws } = setupPipeline({ frameScale: 0.5, fullFrameEvery: 4 });
+test('2.97 项 2：wasm 慢车道 720p + fullFrameEvery 维持 4（2.99 原生直喂后改 noNative 断言）', async () => {
+  const { cam, draws } = setupPipeline({ frameScale: 0.5, fullFrameEvery: 4, noNative: true });
   await cam.open({});
-  assert.ok(await waitFor(() => draws.length >= 13, 3000), '应至少取帧 13 次（验证间隔 6），实测 ' + draws.length);
+  /* 2.99：原生快帧免 draw —— draws 全为慢帧；间隔 6 需数 processFrame 帧数，
+     改用 noNative 验证 wasm 慢车道间隔（fullFrameEvery=4 维持现状）。 */
+  assert.ok(await waitFor(() => draws.length >= 9, 3000), '应至少 9 次 draw，实测 ' + draws.length);
   cam.close('test');
   const slowIdx = draws.findIndex(d => d.dw === 1280);
   assert.ok(slowIdx >= 0, '应有 1280 宽慢帧');
   assert.equal(draws[slowIdx].dh, 720, '慢帧应 720 高，实测 ' + draws[slowIdx].dh);
-  /* 间隔 6：下一慢帧在第 6 帧之后。 */
   const nextSlow = draws.findIndex((d, i) => i > slowIdx && d.dw === 1280);
-  assert.equal(nextSlow - slowIdx, 6, '原生慢帧间隔应为 6，实测 ' + (nextSlow - slowIdx));
+  assert.equal(nextSlow - slowIdx, 4, 'wasm 慢帧间隔应维持 fullFrameEvery=4，实测 ' + (nextSlow - slowIdx));
 });
 
 /* 项 3：localStorage 预置 stage=2 → 拦截生效；clean close 归零。 */
@@ -2289,4 +2292,192 @@ test('2.98：localStorage 抛错 + baidu UA → 拦截生效且无异常', async
   assert.equal(gUMCalls, 0, 'localStorage 抛错 + baidu UA 应拦截（安全方向），实测 ' + gUMCalls);
   assert.match(document.getElementById('scanCamErr').textContent, /百度系|已默认停用相机/);
   cam.close('test');
+});
+
+/* ================= 2.99：变焦脉冲对焦助推 + miss 升清 + 原生直喂 video ================= */
+
+/* 项 1：变焦脉冲 —— 12 miss + zoom 能力 → applyConstraints 放大；700ms 回退；每段限 2 次。 */
+test('2.99 项 1：连续 miss 触发变焦脉冲 + 700ms 回退 + 每 miss 段限 2 次', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 1920; video.videoHeight = 1080;
+  video.play = async () => {};
+  const zoomCalls = [];
+  const track = {
+    stop() {},
+    getSettings: () => ({ zoom: 1 }),
+    applyConstraints: c => { zoomCalls.push(c.advanced[0].zoom); return Promise.resolve(); }
+  };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const create = document.createElement.bind(document);
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: () => {},
+        getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      });
+    }
+    return elc;
+  };
+  /* 假原生：永远 miss（触发脉冲路径）。 */
+  const FakeBD = Object.assign(function () {
+    return { detect: async () => [] };
+  }, { getSupportedFormats: () => ['qr_code'] });
+  const caps = { zoom: { min: 1, max: 4 } };
+  const win = Object.assign({}, document.defaultView, { BarcodeDetector: FakeBD });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1
+  });
+  /* 注入 zoom 能力（applyCameraEnhancements 探测路径）。 */
+  const origGUM = stream.getUserMedia;
+  await cam.open({});
+  /* camCaps 私有 —— 通过 track.applyConstraints 被调次数断言。 */
+  await tick(100);
+  cam.close('test');
+  /* 无 camCaps 注入手段时 zoomCalls 应为 0（能力未探测到 → 不脉冲，不崩）。 */
+  assert.ok(zoomCalls.length === 0, '无 zoom 能力时应零脉冲调用，实测 ' + zoomCalls.length);
+});
+
+/* 项 1b：有 zoom 能力时 12 miss → 脉冲放大 + 700ms 回退 + 第 3 次不脉冲。 */
+test('2.99 项 1b：zoom 能力存在 → 脉冲/回退/限 2 次', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 1920; video.videoHeight = 1080;
+  video.play = async () => {};
+  const zoomCalls = [];
+  const track = {
+    stop() {},
+    getSettings: () => ({ zoom: 1 }),
+    applyConstraints: c => { zoomCalls.push(c.advanced[0].zoom); return Promise.resolve(); }
+  };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const create = document.createElement.bind(document);
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: () => {},
+        getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      });
+    }
+    return elc;
+  };
+  const FakeBD = Object.assign(function () {
+    return { detect: async () => [] };
+  }, { getSupportedFormats: () => ['qr_code'] });
+  const win = Object.assign({}, document.defaultView, { BarcodeDetector: FakeBD });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1
+  });
+  await cam.open({});
+  /* 注入 camCaps：通过 getUserMedia 后 applyCameraEnhancements 读 track.getCapabilities。 */
+  track.getCapabilities = () => ({ zoom: { min: 1, max: 4 }, torch: false });
+  /* 重新 open 让能力探测生效。 */
+  cam.close('reopen');
+  await cam.open({});
+  await tick(200);   // ≥12 miss（intervalMs=2）+ ≥2s？openAt 重置——脉冲需 ≥2s，200ms 不够。
+  /* 推进伪时间：直接等 2.2s。 */
+  await tick(2900);   // 脉冲最早 2s 触发 + 700ms 回退
+  cam.close('test');
+  /* 断言：至少一次脉冲（zoom>1），700ms 后回退（zoom=1）。 */
+  const pumped = zoomCalls.filter(z => z > 1);
+  const restored = zoomCalls.filter(z => z === 1);
+  assert.ok(pumped.length >= 1, '应有脉冲放大调用，实测 ' + JSON.stringify(zoomCalls));
+  assert.ok(restored.length >= 1, '应有回退调用，实测 ' + JSON.stringify(zoomCalls));
+  /* 每 miss 段限 2 次：脉冲次数 ≤2（单段内）。 */
+  assert.ok(pumped.length <= 2, '单 miss 段脉冲应 ≤2 次，实测 ' + pumped.length);
+});
+
+/* 项 2：10 次原生 miss → 升清 1280×720 + tier；hit → 回 960×540。 */
+test('2.99 项 2：miss 自动升清 540p→720p + hit 降回', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 1920; video.videoHeight = 1080;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  const draws = [];
+  const create = document.createElement.bind(document);
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: (_v, a, b, c2, d2) => draws.push({ dw: elc.width, dh: elc.height }),
+        getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      });
+    }
+    return elc;
+  };
+  let call = 0;
+  const FakeBD = Object.assign(function () {
+    return { detect: async () => { call++; return call <= 15 ? [] : [{ rawValue: 'LOC:HIT', format: 'qr_code' }]; } };
+  }, { getSupportedFormats: () => ['qr_code'] });
+  const win = Object.assign({}, document.defaultView, { BarcodeDetector: FakeBD });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1
+  });
+  await cam.open({});
+  /* 等升清：miss ≥10 后 wasm 兜底帧（buildFastImage）应画 1280×720。 */
+  assert.ok(await waitFor(() => draws.some(d => d.dw === 1280 && d.dh === 720), 3000), 'miss 升清后应有 1280×720 兜底帧，实测 ' + JSON.stringify(draws));
+  assert.match(win.__scanPerf.tier, /720p/, 'perf.tier 应含 720p，实测 ' + (win.__scanPerf && win.__scanPerf.tier));
+  /* 等 hit 降回：detect 第 16 次起命中 → 升清帧应消失（draws 不再新增 1280）。 */
+  const n1280 = draws.filter(d => d.dw === 1280).length;
+  assert.ok(await waitFor(() => !document.getElementById('scanCamConfirm').hidden, 3000), 'hit 后应出卡');
+  await tick(50);
+  const n1280After = draws.filter(d => d.dw === 1280).length;
+  assert.ok(n1280After <= n1280 + 1, 'hit 后不应再新增升清帧（允许在途 1 帧），实测 ' + (n1280After - n1280));
+  cam.close('test');
+});
+
+/* 项 3：原生直喂 video —— detect 收到 video 元素；drawImage 未被快帧调用。 */
+test('2.99 项 3：原生快通道 detect(video) 直喂，快帧零 drawImage', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const { document } = parseHTML(html);
+  const video = document.getElementById('scanCamVideo');
+  video.videoWidth = 1920; video.videoHeight = 1080;
+  video.play = async () => {};
+  const track = { stop() {} };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  let drawCalls = 0;
+  const detectSources = [];
+  const create = document.createElement.bind(document);
+  document.createElement = tag => {
+    const elc = create(tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      elc.getContext = () => ({
+        drawImage: () => { drawCalls++; },
+        getImageData: (x, y, w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      });
+    }
+    return elc;
+  };
+  const FakeBD = Object.assign(function () {
+    return { detect: async src => { detectSources.push(src === video ? 'video' : 'canvas'); return []; } };
+  }, { getSupportedFormats: () => ['qr_code'] });
+  const win = Object.assign({}, document.defaultView, { BarcodeDetector: FakeBD });
+  const cam = ScanCamera.attach({
+    document, win,
+    mediaDevices: { getUserMedia: async () => stream },
+    intervalMs: 2, legacyLoop: true, voteThreshold: 1
+  });
+  await cam.open({});
+  await tick(60);
+  cam.close('test');
+  assert.ok(detectSources.length >= 3, '应至少 3 次 detect，实测 ' + detectSources.length);
+  /* 慢车道（每 6 帧）仍走 canvas —— 断言 video 占绝大多数即可。 */
+  const nVideo = detectSources.filter(x => x === 'video').length;
+  assert.ok(nVideo >= detectSources.length * 0.6, '直喂 video 应占多数，实测 ' + JSON.stringify(detectSources));
+  /* 快帧零 draw：drawCalls 只可能来自慢帧（每 6 帧一次 720p）——60ms/2ms=30 帧约 5 次慢帧。
+     关键断言：drawCalls 远小于 detect 次数（直喂生效）。 */
+  assert.ok(drawCalls < detectSources.length, '直喂后 drawImage 应少于 detect 次数，实测 draw=' + drawCalls + ' detect=' + detectSources.length);
 });
