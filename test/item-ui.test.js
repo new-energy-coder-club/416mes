@@ -30,6 +30,43 @@ test('guided activate: unknown LOC blocks fill, action button enables and retrie
  assert.equal(s.queued&&s.queued.kind,'activateLocation');assert.equal(s.submitted,1);
  assert.deepEqual(page.scan.row().values.map(v=>v.code),['L-OLD'],'APPLIED后自动重试填入原步骤');
 });
+test('guided activate: conflict-guard must not masquerade as missing LOC archive (user-reported regression)',async()=>{
+ /* 3.2.2 用户实测：「库位未启用」→点「现场确认启用该库位并继续」→反而报「未找到该库位档案」。
+    根因：entityStatus 用 U.unique——冲突守卫(UNRESOLVED_ENTITY_CONFLICT)先于 NOT_FOUND
+    抛出、状态被吞成 null，真实存在的实体被判成查无此档。修复：读 expected 时对目标
+    实体自身临时豁免冲突守卫（与域层 uniqueForActivation 同款语义）。 */
+ const s=setupGuided();
+ s.state.__itmConflicts={'locations:L-OLD':{reason:'server-snapshot-unverified',observed:{status:'unknown'}}};
+ const d=s.document,page=s.page;
+ d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN();
+ const action=d.getElementById('itmStatus').querySelector('button');assert.ok(action,'未启用应提供引导按钮');
+ action.click();await tickN(12);
+ assert.doesNotMatch(d.getElementById('itmStatus').textContent,/未找到该库位档案/,'冲突堵死的实体不是查无此档');
+ assert.equal(s.queued&&s.queued.kind,'activateLocation');
+ assert.equal(s.queued&&s.queued.expected.locationStatus,'unknown','expected 取本地真实状态（豁免冲突守卫后读得到）');
+ assert.deepEqual(page.scan.row().values.map(v=>v.code),['L-OLD'],'APPLIED后自动重试填入原步骤');
+});
+test('guided activate: conflict-guard must not masquerade as missing container archive',async()=>{
+ const s=setupGuided();
+ s.state.__itmConflicts={'containers:C-OLD':{reason:'unverified-controlled-change',observed:{version:0}}};
+ const d=s.document,page=s.page;
+ await page.accept('LOC:L-A');
+ d.getElementById('itmCode').value='CTN:C-OLD';d.getElementById('itmScanBtn').click();await tickN();
+ const action=d.getElementById('itmStatus').querySelector('button');assert.ok(action,'容器未启用应提供引导按钮');
+ action.click();await tickN(12);
+ assert.doesNotMatch(d.getElementById('itmStatus').textContent,/未找到该容器档案/,'冲突堵死的容器不是查无此档');
+ assert.equal(s.queued&&s.queued.kind,'activateContainer');
+ assert.equal(s.queued&&s.queued.expected.containerVersion,0,'expected.version 取本地真实版本（豁免冲突守卫后读得到）');
+ assert.equal(s.submitted,1);
+});
+test('guided activate: genuinely missing archive still reports missing with recovery hints',async()=>{
+ const s=setupGuided();
+ const d=s.document;
+ d.getElementById('itmCode').value='LOC:L-NOPE';d.getElementById('itmScanBtn').click();await tickN();
+ /* NOT_FOUND 走 ITM 未建档分支之外的裸抛——直接调 guidedActivate 的兜底：없는实体 */
+ assert.match(d.getElementById('itmStatus').textContent,/未识别|未启用|未找到/,'不存在的编码不得伪装成成功');
+ assert.equal(s.submitted,0,'不得产生任何激活命令');
+});
 test('guided activate: unknown container uses current row LOC as target and resumes',async()=>{
  const s=setupGuided();const d=s.document,page=s.page;
  await page.accept('LOC:L-A');
@@ -409,4 +446,65 @@ test('BUG-D 批量提交入队后自动退出批量模式，单行作业界面�
  assert.match(d.getElementById('itmStatus').textContent,/已退出批量模式/);
  assert.equal(d.getElementById('itmConfirm').textContent,'确认本行，保存待提交','确认键恢复单行语义');
  assert.equal(d.getElementById('itmBatchAbandon').style.display,'none','放弃本批按钮收起');
+});
+
+/* ================= 阶段B 查询页改造回归（用户反馈「只知道名称、找不到东西在哪」） =================
+   ① 结果卡直接带位置摘要（不必逐条点详情）② 空查询不再全表渲染
+   ③ 每张表按自己真实字段匹配（库位 kind / 容器 loc / 物品 category·materialCode）
+   ④ 多关键词 AND + 物品优先排序 + 上限 */
+function setupSearch(){
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document}=parseHTML(html);
+ const state={
+  locations:[{code:'L-A',status:'active',kind:'货架库位',desc:'A区角钢货架'},{code:'W01-G01',status:'active',kind:'工位收纳格',desc:'1号工位'}],
+  containers:[{code:'C-A',loc:'L-A',status:'active',type:'收纳盒',spec:'32×25×34cm',version:2},{code:'C-B',loc:'',status:'active',type:'零件盒',spec:'小',version:1}],
+  items:[
+   {code:'WP-TS-001',name:'内六角扳手',spec:'M3',category:'TS',status:'pending',version:1},
+   {code:'WP-GJ-001',name:'螺丝刀',spec:'十字 PH2',category:'GJ',status:'in_stock',container:'C-A',version:2}]
+ };
+ const page=UI.mount({document,getState:()=>state,getPersistence:()=>null,getCommands:async()=>[],id:()=>'x'});
+ return {document,state,page};
+}
+test('B-1：按名称模糊查找，结果卡直接带位置摘要（不必逐条点详情）',()=>{
+ const {document:d}=setupSearch();
+ d.getElementById('itmSearch').value='内六角';d.getElementById('itmSearchBtn').click();
+ const cards=d.getElementById('itmResults').querySelectorAll('.itm-result-card');
+ assert.equal(cards.length,1,'名称命中唯一物品');
+ assert.match(d.getElementById('itmResults').textContent,/物品 · 内六角扳手/);
+ assert.match(d.getElementById('itmSearchStatus').textContent,/找到 1 条/);
+});
+test('B-1：在库物品的结果卡显示 容器 → 库位',()=>{
+ const {document:d}=setupSearch();
+ d.getElementById('itmSearch').value='螺丝刀';d.getElementById('itmSearchBtn').click();
+ assert.match(d.getElementById('itmResults').textContent,/位置：当前 C-A → L-A/,'结果卡必须带容器→库位，不用点详情');
+});
+test('B-1：按说明搜库位时结果卡显示容器数与在库件数',()=>{
+ const {document:d}=setupSearch();
+ d.getElementById('itmSearch').value='角钢货架';d.getElementById('itmSearchBtn').click();
+ assert.equal(d.getElementById('itmResults').querySelectorAll('.itm-result-card').length,1,'按 desc 命中库位');
+ assert.match(d.getElementById('itmResults').textContent,/位置：容器 1 个 · 在库单件 1/,'库位卡应给出容器数与在库件数');
+});
+test('B-2：空查询给引导，不再把全表渲染成卡片',()=>{
+ const {document:d}=setupSearch();
+ d.getElementById('itmSearch').value='   ';d.getElementById('itmSearchBtn').click();
+ assert.equal(d.getElementById('itmResults').querySelectorAll('.itm-result-card').length,0,'空查询禁止全表渲染（扫码枪误触回车曾卡死移动端）');
+ assert.match(d.getElementById('itmSearchStatus').textContent,/请输入名称、规格、分类或编码/);
+ assert.match(d.getElementById('itmResults').textContent,/按名称查找/);
+});
+test('B-3：库位类型 kind / 容器库位 loc / 物品分类 category 均可检索',()=>{
+ const {document:d}=setupSearch();
+ const qv=v=>{d.getElementById('itmSearch').value=v;d.getElementById('itmSearchBtn').click();return d.getElementById('itmResults').textContent;};
+ assert.match(qv('货架库位'),/L-A/,'locations.kind 此前不在匹配字段里');
+ assert.match(qv('L-A'),/C-A/,'反查容器（containers.loc 此前不在匹配字段里）');
+ assert.match(qv('TS'),/内六角扳手/,'按分类查物品（items.category 此前不在匹配字段里）');
+});
+test('B-4：多关键词 AND 命中 + 物品优先于容器库位',()=>{
+ const {document:d}=setupSearch();
+ d.getElementById('itmSearch').value='扳手 M3';d.getElementById('itmSearchBtn').click();
+ assert.match(d.getElementById('itmResults').textContent,/内六角扳手/,'两个词都命中才返回');
+ assert.match(d.getElementById('itmSearchStatus').textContent,/找到 1 条/);
+ d.getElementById('itmSearch').value='A';d.getElementById('itmSearchBtn').click();
+ const titles=[...d.getElementById('itmResults').querySelectorAll('.itm-result-card h3')].map(h=>h.textContent);
+ assert.ok(titles.length>=2);
+ assert.match(titles[0],/^容器 ·/,'物品>容器>库位：容器必须排在库位之前');
+ assert.ok(titles.findIndex(t=>/^库位/.test(t))>titles.findIndex(t=>/^容器/.test(t)),'库位排最后');
 });
