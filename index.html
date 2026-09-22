@@ -9582,7 +9582,9 @@ function dataConsistencyHtml() {
         '<tr><td><code>' + esc(d.key) + '</code></td><td>' + esc(label(d.field)) + '</td>' +
         '<td class="diff-local">' + (d.local === '' ? '<span class="hint">（空）</span>' : esc(d.local)) + '</td>' +
         '<td class="diff-remote">' + (d.feishu === '' ? '<span class="hint">（空）</span>' : esc(d.feishu)) + '</td>' +
-        '<td><button class="btn tiny ghost" data-diff-keep-local="' + esc(k) + '" data-diff-key="' + esc(d.key) + '" data-diff-field="' + esc(d.field) + '" title="把本机这条记录重新推给飞书，让飞书改成和本地一样">推本地值→飞书</button></td></tr>').join('');
+        '<td>' + (k === 'itemOperations'
+          ? '<span class="hint" title="物品操作表只许专用接口写入（服务端拒收通用 upsert），通用覆盖会让多设备命令仲裁失真">⚠ 物品操作请到「物品作业 · 待处理区」核对原命令</span>'
+          : '<button class="btn tiny ghost" data-diff-keep-local="' + esc(k) + '" data-diff-key="' + esc(d.key) + '" data-diff-field="' + esc(d.field) + '" title="把本机这条记录重新推给飞书，让飞书改成和本地一样">推本地值→飞书</button>') + '</td></tr>').join('');
       detail += '<div class="reconcile-keys"><b>内容差异 ' + t.diffCount + ' 处'
         + (t.diffCount > (t.diffs || []).length ? '（仅展示前 ' + (t.diffs || []).length + ' 处）' : '') + '：</b>' +
         '<div class="table-scroll"><table class="grid grid-dense diff-table"><thead><tr>' +
@@ -9861,6 +9863,12 @@ function renderAlignBox() {
   /* 内容差异：把单条记录的本地值推回飞书（覆盖飞书那一列） */
   box.querySelectorAll('[data-diff-keep-local]').forEach(btn => btn.addEventListener('click', async () => {
     const table = btn.dataset.diffKeepLocal, key = btn.dataset.diffKey;
+    /* 物品操作表只许专用接口写入（/api/feishu/upsert 对它一律 400 拒收，实测确认），
+       通用 pushOneReconcileRecord 必失败并静默进离线队列 —— 对物品操作绝不走通用覆盖。 */
+    if (table === 'itemOperations') {
+      alert('物品操作命令不能用「推本地值→飞书」覆盖：\n\n这张表只许专用接口写入，通用覆盖会让多设备命令仲裁失真。\n请到「物品作业 · 待处理区」用「查询原命令结果」核对这条命令的真实终态。');
+      return;
+    }
     const rec = findRec(table, key);
     if (!rec) { alert('记录已不存在，请重新核对。'); return; }
     if (!confirm('把本机 ' + (TABLE_LABEL[table] || table) + '「' + key + '」的**整条记录**推给飞书？\n\n' +
