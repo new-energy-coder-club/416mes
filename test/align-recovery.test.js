@@ -430,21 +430,48 @@ test('阶段5：保存计划必须走 CORE.updateOrderPlan 并同步飞书、留
   assert.ok(failIdx > 0 && s.slice(failIdx, failIdx + 200).includes('alert'), '失败必须告知用户');
 });
 
-test('阶段5：已执行工单不得直接删除，必须先冲销（入口与文案都要说清）', () => {
+test('阶段B：已执行工单不得直接删除，必须先冲销（入口与文案都要说清）', () => {
   const s = fnSrc('showWipDetail');
-  /* 2.60.0：冲销入口已下线，删除拦截文案统一为「不可删+导出核对」 */
-  assert.match(s, /p\.anyExecuted && !CORE\.isCancelled\(w\)[\s\S]{0,120}不可删除（冲销入口已下线）/,
-    '删除按钮必须拦住已执行的工单并说明唯一出路口径');
+  /* 阶段B：冲销入口已重开 —— 删除拦截文案从「不可删+导出 Excel」改为「先去冲销」，
+     并且详情里必须真的渲染出冲销按钮（不再是死路）。 */
+  assert.match(s, /p\.anyExecuted && !CORE\.isCancelled\(w\)[\s\S]{0,160}冲销/,
+    '删除按钮必须拦住已执行的工单，并指出冲销是唯一出路口径');
+  assert.match(s, /wipReverseEligible\(w\)[\s\S]{0,200}btnWipReverse/,
+    '已执行物品化工单必须真的渲染出冲销按钮');
   assert.match(s, /workorderLocalDuplicate\(w\.code\)[\s\S]{0,120}数据对齐/,
     '同号重复工单不得走普通删除（会连飞书唯一记录一起删）');
 });
 
-test('G3：冲销预览与 doReverse 已随 MAT 写路径一并移除（旧单只读，无库存回退入口）', () => {
+test('阶段B：冲销只对物品化工单开放，且三重安全边界都在代码里', () => {
+  const g = fnSrc('wipReverseEligible');
+  assert.match(g, /isItemizedOrder/, '旧「物料×数量」单不得开放冲销');
+  assert.match(g, /isCancelled\(w\)\s*\|\|\s*w\.reverseInfo/, '已取消/已冲销不得重复冲销');
+  assert.match(g, /anyExecuted/, '未执行的单走「取消」即可，不给冲销');
+  assert.match(g, /buildItemReverseCommands/, '必须先能生成逐件反向计划，否则不给按钮');
+  const p = fnSrc('wipReverseRun');
+  assert.match(p, /itmPersistence\.enqueue/, '反向命令必须走物品操作协议入队，不能直接改库存');
+  /* 关单收口在 lib/item-ui.js：反向命令 APPLIED → applyItemReverseResult，
+     未全 APPLIED 时原样报 pending，工单保持原状态（不会「关了单东西没退回去」）。 */
+  const ui = fs.readFileSync(path.join(__dirname, '..', 'lib', 'item-ui.js'), 'utf8');
+  assert.match(ui, /applyItemReverseResult\(state,rw,revs/, 'item-ui 必须用 applyItemReverseResult 收口冲销');
+  assert.match(ui, /rr\.pending/, '有未完成的反向件必须报 pending 而不是直接关单');
+});
+
+/* 阶段B：约束反转。
+   原断言「冲销按钮接线必须删除」对应的是「冲销入口整体下线」——那让误执行的工单
+   只能导出 Excel 人工记账。现在冲销以「逐件反向命令 + 协议收执」的形式重开，
+   因此这里改为守住**新的**安全边界：入口可以有，但绝不允许详情页直改库存。 */
+test('阶段B：冲销入口已重开，但详情页仍不得直改库存', () => {
   const s = fnSrc('showWipDetail');
-  assert.ok(!/const doReverse/.test(s), 'doReverse 死代码必须删除');
-  assert.ok(!/showReversePreview/.test(s), '冲销预览函数必须删除');
-  assert.ok(!/btnWipReverse/.test(s), '冲销按钮接线必须删除（按钮早已不渲染）');
+  assert.ok(!/const doReverse/.test(s), '旧的 doReverse 死代码不得复活');
+  assert.ok(!/showReversePreview/.test(s), '旧的同步预览函数不得复活');
+  assert.match(s, /btnWipReverse/, '冲销按钮必须接线（误执行的工单要能退回）');
   assert.ok(!/fsPushStock/.test(s), '详情页不得再有库存直写调用');
+  assert.ok(!/applyStockChange/.test(s), '详情页不得直接调库存写入口（必须走物品操作协议）');
+  /* 反向命令只能经 itmPersistence 入队，由服务端执行 */
+  const run = fnSrc('wipReverseRun');
+  assert.match(run, /itmPersistence\.enqueue/, '反向命令必须入队，不得本地直改');
+  assert.ok(!/applyStockChange/.test(run), '冲销路径不得直接调库存写入口');
 });
 
 test('阶段5：删除/取消/冲销后都必须回到列表并清掉当前对象条', () => {

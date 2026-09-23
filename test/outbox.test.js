@@ -314,6 +314,64 @@ test('outbox【Phase1·IDB】append 与 remove 均在事务内，不能把其他
   assert.equal(after.length, 1, '删除 A 时不能顺手覆盖掉 B');
 });
 
+/* ================= 阶段B：put（整条覆盖写回） =================
+   背景：index.html 的「瞬态错误自动慢速重试」要把 needs_attention 改回 pending，
+   但 outbox 的两个 create 都没导出 put —— 调用抛 TypeError 又被 catch(e){} 静默吞掉，
+   结果是每 5 分钟打一次「自动重试」却从不真正重投。这里锁住 put 的存在与语义。 */
+test('outbox【同步】put 覆盖写回：只改簿记字段，不动 tries/lastError', () => {
+  const ob = mk();
+  ob.append({ op: 'stock', matCode: 'A-1', qty: 1 });
+  const id = ob.list()[0].id;
+  ob.markAttempt(id, '网络断开');
+  const before = ob.list()[0];
+  assert.equal(before.tries, 1, 'markAttempt 计一次失败');
+  ob.put({ id: id, status: 'pending', _autoRetries: 1 });
+  const after = ob.list().find(x => x.id === id);
+  assert.equal(after.status, 'pending', 'needs_attention 必须能被改回 pending');
+  assert.equal(after._autoRetries, 1, '新增字段要落盘');
+  assert.equal(after.tries, before.tries, 'put 不得递增 tries');
+  assert.equal(after.lastError, before.lastError, 'put 不得改写 lastError');
+  assert.equal(after.matCode, 'A-1', '业务字段必须保留');
+});
+test('outbox【同步】put 不新增条目，也不吞掉其他条目', () => {
+  const ob = mk();
+  ob.append({ op: 'stock', matCode: 'A-1', qty: 1 });
+  ob.append({ op: 'stock', matCode: 'B-1', qty: 1 });
+  const ids = ob.list().map(x => x.id);
+  ob.put({ id: ids[0], status: 'pending', _autoRetries: 1 });
+  assert.deepEqual(ob.list().map(x => x.id).sort(), ids.slice().sort(), '条目集合不得变化');
+  assert.equal(ob.summary().total, 2, '两条都还在');
+});
+test('outbox【同步】put 到不存在的 id 会补写，而不是静默丢弃', () => {
+  const ob = mk();
+  ob.put({ id: 'q-new', op: 'stock', matCode: 'Z-1', status: 'pending' });
+  assert.equal(ob.list().length, 1, '显式 put 的新条目要能读回');
+  assert.equal(ob.list()[0].matCode, 'Z-1');
+});
+test('outbox【同步】put 缺 id 直接抛错（不静默）', () => {
+  const ob = mk();
+  assert.throws(() => ob.put({ op: 'stock' }), /id/, '没有 id 的条目无法定位，必须显式报错');
+});
+test('outbox【IDB】异步 put 同样生效，且重开 adapter 后仍在', async () => {
+  const Store = require('../lib/store.js');
+  const store = Store.createMemoryStore(); await store.open();
+  let n = 0;
+  const ob = Outbox.createAsync({ store, maxTries: 2, idFactory: () => 'id-' + (++n) });
+  await ob.append({ op: 'stock', matCode: 'A-1', qty: 1 });
+  const id = (await ob.list())[0].id;
+  await ob.markAttempt(id, '502');
+  await ob.markAttempt(id, '502');
+  assert.equal((await ob.list())[0].status, 'needs_attention');
+  await ob.put({ id: id, status: 'pending', _autoRetries: 1 });
+  let cur = (await ob.list()).find(x => x.id === id);
+  assert.equal(cur.status, 'pending', '异步 put 必须把 needs_attention 改回 pending');
+  assert.equal(cur.tries, 2, '异步 put 不得递增 tries');
+  const reopened = Outbox.createAsync({ store });
+  cur = (await reopened.list()).find(x => x.id === id);
+  assert.equal(cur.status, 'pending', '重开 adapter 后回队状态必须仍在（自动重试能落地的前提）');
+  assert.equal(cur._autoRetries, 1);
+});
+
 test('投影：已放弃（gaveup）的操作不参与投影', () => {
   const r = Outbox.project(snap(), [{ op: 'delete', table: 'materials', keys: ['A-1'], status: 'gaveup' }]);
   assert.equal(r.view.materials.length, 2, '放弃掉的操作不该继续影响视图');

@@ -64,14 +64,22 @@ test('G3-1 台账页无编辑控件：无新增/删除/自动编号入口，表�
   assert.ok(sec.includes('id="btnColsMore"'), '「显示全部列」必须保留（纯呈现）');
 });
 
-test('G3-1 renderLedger 纯展示：无 input/select 单元格、无 change 写处理器、无预警底色', () => {
+/* 阶段B：契约修正 —— 「台账只读」与「显示预警」是两件事。
+   原断言把预警底色一并禁掉，导致需求书 §3.1「低于阈值黄底提示」无法实现。
+   现在改为：仍然禁止任何写入口（input/select/change/applyStockChange/fsPush*），
+   但允许（且要求）有预警着色与徽标。 */
+test('G3-1 renderLedger 只读：无任何写入口，但有低库存/负库存预警', () => {
   const s = fnSrc('renderLedger');
   assert.ok(!/<input/.test(s), 'renderLedger 不得再渲染 input 单元格');
   assert.ok(!/<select/.test(s), 'renderLedger 不得再渲染 select 单元格');
   assert.ok(!/addEventListener\('change'/.test(s), '不得再挂单元格 change 写处理器');
-  assert.ok(!/row-neg/.test(s) && !/row-low/.test(s), '预警底色（row-neg/row-low）必须移除');
   assert.ok(!/cell-qty-risk/.test(s), '库存数量高风险写入口样式必须移除');
-  assert.ok(!/applyManualAdjust|fsPushStock|fsPushRecord/.test(s), '渲染函数里不得有写调用');
+  assert.ok(!/applyManualAdjust|applyStockChange|fsPushStock|fsPushRecord/.test(s), '渲染函数里不得有写调用');
+  // 阶段B：预警必须存在（需求书 §3.1），但只改呈现
+  assert.match(s, /row-neg/, '负库存要红底（需求书 §3.1）');
+  assert.match(s, /row-low/, '低于安全库存要黄底（需求书 §3.1）');
+  assert.match(s, /mat-warn/, '要有预警徽标说明原因');
+  assert.match(s, /matStockLevel/, '预警判定要集中在一个纯函数里，便于单测');
   // 存量数据照常渲染：物料字段逐列输出
   assert.ok(/MAT_COLS\.map/.test(s), '仍按 MAT_COLS 列渲染存量物料数据');
 });
@@ -143,10 +151,17 @@ test('G3-4 旧 MAT 单执行/冲销的页面 handler 已删：scanWip 只剩只�
   assert.ok(!/execQty/.test(s), 'scanWip 不得再有 execQty 输入框');
   assert.match(s, /物料工单（历史）· 数量执行已停用/, '旧 MAT 单必须给出「数量执行已停用」结论');
   assert.match(s, /数量工单已封存/, '旧单必须引导取消后按物品化流程重建');
-  // 详情页冲销死代码（剥注释：G3 说明文字里提到这些名字）
+  /* 阶段B：详情页不再有旧的同步冲销死代码（doReverse/showReversePreview/reversePanel 均不得复活），
+     但**新的**物品化冲销入口（btnWipReverse → wipReversePreview → wipReverseRun）是有意重开的：
+     误执行的工单必须能退回。约束从「不许有」改成「只许走物品操作协议」。 */
   const d = fnSrc('showWipDetail').replace(/\/\*[\s\S]*?\*\//g, ' ');
-  assert.ok(!/doReverse|showReversePreview|btnWipReverse/.test(d), '冲销预览/执行死代码必须删除');
-  assert.ok(!/reversePanel/.test(d), '冲销预览面板 markup 必须删除');
+  assert.ok(!/doReverse|showReversePreview|reversePanel/.test(d), '旧的同步冲销死代码不得复活');
+  assert.match(d, /btnWipReverse/, '新的物品化冲销入口必须接线');
+  assert.ok(!/fsPushStock/.test(d), '详情页不得库存直写');
+  /* 反向命令只能经 itmPersistence 入队 */
+  const run = fnSrc('wipReverseRun').replace(/\/\*[\s\S]*?\*\//g, ' ');
+  assert.ok(!/fsPushStock|applyStockChange/.test(run), '冲销路径不得库存直写');
+  assert.match(run, /itmPersistence\.enqueue/, '反向命令必须走物品操作协议入队');
 });
 
 test('G3-4 mes-core 数量账函数保留且上方有统一封存横幅（函数本体不删）', () => {

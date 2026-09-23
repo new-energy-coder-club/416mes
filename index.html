@@ -1201,6 +1201,13 @@ body.cols-compact .col-secondary{display:none}
 .flash-bad{background:#fdecea;border:1px solid #f2b8b0;}
 tr.row-neg td{background:#fdecea;}
 tr.row-low td{background:#fff8e1;}
+/* 阶段B：物料台账低库存/负库存预警徽标（需求书 §3.1）。
+   与行底色同一套色语：黄=低于安全库存，红=负库存，灰=无库存。 */
+.mat-warn{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:10px;font-size:11px;font-weight:600;line-height:16px;white-space:nowrap;vertical-align:middle}
+.mat-warn--low{background:#fff3cd;color:#8a6100;border:1px solid #f0d68a}
+.mat-warn--neg{background:#fdecea;color:#b3261e;border:1px solid #f3b7b1}
+.mat-warn--zero{background:#eceff1;color:#546e7a;border:1px solid #cfd8dc}
+#matSummary{margin:6px 0 0}
 /* ===== A4 模块区大卡（NEC 主视觉） ===== */
 .zonecard{width:100%;max-width:190mm;aspect-ratio:196/283;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8mm 10mm 6mm;display:flex;flex-direction:column;font-family:Arial,"Microsoft YaHei",sans-serif;overflow:hidden;box-shadow:0 0 0 1px #c6ccd4;}
 .zc-top{display:flex;align-items:baseline;gap:3mm;border-bottom:2px solid #eee;padding-bottom:3mm;}
@@ -3066,6 +3073,7 @@ body:has(#tab-item-work.on) .itm-batch-sticky.batch-on{display:flex}
           <input class="field field--md field--w240" type="text" id="matSearch" placeholder="🔍 搜索：编码/名称/规格/库位/容器">
           <button class="btn small ghost" id="btnColsMore" title="规格 / 闲鱼XY编号 / 成本 / 图片链接">👁 显示全部列</button>
         </span>
+        <span class="hint" id="matSummary" role="status" aria-live="polite"></span>
       </div>
       <div class="toolbar toolbar--data">
         <span class="toolbar__group">
@@ -3110,7 +3118,7 @@ body:has(#tab-item-work.on) .itm-batch-sticky.batch-on{display:flex}
        第 51 条起网页端完全不可达；也没有任何筛选。流水是唯一「只增不改」的审计凭据，
        自带回放/修数/导出三个工具，与物料主数据维护是两种作业 → 独立成页。 -->
   <section class="tab" id="tab-txn">
-    <p class="page-purpose"><span>库存流水台账：只增不改的审计凭据，回放可逐条重算</span><span class="impact impact--none">本页只读</span><span class="hint">流水由库存变动自动产生；手工不可增删改，异常走回放校验/账本修数</span></p>
+    <p class="page-purpose"><span>库存流水台账：只增不改的审计凭据，回放可逐条重算</span><span class="impact impact--none">本页只读</span><span class="hint">流水由库存变动自动产生；手工不可增删改，异常请用页面上的「🔄 回放校验」定位</span></p>
     <div class="panel">
       <div class="toolbar">
         <input type="search" id="txnSearch" class="field field--sm" placeholder="🔍 筛选：物料码 / 类型 / 操作人 / 关联单 / 原因" style="min-width:240px">
@@ -3133,6 +3141,26 @@ body:has(#tab-item-work.on) .itm-batch-sticky.batch-on{display:flex}
       <div class="toolbar mt-8">
         <button class="btn small ghost" id="btnTxnMore">加载更多（每次 100 条）</button>
         <span class="hint" id="txnSummary"></span>
+      </div>
+    </div>
+    <!-- 阶段B：扫码历史独立成表。此前 scanHistory 只被位置卡与状态栏计数消费，
+         用户无法回答「这件东西上周谁扫过」；且上限 2000 条静默丢最旧，界面无任何提示。 -->
+    <div class="panel mt-12">
+      <h2>扫码记录（谁在什么时候扫了什么）</h2>
+      <p class="hint">只追加、不改不删；与库存流水的分工：<b>流水</b>是库存凭据，<b>扫码记录</b>是现场动作凭据（含只读查询）。最多保留最近 2000 条，更早的会被自动淘汰。</p>
+      <div class="toolbar">
+        <input type="search" id="scanLogSearch" class="field field--sm" placeholder="🔍 筛选：码 / 名称 / 位置 / 操作人" style="min-width:240px">
+        <button class="btn small ghost" id="btnScanLogClearFilter">清除筛选</button>
+      </div>
+      <div class="table-scroll">
+      <table class="grid grid-dense mt-8" id="scanLogTable" aria-label="扫码记录：时间/操作人/码型/编码/名称/位置/是否命中">
+        <thead><tr><th>时间</th><th>操作人</th><th>码型</th><th>编码</th><th>名称</th><th>位置</th><th style="width:70px">命中</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <div class="toolbar mt-8">
+        <button class="btn small ghost" id="btnScanLogMore">加载更多（每次 100 条）</button>
+        <span class="hint" id="scanLogSummary"></span>
       </div>
     </div>
   </section>
@@ -3592,7 +3620,7 @@ body:has(#tab-item-work.on) .itm-batch-sticky.batch-on{display:flex}
                 <td>**只能通过流水改**。物料行的「库存数量」列不接受普通写入（服务端会剥掉），数量永远按「期初 + Σ变动」算出来</td></tr>
             <tr><td><b>库存流水</b></td>
                 <td>只增账本</td>
-                <td>追加写、不改不删；不参与批量推送、不参与自动删除。要纠正走「回放校验 / 账本修数」</td></tr>
+                <td>追加写、不改不删；不参与批量推送、不参与自动删除。发现不一致先用「回放校验」定位（流水页「🔄 回放校验」）；确需改数请联系管理员在飞书侧补记流水，本机不做手工改数</td></tr>
             <tr><td><b>NEC 任务</b></td>
                 <td>仅本机</td>
                 <td>不同步到飞书，换浏览器就没了（导出备份 JSON 才带走）</td></tr>
@@ -4465,6 +4493,50 @@ function txnResetFilter() {
 { const el = document.getElementById('btnTxnClearFilter'); if (el) el.addEventListener('click', txnResetFilter); }
 document.getElementById('btnAuditReplay').addEventListener('click', replayAudit);
 
+/* ================= 阶段B：扫码记录表 =================
+   scanHistory 以前只被位置卡和状态栏计数消费，用户问「这件上周谁扫过」无从答起；
+   2000 条上限静默丢最旧也没人知道。这里独立成表：筛选 + 分页 + 上限可见。 */
+const SCAN_KIND_TXT = { location: '库位', container: '容器', item: '物品', material: '物料', manual: '手册', workorder: '工单', nec: 'NEC任务', unknown: '未识别' };
+let _scanLogPage = 1;
+const SCAN_LOG_PAGE_SIZE = 100;
+function scanLogFiltered() {
+  const kw = ((document.getElementById('scanLogSearch') || {}).value || '').trim().toLowerCase();
+  return (state.scanHistory || []).filter(h => !kw || [h.code, h.name, h.loc, h.container, h.zone, h.operator, h.prefix].some(v => String(v || '').toLowerCase().includes(kw)));
+}
+function renderScanHistory() {
+  const tb = document.querySelector('#scanLogTable tbody');
+  if (!tb) return;
+  const all = state.scanHistory || [];
+  const filtered = scanLogFiltered();
+  const shown = filtered.slice(0, _scanLogPage * SCAN_LOG_PAGE_SIZE);
+  const sum = document.getElementById('scanLogSummary');
+  if (sum) {
+    const oldest = all.length ? (all[all.length - 1].time || '') : '';
+    sum.textContent = '共 ' + all.length + ' 条' + (all.length ? ' · 最早 ' + oldest : '') +
+      (filtered.length !== all.length ? ' · 筛选出 ' + filtered.length + ' 条' : '') +
+      ' · 显示 ' + shown.length + ' 条' +
+      (shown.length < filtered.length ? '（还有 ' + (filtered.length - shown.length) + ' 条，点「加载更多」）' : '') +
+      (all.length >= 2000 ? ' · ⚠ 已达 2000 条上限，更早记录已被自动淘汰' : '');
+  }
+  const more = document.getElementById('btnScanLogMore');
+  if (more) more.style.display = shown.length < filtered.length ? '' : 'none';
+  tb.innerHTML = shown.map(h => {
+    const pos = [h.loc, h.container, h.zone].filter(Boolean).join(' / ') || '—';
+    return '<tr><td data-th="时间">' + esc(h.time || '—') + '</td><td data-th="操作人">' + esc(h.operator || '—') + '</td>' +
+      '<td data-th="码型">' + esc(SCAN_KIND_TXT[h.kind] || h.kind || '—') + '</td>' +
+      '<td data-th="编码"><code>' + esc(h.code || '—') + '</code></td>' +
+      '<td data-th="名称">' + esc(h.name || '—') + '</td><td data-th="位置">' + esc(pos) + '</td>' +
+      '<td data-th="命中">' + (h.hit ? '<span style="color:#2d9d4f">✓</span>' : '<span class="hint">✗</span>') + '</td></tr>';
+  }).join('') || '<tr><td colspan="7" class="empty-row">' + (all.length ? '（没有符合条件的扫码记录）' : '（还没有扫码记录）') + '</td></tr>';
+}
+function scanLogResetFilter() {
+  const el = document.getElementById('scanLogSearch'); if (el) el.value = '';
+  _scanLogPage = 1; renderScanHistory();
+}
+{ const el = document.getElementById('scanLogSearch'); if (el) el.addEventListener('input', () => { _scanLogPage = 1; renderScanHistory(); }); }
+{ const el = document.getElementById('btnScanLogClearFilter'); if (el) el.addEventListener('click', scanLogResetFilter); }
+{ const el = document.getElementById('btnScanLogMore'); if (el) el.addEventListener('click', () => { _scanLogPage++; renderScanHistory(); }); }
+
 /* ---------- B4：账本修数 ---------- */
 /* G3：账本修数面板已移除 —— 数量账封存后页面层不再有库存写入口，
    CORE.ledgerRepairPlan / applyStocktake 仅保留在 mes-core 供历史数据与回放审计。 */
@@ -4630,7 +4702,7 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('cl
   if (!['items','item-work','register'].includes(b.dataset.tab) && itemPage) itemPage.stopCamera();
   if (['items','item-work','register'].includes(b.dataset.tab)) mountItemPage();
   if (b.dataset.tab === 'ledger') renderLedger();   // 数据可能在别的页签被改过，切回时必须重渲染
-  if (b.dataset.tab === 'txn') { _txnPage = 1; renderTxns(); }   // 阶段3：流水独立页，切回重置分页
+  if (b.dataset.tab === 'txn') { _txnPage = 1; renderTxns(); _scanLogPage = 1; renderScanHistory(); }   // 阶段3：流水独立页，切回重置分页；阶段B：扫码记录同页
   if (b.dataset.tab === 'label') renderLabelTab();
   if (b.dataset.tab === 'wip') renderWip();
   if (b.dataset.tab === 'nec') renderNec();
@@ -4762,6 +4834,7 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('cl
     pgTocPlace();
   }
 
+  let pgTocRaf = 0;   /* 滚动节流句柄：必须声明 —— 隐式赋值在严格作用域下会抛 ReferenceError，滚动监听每秒报错 */
   function pgTocTick() {
     pgTocRaf = 0;
     const def = defFor(diag.activeTab);
@@ -5035,21 +5108,54 @@ document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('cl
 
 /* G3：物料台账已降级为只读历史视图 —— 单元格编辑 / 新增行 / 删除行 / 库存数量写入口
    （手工调整 + 账本修数）全部移除；本块只剩纯展示渲染与搜索筛选。
-   minQty 字段保留在数据里（不删字段），UI 不再做低库存/负库存预警。 */
+   阶段B：恢复低库存/负库存**预警着色**（需求书 §3.1 明确要求「低于阈值黄底提示」）。
+   ⚠ 只改呈现，不写任何数据：预警是给人看的，修数仍须走正式流程。 */
+function matStockLevel(m) {
+  const qty = Number(m.qty);
+  const min = Number(m.minQty);
+  if (!Number.isFinite(qty)) return 'none';
+  if (qty < 0) return 'neg';                                        // 负库存：数据已不一致
+  if (Number.isFinite(min) && min > 0 && qty < min) return 'low';   // 低于安全库存
+  if (qty === 0) return 'zero';                                     // 售罄/断货
+  return 'ok';
+}
 function renderLedger() {
   const tb = document.querySelector('#matTable tbody');
   const kw = ledgerFilter.trim().toLowerCase();
-  tb.innerHTML = state.materials.map(m => ({ m }))
+  const rows = state.materials.map(m => ({ m }))
     .filter(({ m }) => !kw || [m.code, m.name, m.spec, m.loc, m.container, m.zone].some(v => String(v || '').toLowerCase().includes(kw)))
     .map(({ m }) => {
-      return '<tr>' +
+      const lvl = matStockLevel(m);
+      const rowCls = lvl === 'neg' ? 'row-neg' : (lvl === 'low' ? 'row-low' : '');
+      const qtyCell = (label, k, unit) => {
+        let html = esc(m[k]);
+        if (k === 'qty' && lvl !== 'none' && lvl !== 'ok') {
+          html += ' <span class="mat-warn mat-warn--' + lvl + '" title="' +
+            (lvl === 'neg' ? '库存为负：账面与流水对不上，请用「回放校验」定位' :
+             lvl === 'low' ? '低于安全库存 ' + esc(m.minQty) + '，请补货' : '已无库存') + '">' +
+            (lvl === 'neg' ? '⚠ 负库存' : lvl === 'low' ? '⚠ 低于安全库存' : '○ 无库存') + '</span>';
+        }
+        return '<td data-th="' + label + '"' + (unit ? ' class="num"' : '') + '>' + html + '</td>';
+      };
+      return '<tr' + (rowCls ? ' class="' + rowCls + '"' : '') + '>' +
         MAT_COLS.map(([k, label]) => {
           if (k === 'cat') return '<td data-th="分类">' + esc((m.cat || 'QT') + ' ' + (MAT_CATS[m.cat] || '')) + '</td>';
           const num = (k === 'qty' || k === 'cost' || k === 'minQty');
           const cls = (num ? 'num ' : '') + (SECONDARY_MAT_COLS.includes(k) ? 'col-secondary' : '');
+          if (k === 'qty') return qtyCell(label, k, num).replace(' class="num"', (cls ? ' class="' + cls.trim() + '"' : ''));
           return '<td data-th="' + label + '"' + (cls ? ' class="' + cls.trim() + '"' : '') + '>' + esc(m[k]) + '</td>';
         }).join('') + '</tr>';
-    }).join('') || '<tr><td colspan="' + MAT_COLS.length + '" class="empty-row">（没有符合条件的物料）</td></tr>';
+    });
+  tb.innerHTML = rows.join('') || '<tr><td colspan="' + MAT_COLS.length + '" class="empty-row">（没有符合条件的物料）</td></tr>';
+  const sum = document.getElementById('matSummary');
+  if (sum) {
+    const low = state.materials.filter(m => matStockLevel(m) === 'low').length;
+    const neg = state.materials.filter(m => matStockLevel(m) === 'neg').length;
+    const zero = state.materials.filter(m => matStockLevel(m) === 'zero').length;
+    sum.textContent = '共 ' + state.materials.length + ' 条' + (kw ? ' · 筛选出 ' + rows.length + ' 条' : '') +
+      (low || neg || zero ? ' · ⚠ 低于安全库存 ' + low + ' 条 · 负库存 ' + neg + ' 条 · 无库存 ' + zero + ' 条' : ' · 库存充足') +
+      '（本页只读：数量由流水决定，预警仅提示，不在此改数）';
+  }
   if (typeof refreshMatDatalist === 'function') refreshMatDatalist();
   const zl = document.getElementById('zoneList');
   if (zl) zl.innerHTML = recordsOf('zone').map(z => '<option value="' + esc(z.code) + '">' + esc(z.code + ' ' + z.desc) + '</option>').join('');
@@ -7069,6 +7175,10 @@ function backToWipList() {
   }
 }
 
+
+
+
+
 /* ---------- 阶段5：工单计划编辑（未执行工单可改明细 / 数量 / 日期）----------
    为什么只有未执行能动：冲销的依据是「已执行数量」，而「已执行」是相对计划算出来的；
    事后改计划会让「计划 / 已执行 / 剩余」三者对不上，流水金额也无法解释。
@@ -7253,9 +7363,12 @@ function showWipDetail(code) {
       '</label>' +
       '<div class="toolbar">' +
         (CORE.isPending(w) ? '<button class="btn danger" id="btnWipCancel">取消工单</button>' : '') +
-        /* G1：冲销入口整体下线 —— 物品化冲销（buildItemReverseCommands）页面层未开放；
-           旧 MAT 单按迁移策略只读裁剪，不再提供库存回退动作。
-           G3：冲销预览面板与 doReverse 死代码一并移除（按钮早已不渲染）。 */
+        /* 阶段B：重开冲销入口（此前整体下线 → 误执行的工单无法回退，只能导出 Excel 人工记账）。
+           物品化工单走 buildItemReverseCommands 生成「逐件反向」命令，再按物品操作协议
+           入队/提交/收执（applyItemReverseResult 全 APPLIED 才关单）——
+           这条路径不直接改库存，位置变化由协议落地，冲销凭据写 reverseInfo 留痕。
+           仅在「已执行且未取消、且执行批次有位置留痕」时出现按钮。 */
+        (wipReverseEligible(w) ? '<button class="btn danger" id="btnWipReverse">冲销（逐件退回原位）</button>' : '') +
         '<button class="btn ghost" id="btnWipDelete">删除工单</button>' +
         (wipLocalOnlyCleanupEligibility(w.code).ok ? '<button class="btn ghost" id="btnWipLocalOnlyDel" title="这张单飞书里没有，删本机不会影响飞书">🧹 作废本机记录（仅在本地）</button>' : '') +
       '</div>' +
@@ -7289,9 +7402,11 @@ function showWipDetail(code) {
   // 删除工单：已执行过的必须先冲销，否则库存流水与结存会对不上
   const lod = document.getElementById('btnWipLocalOnlyDel');
   if (lod) lod.addEventListener('click', async () => { await cleanLocalOnlyExecutedWip(w.code); });
+  const rv = document.getElementById('btnWipReverse');
+  if (rv) rv.addEventListener('click', () => wipReversePreview(w));
   const db = document.getElementById('btnWipDelete');
   if (db) db.addEventListener('click', () => {
-    if (p.anyExecuted && !CORE.isCancelled(w)) { alert('该工单已执行过库存变动，不可删除（冲销入口已下线）。请用「导出 Excel」核对留存。'); return; }
+    if (p.anyExecuted && !CORE.isCancelled(w)) { alert('该工单已执行过库存变动，不可删除；请先用「冲销（逐件退回原位）」把执行退回，再删除。'); return; }
     if (workorderLocalDuplicate(w.code)) { alert('该工单号在本机有多条记录，普通删除会同时删掉所有本地副本与飞书唯一记录。请先到「数据对齐」面板收敛重复工单。'); return; }
     if (!confirm('删除工单 ' + w.code + '？飞书「工单记录」里的同号记录也会一起删除，不可恢复。')) return;
     state.workorders = state.workorders.filter(x => x.code !== w.code);
@@ -7712,6 +7827,8 @@ function addScan(kind, prefix, code, hit, hitObj) {
   });
   // 阶段13：只有「命中」才回焦。未命中也回焦会把用户正在修正的输入框夺走。
   if (hit) focusScanInput();
+  // 阶段B：扫码记录表现在是「库存流水」页的一张表；开着那一页就实时刷新
+  try { if (document.getElementById('tab-txn') && document.getElementById('tab-txn').classList.contains('on')) renderScanHistory(); } catch (e) { }
 }
 
 function scanMat(code, box) {
@@ -7854,6 +7971,21 @@ function scanNec(code, box) {
 }
 
 /* ---------- ITM: 物品（设备/工具/展品） ---------- */
+/* 阶段B：唯一物品同号守卫。
+   物品码是「唯一实体」的身份，同号两条记录会让 find() 只取第一条，
+   另一条完全不可见 → 盘点/作业/查询可能取错件（工单侧早有 workorderLocalDuplicate，物品侧一直没有）。 */
+function itemLocalDuplicateCodes() {
+  const seen = Object.create(null), dup = Object.create(null);
+  (state.items || []).forEach(i => {
+    if (!i || i.code == null) return;
+    const k = String(i.code);
+    if (seen[k]) dup[k] = true; else seen[k] = true;
+  });
+  return new Set(Object.keys(dup));
+}
+function itemLocalDuplicate(code) {
+  return itemLocalDuplicateCodes().has(String(code || '').trim());
+}
 function scanItem(code, box) {
   const it = state.items.find(x => x.code === code);
   if (!it) {
@@ -7865,6 +7997,25 @@ function scanItem(code, box) {
     });
     addScan('item', 'ITM:', code, false, null);
     log('未命中物品 ' + code);
+    return;
+  }
+  /* 阶段B：同号拦截 —— 有重复就不给「权威答案」，因为那可能只是碰巧排在第一条。
+     引导去「数据对齐」收敛，避免按错误记录作业。
+     判据内联（不依赖外部 helper）：同码出现 >1 次即为重复。 */
+  const _dups = state.items.filter(x => x.code === code);
+  if (_dups.length > 1) {
+    const dups = _dups;
+    box.className = 'scan-result panel';
+    box.innerHTML = renderScanCard({
+      kind: 'warn', statusText: '该物品码在本机有 ' + dups.length + ' 条同号记录，已停止显示权威结果',
+      prefix: 'ITM:', prefixCls: 'itm', title: '物品码重复', code: 'ITM:' + code,
+      readings: [{ label: '同号记录', value: dups.length + ' 条', primary: true }, { label: '状态分布', value: dups.map(d => itemStatusToText(d.status)).join(' / ') }],
+      detailHtml: '<p class="hint">下面是第一条的内容，<b>可能不是你要的那一件</b>。请到「同步与状态 → 数据对齐」收敛重复记录后再作业。</p>' +
+        '<div class="kv"><b>名称</b>' + esc(dups.map(d => d.name || '（未命名）').join(' / ')) + '</div>' +
+        '<div class="kv"><b>容器</b>' + esc(dups.map(d => d.container || '—').join(' / ')) + '</div>'
+    });
+    addScan('item', 'ITM:', code, true, it);
+    log('⚠️ 物品码 ' + code + ' 在本机有 ' + dups.length + ' 条同号记录，已停止给出权威结果');
     return;
   }
   /* BUG-G（实测）：物品位置由容器归属派生（it.loc 恒为空）——
@@ -7981,6 +8132,81 @@ function scanWip(code, box) {
 /* ================= G1 物品化工单 · 扫码执行卡（S4） =================
    铁律：这条路径只发「物品操作命令」（itmPersistence.enqueue → ItemClient.submit），
    APPLIED 才把码记入工单进度；全程不碰 applyStockChange / fsPushStock / transactions。 */
+
+/* ================= 阶段B：物品化工单冲销（重开入口） =================
+   为什么需要：此前冲销入口整体下线，误执行的工单无法回退 —— 现场只能「取消」（未执行才允许）
+   或导出 Excel 人工记账，账面与实物就此背离。
+
+   安全边界（三重）：
+   ① 只对**物品化工单**开放（isItemizedOrder）；旧「物料×数量」单按迁移策略仍只读。
+   ② 只生成「逐件反向」命令（buildItemReverseCommands），不直接改库存；
+      每件都要有执行时的位置留痕（fromLoc/fromContainer），缺留痕就拒绝并明说。
+   ③ 全部反向命令 APPLIED 才由 applyItemReverseResult 关单并写 reverseInfo；
+      未完成则原样报出 pending，工单保持原状态 —— 不会出现「关了单但东西没退回去」。 */
+function wipReverseEligible(w) {
+  if (!w || !CORE.isItemizedOrder(w)) return false;          // 只开放物品化工单
+  if (CORE.isCancelled(w) || w.reverseInfo) return false;    // 已取消/已冲销不再冲
+  let p; try { p = CORE.orderProgress(w); } catch (e) { return false; }
+  if (!p || !p.anyExecuted) return false;                    // 未执行 → 直接「取消」即可
+  let plan; try { plan = CORE.buildItemReverseCommands(state, w); } catch (e) { return false; }
+  return !!(plan && plan.commands && plan.commands.length);  // 有可反向的件才亮按钮
+}
+
+/** 冲销预览：把将被逐件退回的物品与原位列出，二次确认后才入队 */
+function wipReversePreview(w) {
+  const plan = CORE.buildItemReverseCommands(state, w);
+  if (!plan || !plan.commands.length) {
+    alert('无法生成冲销计划：' + ((plan && plan.errors && plan.errors[0]) || '该工单没有可反向的执行批次'));
+    return;
+  }
+  if (plan.errors && plan.errors.length) {
+    alert('冲销计划不完整，已停止：\n' + plan.errors.join('\n'));
+    return;
+  }
+  const rows = plan.commands.map(c => {
+    const it = (state.items || []).find(x => x.code === c.itemCode);
+    return '· ' + c.itemCode + ' ' + (it ? (it.name || '') : '（本机无此物品档案）') +
+      (c.kind === 'receive' ? ' → 退回 ' : ' → 取出 ') + (c.target || c.source).loc + ' / ' + (c.target || c.source).container;
+  }).join('\n');
+  const reason = (document.getElementById('wipReason') || {}).value || '';
+  const ok = confirm(
+    '冲销工单 ' + w.code + '？\n\n' +
+    '将逐件执行反向物品操作（' + plan.commands.length + ' 件）：\n' + rows + '\n\n' +
+    '这些命令会进入「待处理区」，需要在那里提交并等全部 APPLIED 后工单才置为已取消。\n' +
+    (reason ? '原因：' + reason + '\n' : '') +
+    '确认生成反向命令？');
+  if (!ok) return;
+  wipReverseRun(w, plan, reason);
+}
+
+/** 入队反向命令（与其它物品作业同一协议：enqueue → 待处理区提交 → 收执关单） */
+async function wipReverseRun(w, plan, reason) {
+  if (!itmPersistence) { alert('IDB 不可用，不能生成冲销命令'); return; }
+  let seq = 0;
+  try {
+    for (const c of plan.commands) {
+      const request = {
+        schemaVersion: 1,
+        opId: c.opId + (seq ? '-' + seq : ''),
+        kind: c.kind,
+        itemCode: c.itemCode,
+        reverseOf: c.reverseOf || ''
+      };
+      if (c.kind === 'receive') request.target = c.target;
+      else request.source = c.source;
+      await itmPersistence.enqueue(request);
+      seq++;
+    }
+  } catch (e) {
+    alert('冲销命令入队失败（已入队 ' + seq + ' 条）：' + (e && e.message || e) + '\n请到「待处理区」核对后重试，不要重复点冲销。');
+    save(); renderWip(); showWipDetail(w.code);
+    return;
+  }
+  log('生成冲销命令 ' + seq + ' 条｜工单 ' + w.code + '｜操作人 ' + (state.operator || '—'));
+  alert('已生成 ' + seq + ' 条反向命令，进入「物品作业 → 待处理区」。\n\n' +
+    '请在待处理区逐条提交；全部 APPLIED 后工单会自动置为「已取消」并留下冲销凭据。');
+  save(); renderWip(); showWipDetail(w.code);
+}
 
 /* 执行上下文：激活时 handleScan 把物品码喂给工单执行卡而不是 scanItem。
    target 是 BH/TL 入库方向「每批次先扫一次」的目标库位+容器，批次内复用。 */
@@ -8353,13 +8579,47 @@ function wipItemExecTarget(prefix, code) {
   if (box) scanWipItemized(w, box);
   return true;
 }
+/* 阶段B：判断一个无前缀串是否「像被截断/损坏的码」。
+   判据（保守，宁可放过不可误判）：
+   · 长度够长（≥5）—— 太短更可能是手输关键词，交给物料查询；
+   · 由字母/数字/连字符组成（真码不含空格和中文）；
+   · 含连字符，或以「WP-」「NEC-」等已知前缀开头，或形似区号 B/A/C 开头。
+   只提示「可能没扫全」，不断言不存在，也不阻断后续查询。 */
+function looksLikeTruncatedCode(s) {
+  const t = String(s || '').trim();
+  if (t.length < 5) return false;
+  if (!/^[A-Za-z0-9][A-Za-z0-9-]*$/.test(t)) return false;
+  if (/^(WP|NEC|LOC|CTN|ITM|MAT|MAN|WIP)-/i.test(t)) return true;
+  if (/^[A-Z]\d/.test(t)) return true;              // B-01…、A4SH…、M-01…
+  if (t.indexOf('-') > 0 && t.indexOf('-') < t.length - 1) return true;
+  return false;
+}
 /* 统一扫码入口：手输回车 / 扫码枪 / 摄像头 共用 */
 function handleScan(raw) {
   raw = (raw || '').trim();
   if (!raw) return;
   const box = document.getElementById('scanResult');
-  /* 物品二维码短链：/i/8位 或裸 8 位码 → 本地解码出物品码，走 ITM 分支 */
-  if (window.ItemLink) {
+  /* 物品二维码短链：/i/8位 或裸 8 位码 → 本地解码出物品码，走 ITM 分支。
+     阶段B：解析返回 null 时分两种情况——
+       · 是 8 位短码形状但校验和不符 → 几乎一定是标签磨损/印刷残缺，明确提示；
+       · 根本不是 8 位短码 → 不打扰，按原逻辑走下面的前缀识别。 */
+  if (window.ItemLink && /^\/?i\/?[A-Za-z0-9]{8}$/.test(raw.replace(/^https?:\/\/[^/]+/, ''))) {
+    const link = window.ItemLink.parseScanText(raw);
+    if (!link) {
+      box.className = 'scan-result panel';
+      box.innerHTML = renderScanCard({
+        kind: 'warn', statusText: '8 位短码校验不通过 —— 这个码很可能没扫全',
+        prefix: '', prefixCls: 'itm', title: '短码识别失败', code: raw,
+        readings: [{ label: '识别到的内容', value: raw, primary: true }, { label: '原因', value: '短码自带校验位，内容是 8 位但校验和不匹配' }],
+        detailHtml: '<p class="hint">请调整角度/距离重扫，或用「相机查询」再试一次。</p>' +
+          '<p class="hint">若反复失败：标签可能磨损或印刷不良，请到「资源档案」按物品码重新打印。</p>'
+      });
+      addScan('unknown', '', raw, false, null);
+      log('⚠️ 短码校验失败（可能磨损）：' + raw);
+      return;
+    }
+    raw = 'ITM:' + link.code;
+  } else if (window.ItemLink) {
     const link = window.ItemLink.parseScanText(raw);
     if (link) { raw = 'ITM:' + link.code; }
   }
@@ -8388,8 +8648,33 @@ function handleScan(raw) {
     else if (asNec) prefix = 'NEC:';
     else if (state.items.some(i => i.code === raw)) prefix = 'ITM:';
     else if (state.manuals.some(x => x.code === raw)) prefix = 'MAN:';
-    else prefix = 'MAT:';
+    else {
+      /* 阶段B：区分「扫坏了」与「确实没有」。
+         此前残缺码直接落 scanMat，界面显示「未找到物料」—— 操作员会以为物料没建档，
+         白跑一趟台账。这里先判断它像不像一个「被截断的码」：
+         本系统所有码都有明确形状（WP-分类-序号 / B-01-01-01 / A4SH-001 / 8位短码 …），
+         形状明显不符就先提示可能磨损，而不是断言「不存在」。 */
+      const suspicious = looksLikeTruncatedCode(raw);
+      if (suspicious) {
+        box.className = 'scan-result panel';
+        box.innerHTML = renderScanCard({
+          kind: 'warn', statusText: '这个码可能没扫全（标签磨损 / 反光 / 距离不对）',
+          prefix: '', prefixCls: 'mat', title: '无法识别为完整编码', code: raw,
+          readings: [{ label: '识别到的内容', value: raw, primary: true }, { label: '判断依据', value: '不符合任何一类编码的固定写法' }],
+          detailHtml: '<p class="hint">本系统编码都有固定写法，例如：</p>' +
+            '<div class="kv"><b>库位</b>B-01-01-01（区-货架-层-位）　<b>容器</b>A4SH-001　<b>模块区</b>M-01</div>' +
+            '<div class="kv"><b>物品</b>WP-TS-001（分类-序号）或 8 位短码　<b>工单</b>NEC-类型+日期+流水</div>' +
+            '<p class="hint">请调整角度/距离重扫，或改用「相机查询」；若确认标签已损坏，请到「资源档案」重新打印。</p>'
+        });
+        addScan('unknown', '', raw, false, null);
+        log('⚠️ 扫码内容不像完整编码（可能磨损）：' + raw);
+        return;
+      }
+      prefix = 'MAT:';
+    }
   }
+  /* 阶段B：短链 8 位码解析失败也属「扫坏了」—— 校验和不匹配时 parseScanText 返回 null，
+     此前静默落回 MAT: 分支报「未找到物料」，同样是误导。 */
   /* G2 物品盘点模式（优先于工单执行上下文）：物品码进盘点确认（只读、不写账）；
      其它码型照常走只读查询，结束后补一条「不计入盘点」的提示。 */
   if (stocktakeActive()) {
@@ -8561,12 +8846,70 @@ function stocktakeEnd(box) {
         '<div class="kv"><b>开始</b>' + esc(st.startedAt || '—') + '　<b>操作人</b>' + esc(st.operator || '—') + '</div>' +
         stocktakeReportSection('① 已确认清单', confirmed, '本次没有确认任何物品。') +
         stocktakeReportSection('② 差异清单（在库但未扫到）', missing, '无差异：在库物品全部扫到。✅',
-          missing.length ? '找到后请再开一轮盘点扫码确认；确认找不回的，到「物品」作业页走退役，不要让它们一直挂在在库账上。' : '') +
+          missing.length ? stocktakeDiffActions(missing) : '') +
         stocktakeReportSection('③ 异常清单（扫到但状态非在库）', anomaly, '无异常。✅',
-          anomaly.length ? '这些物品扫到了但账面状态不是「在库」，请核对它们的实际去向（出库/待入/退役流程）。' : '')
+          anomaly.length ? stocktakeAnomalyActions(anomaly) : '') +
+        /* 阶段B：差异不再「只能看」—— 给出可操作的修正出口。
+           盘点路径本身仍然只读（不改库存、不写流水），这是安全边界；
+           修正必须走正式的物品操作命令（退役 / 出库 / 转移），留下凭据。 */
+        '<div class="mt-8"><b>差异处理（盘点只读，修正请走正式操作）</b>' +
+        '<p class="hint">盘点本身不改任何数据。差异要落到账上，请用右侧操作逐件走<b>物品操作命令</b>——每条命令都有凭据、可在「待处理区」核对，不会静默改数。</p>' +
+        '<div class="toolbar" style="display:flex;gap:8px;flex-wrap:wrap">' +
+          (missing.length ? '<button class="btn small" id="btnStocktakeExportDiff">⬇ 导出差异清单（CSV）</button>' : '') +
+          (missing.length ? '<button class="btn small ghost" id="btnStocktakeGotoRetire">↗ 去「物品作业」处理差异件</button>' : '') +
+          (anomaly.length ? '<button class="btn small ghost" id="btnStocktakeGotoQuery">↗ 去「查询」核对异常件</button>' : '') +
+        '</div></div>'
     });
+    const ex = document.getElementById('btnStocktakeExportDiff');
+    if (ex) ex.addEventListener('click', () => stocktakeExportDiff(missing, anomaly));
+    const gr = document.getElementById('btnStocktakeGotoRetire');
+    if (gr) gr.addEventListener('click', () => {
+      goTab('item-work');
+      const inp = document.getElementById('itmRetireCode');
+      if (inp && missing.length) inp.value = missing[0].code;
+      const det = inp && inp.closest('details'); if (det) det.open = true;
+      toast('已带入第 1 件差异 ' + (missing[0] ? missing[0].code : '') + '：其余 ' + (missing.length - 1) + ' 件请自行改码后逐件处理');
+    });
+    const gq = document.getElementById('btnStocktakeGotoQuery');
+    if (gq) gq.addEventListener('click', () => { goTab('items'); toast('请在查询页逐件核对异常物品的当前位置与状态'); });
   }
   log('结束物品盘点：已确认 ' + confirmed.length + ' 件，差异 ' + missing.length + ' 件，异常 ' + anomaly.length + ' 件（报告只读，未写账）');
+}
+
+/** 盘点差异的可操作指引：告诉用户每件该走哪条正式命令，而不是「再扫一轮」了事 */
+function stocktakeDiffActions(missing) {
+  const retired = missing.filter(i => i.status === 'retired').length;
+  return '这些物品账面在库、现场没扫到。逐件确认后按下面处理（每条都会留下操作凭据）：' +
+    '<br>· 找到实物 → 再开一轮盘点扫码确认，或到「查询」页核对它的库位/容器；' +
+    '<br>· 确认已不在现场 → 「物品作业 → 退役」（需填原因），不要让它一直挂在在库账上' +
+    (retired ? '（其中 ' + retired + ' 件已退役，属历史脏数据）' : '') + '；' +
+    '<br>· 只是放错位置 → 走「换箱 / 容器移库」把位置改对，比退役更准确。';
+}
+function stocktakeAnomalyActions(anomaly) {
+  const byStatus = {};
+  anomaly.forEach(i => { byStatus[i.status] = (byStatus[i.status] || 0) + 1; });
+  const parts = Object.keys(byStatus).map(s => wipItemStatusLabel(s) + ' ' + byStatus[s] + ' 件');
+  return '这些物品扫到了，但账面状态不是「在库」（' + parts.join('、') + '）。' +
+    '<br>· 待入库/待核实 → 现场确认后走「入库」把它转正；' +
+    '<br>· 已出库却又出现在货架上 → 走「入库」回账，或核对是否借还登记漏记；' +
+    '<br>· 已退役 → 属历史数据，核对后可不管。';
+}
+/** 导出盘点差异清单（CSV，UTF-8 BOM 便于 Excel 直接打开）—— 让差异能离线流转给负责人 */
+function stocktakeExportDiff(missing, anomaly) {
+  const rows = [['类型', '物品码', '名称', '规格', '账面状态', '账面容器', '账面库位']];
+  missing.forEach(i => rows.push(['差异（在库未扫到）', i.code, i.name || '', i.spec || '', wipItemStatusLabel(i.status), i.container || '', (i.container ? ((state.containers || []).find(c => c.code === i.container) || {}).loc : '') || i.loc || '']));
+  anomaly.forEach(i => rows.push(['异常（扫到但非在库）', i.code, i.name || '', i.spec || '', wipItemStatusLabel(i.status), i.container || '', (i.container ? ((state.containers || []).find(c => c.code === i.container) || {}).loc : '') || i.loc || '']));
+  const csv = '\ufeff' + rows.map(r => r.map(v => {
+    const s = String(v == null ? '' : v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '416MES盘点差异_' + new Date().toISOString().slice(0, 10) + '.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  toast('已导出盘点差异清单（' + (missing.length + anomaly.length) + ' 条）');
 }
 /* 接线 + 刷新恢复：state.stocktake 还在就说明上次盘点没结束，自动回到盘点模式 */
 function initItemStocktake() {
@@ -9200,7 +9543,11 @@ function renderRes(more) {
       '<button class="btn tiny ghost" data-res-detail="' + esc(key) + '">详情</button>' +
       '<button class="btn tiny ghost" data-res-edit="' + esc(key) + '">编辑</button>' +
       '<button class="btn tiny ghost" data-res-print="' + esc(key) + '">打印</button>' +
-      '<button class="btn tiny ghost" data-res-del="' + esc(key) + '">作废删除</button>' +
+      /* 阶段B：唯一实体（物品/库位/容器）不可硬删，resDelete 会直接 alert 拒绝。
+         与其渲染一个「点了才告诉你不行的死按钮」，不如直接禁用并把原因写在 title 里。 */
+      (resHardDeletable(resType)
+        ? '<button class="btn tiny ghost" data-res-del="' + esc(key) + '">作废删除</button>'
+        : '<button class="btn tiny ghost" data-res-del="' + esc(key) + '" disabled title="唯一实体编码不可硬删（删了会让在库物品/流水指向空编码）。物品请走「建档管理 → 退役」；库位/容器误建请联系管理员在飞书侧处理。">作废删除</button>') +
       '</span></td></tr>';
   }).join('') || '<tr><td colspan="' + (cfg.cols.length + 2) + '" class="empty-row">（没有符合条件的' + cfg.label + '）</td></tr>';
   /* 长列表分段加载：几百条一次渲染太重。首屏 40 + 「加载更多」。
@@ -9325,9 +9672,14 @@ function resSave() {
   fsPushRecord(table, [pushed], { clearFields: clearFields });
 }
 
+/* 阶段B：哪些表允许在资源档案页硬删。
+   唯一实体（物品/库位/容器）的编码是库存流水与在库归属的锚点，硬删会让历史指向空编码，
+   因此只允许删手册这类无存量关系的主数据。 */
+function resHardDeletable(table) { return !['items', 'containers', 'locations'].includes(table); }
+
 /** 作废删除：显示影响范围 + 同步状态 → 二次确认 → 写凭据 → 删本地 → 推飞书删除 */
 async function resDelete(key) {
-  if (['items', 'containers', 'locations'].includes(resType)) { alert('唯一实体编码不可硬删/回收。物品退役请到「建档管理」的「退役」流程；库位/容器暂无停用/退役命令（如有误建请联系管理员在飞书侧处理）。'); return; }
+  if (!resHardDeletable(resType)) { alert('唯一实体编码不可硬删/回收。物品退役请到「建档管理」的「退役」流程；库位/容器暂无停用/退役命令（如有误建请联系管理员在飞书侧处理）。'); return; }
   const cfg = RES_TYPES[resType], table = resType;
   const rec = (state[table] || []).find(r => String(r[cfg.key]) === String(key));
   if (!rec) { alert('记录已不存在，请刷新。'); renderRes(); return; }
@@ -12149,7 +12501,7 @@ function fsStripMaterialQty(item) {
 }
 
 /* G3：fsPushStock（库存直写）函数本体已移除 —— 页面层调用点已清零
-   （账本修数 / 手工调整 / 旧 MAT 单执行 / 旧 MAT 单冲销 / 冲突裁决库存直写）。
+   （手工调整 / 旧 MAT 单执行 / 旧 MAT 单冲销 / 冲突裁决库存直写；账本修数面板 G3 已移除）。
    离线队列里可能仍躺有历史 op:'stock' 条目，由 fsExecItem 照常冲刷提交
    （那是封存前已入队的写入，不丢）；新代码禁止再产生此类条目。 */
 /** 任意表的新建/修改 */
@@ -12229,10 +12581,16 @@ async function fsFlushQueueInner() {
       const transientErr = /超时|timeout|网络|ECONNREFUSED|fetch failed|502|503/i.test(String(item.lastError || ''));
       const cooled = Date.now() - Number(item.lastAttemptAt || 0) > 5 * 60 * 1000;
       if (transientErr && cooled && (item._autoRetries || 0) < 2) {
-        item.status = 'pending';
-        item._autoRetries = (item._autoRetries || 0) + 1;
-        try { if (ob) await ob.put(item); else fsOutbox().put(item); } catch (e) { }
-        log('🔄 自动重试瞬态错误（第 ' + item._autoRetries + ' 次）：' + fsDescribeItem(item));
+        /* 2.99.9（审计 P1）：这里必须是「整条覆盖写回」而不是「改 list() 返回的克隆」——
+           ob.list() 给的是深拷贝，改 item 只是改内存对象，不写回队列就永远不会生效。
+           put(item) 之前不存在于 outbox 的两个 create 上，调用抛 TypeError 又被下面
+           的 catch(e){} 静默吞掉 → 每 5 分钟打一次「自动重试」却从不真正重投。
+           现在 put 已补齐；同时把 catch 改成显式告警，失败必须看得见。 */
+        const retryItem = Object.assign({}, item, { status: 'pending', _autoRetries: (item._autoRetries || 0) + 1 });
+        let requeued = false;
+        try { if (ob) await ob.put(retryItem); else fsOutbox().put(retryItem); requeued = true; }
+        catch (e) { log('⚠️ 自动重试回队失败（该条目仍需人工点「重试」）：' + (e && e.message || e)); }
+        if (requeued) log('🔄 自动重试瞬态错误（第 ' + retryItem._autoRetries + ' 次）：' + fsDescribeItem(retryItem));
         continue;   // 本轮先跳过，下一轮冲刷按 pending 处理
       }
       held++; continue;
@@ -12326,6 +12684,46 @@ function renderDataStoreHint() {
   if (c) c.addEventListener('click', () => box.remove());
 }
 
+/* ================= 阶段B：首次使用三步引导 =================
+   此前新用户第一次打开只看到「全新的数据空间」黄条（讲的是数据找回，不是怎么开始用），
+   没有任何「先做什么」的指引 —— 而 flowMap 在手机端默认收起，新用户最可能用手机。
+   这里补一个只显示一次的三步卡：建档 → 打码 → 扫码作业。 */
+const ONBOARD_KEY = 'mes416_onboarded_v1';
+function showOnboarding() {
+  let seen = false;
+  try { seen = localStorage.getItem(ONBOARD_KEY) === '1'; } catch (e) { return; }
+  if (seen) return;
+  try { localStorage.setItem(ONBOARD_KEY, '1'); } catch (e) { }
+  const steps = [
+    { n: '①', t: '建档', d: '先到「建档管理」把物品/库位/容器建档案。不建档就没有码可扫。', go: 'register' },
+    { n: '②', t: '打码', d: '到「标签打印」勾选记录 → 预览 → 打印，贴到实物上。', go: 'label' },
+    { n: '③', t: '扫码作业', d: '「ITM作业」做出入库/移库；「扫码工作台」随货确认执行。', go: 'item-work' }
+  ];
+  const box = document.createElement('div');
+  box.className = 'panel';
+  box.style.cssText = 'border-left:5px solid var(--color-primary,#1658d6);background:var(--surface-2,#f4f7fd);margin:12px 20px 0';
+  box.innerHTML = '<b>👋 第一次使用？按这个顺序走一遍</b>' +
+    '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 4px">' +
+    steps.map(s => '<div style="flex:1 1 200px;min-width:190px;padding:10px 12px;border:1px solid var(--line,#dde3ec);border-radius:8px;background:var(--surface,#fff)">' +
+      '<div style="font-size:18px;font-weight:700">' + s.n + ' ' + s.t + '</div>' +
+      '<p class="hint" style="margin:4px 0 8px">' + s.d + '</p>' +
+      '<button class="btn small" data-onboard-go="' + s.go + '">去「' + s.t + '」</button></div>').join('') +
+    '</div>' +
+    '<p class="hint" style="margin:4px 0">随时想找东西：去「查询」页直接输<b>名称</b>（如「内六角」）就能查，结果卡上会直接告诉你在哪个容器/库位。不知道码也能查。</p>' +
+    '<div class="toolbar"><button class="btn small ghost" id="btnOnboardClose">知道了，开始用</button></div>';
+  const main = document.querySelector('main');
+  if (!main || !main.firstChild) return;
+  main.insertBefore(box, main.firstChild);
+  box.querySelectorAll('[data-onboard-go]').forEach(b => b.addEventListener('click', () => {
+    const tab = b.getAttribute('data-onboard-go');
+    const nav = document.querySelector('nav.tabs button[data-tab="' + tab + '"]');
+    if (nav) nav.click();
+    box.remove();
+  }));
+  const c = document.getElementById('btnOnboardClose');
+  if (c) c.addEventListener('click', () => box.remove());
+}
+
 let itemPage = null;
 function mountItemPage() {
   if (!itemPage) itemPage = window.ItemUI.mount({ document, getState: () => state, getPersistence: () => itmPersistence,
@@ -12348,7 +12746,7 @@ function mountItemPage() {
   /* 2.49.2：刷新后自动恢复未完成的扫码草稿（boot 未就绪时内部静默重试，持久层可即会恢复） */
   itemPage.autoRestoreDraft().catch(e => log('ITM草稿自动恢复失败：' + e.message));
 }
-load(); restoreSyncUiState(); renderDataStoreHint(); renderLedger(); renderRes(); refreshMatDatalist(); refreshMemberDatalist(); refreshItemCodeDatalist(); renderNec(); renderOperators(); renderTxns(); renderWip(); renderCtxBar(); renderStatusBar();
+load(); restoreSyncUiState(); renderDataStoreHint(); showOnboarding(); renderLedger(); renderRes(); refreshMatDatalist(); refreshMemberDatalist(); refreshItemCodeDatalist(); renderNec(); renderOperators(); renderTxns(); renderScanHistory(); renderWip(); renderCtxBar(); renderStatusBar();
 mountItemPage();   /* 默认落地页=items（用户指定「一开始是查询」）：查询页 UI 由 ItemUI 驱动，启动必须挂载（幂等，深链场景已是挂载态时为 no-op） */
 if (document.querySelector('#tab-design.on')) { renderDesign(); renderGalAlbums(); }   /* 深链直载 #design：applyHash 早于异步 load()，首渲染曾拿到 null state 抛错中断（子代理实测复现）——就绪后补渲染 */
 stocktakeSyncBanner();   // G2：盘点会话随 state 持久化 —— load() 之后才能做刷新恢复（脚本装载时 state 还是 null）
@@ -12359,7 +12757,7 @@ applyHash();
 /* 阶段26（§3.7）：兼容 hashchange 与浏览器前进/后退。
    原先只在启动时读一次 hash，用户按后退键页面不动 —— 深链分享出去后体验很割裂。 */
 window.addEventListener('hashchange', () => { applyHash(); });
-renderScanLog();
+renderScanHistory();
 /* 启动顺序很重要：**必须先等 IndexedDB 状态就位，再去飞书拉取合并**。
    否则 fsBoot 会拿 localStorage 里那份旧状态去合并，而合并又会 save() ——
    于是把刚迁移进 IDB 的新状态用旧状态覆盖回去。实测踩过：
