@@ -4,7 +4,7 @@ const {parseHTML}=require('linkedom'),UI=require('../lib/item-ui');
 function setup(persistence=null,scanCamera=null){const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document}=parseHTML(html);let n=0,writes=0;const state={locations:[{code:'SAME',status:'active',desc:'location'},{code:'L-A',status:'active'}],containers:[{code:'C-A',loc:'L-A',status:'active',version:2}],items:[{code:'SAME',name:'item',status:'pending',version:0},{code:'I-P',name:'part',status:'pending',version:0}]};const page=UI.mount({document,scanCamera,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>[],id:()=>String(++n)});return {document,state,page,writes};}
 function fakeCam(){return {opened:0,closed:0,lastOpts:null,isOpen:()=>false,async open(o){this.opened++;this.lastOpts=o;},close(){this.closed++;}};}
 test('DOM query typed prefix selects item and bare collision lists candidates without write',()=>{const {document:d,state}=setup(),before=JSON.stringify(state);d.getElementById('itmSearch').value='SAME';d.getElementById('itmSearchBtn').click();assert.match(d.getElementById('itmResults').textContent,/多个候选/);assert.equal(d.getElementById('itmResults').querySelectorAll('button').length,2);d.getElementById('itmSearch').value='ITM:SAME';d.getElementById('itmSearchBtn').click();assert.match(d.getElementById('itmResults').textContent,/数量：1/);assert.equal(JSON.stringify(state),before);});
-test('DOM draft save/restore and double confirm persist exactly one command',async()=>{let draft=null,calls=0;const persistence={async saveDraft(id,value){draft={key:'itmDraft:'+id,value:structuredClone(value)};},async recover(){return {drafts:draft?[draft]:[],commands:[]};},async enqueue(){calls++;}};const {document:d,page}=setup(persistence);await page.accept('LOC:L-A');await page.accept('CTN:C-A');d.getElementById('itmDraftSave').click();await new Promise(r=>setImmediate(r));page.scan.reset();d.getElementById('itmDraftRestore').click();await new Promise(r=>setImmediate(r));assert.equal(page.scan.row().values.length,2);await page.accept('ITM:I-P');d.getElementById('itmConfirm').click();d.getElementById('itmConfirm').click();await new Promise(r=>setImmediate(r));assert.equal(calls,1);assert.match(d.getElementById('itmStatus').textContent,/不代表业务完成/);});
+test('DOM draft save/restore and double confirm persist exactly one command',async()=>{let draft=null,calls=0;const persistence={async saveDraft(id,value){draft={key:'itmDraft:'+id,value:structuredClone(value)};},async recover(){return {drafts:draft?[draft]:[],commands:[]};},async enqueue(){calls++;}};const {document:d,page}=setup(persistence);await page.accept('LOC:L-A');await page.accept('CTN:C-A');d.getElementById('itmDraftSave').click();await new Promise(r=>setImmediate(r));page.scan.reset();d.getElementById('itmDraftRestore').click();await new Promise(r=>setImmediate(r));assert.equal(page.scan.row().values.length,2);await page.accept('ITM:I-P');d.getElementById('itmConfirm').click();d.getElementById('itmConfirm').click();await new Promise(r=>setImmediate(r));assert.equal(calls,1);assert.match(d.getElementById('itmStatus').textContent,/本机已保存/);});
 test('DOM IDB enqueue failure does not display completion and leaves retry available',async()=>{const {document:d,page}=setup({async enqueue(){throw Error('IDB写失败');}});for(const text of ['LOC:L-A','CTN:C-A','ITM:I-P'])await page.accept(text);d.getElementById('itmConfirm').click();await new Promise(r=>setImmediate(r));assert.match(d.getElementById('itmStatus').textContent,/IDB写失败/);assert.equal(page.scan.row().locked,false);assert.equal(d.getElementById('itmConfirm').disabled,false);});
 test('work camera opens shared ScanCamera; confirm card fills input box, then user confirms into step',async()=>{const cam=fakeCam();const {document:d,page}=setup(null,cam);d.getElementById('itmCamera').click();await new Promise(r=>setImmediate(r));assert.equal(cam.opened,1);cam.lastOpts.onConfirm('LOC:L-A');await new Promise(r=>setImmediate(r));assert.equal(d.getElementById('itmCode').value,'LOC:L-A');assert.equal(page.scan.row().values.length,0);assert.match(d.getElementById('itmStatus').textContent,/已填入输入框/);d.getElementById('itmScanBtn').click();await new Promise(r=>setImmediate(r));assert.equal(page.scan.row().values.length,1);assert.equal(page.scan.row().values[0].code,'L-A');page.stopCamera();assert.equal(cam.closed,1);});
 test('acceptGuided with expired token shows ignored status instead of lying about success',async()=>{const {document:d,page}=setup();const token=page.scan.token();page.scan.add('receive');await page.accept('LOC:L-A',token);assert.match(d.getElementById('itmStatus').textContent,/被忽略/);assert.doesNotMatch(d.getElementById('itmStatus').textContent,/已填写草稿/);});
@@ -507,4 +507,99 @@ test('B-4：多关键词 AND 命中 + 物品优先于容器库位',()=>{
  assert.ok(titles.length>=2);
  assert.match(titles[0],/^容器 ·/,'物品>容器>库位：容器必须排在库位之前');
  assert.ok(titles.findIndex(t=>/^库位/.test(t))>titles.findIndex(t=>/^容器/.test(t)),'库位排最后');
+});
+
+/* ================= P1a：批量模式容器启用引导用批量锚点为目标（用户实测误报「请先扫描库位码」） ================= */
+test('P1a 批量锚点已扫：未启用容器的现场启用以批量锚点库位为目标，不再误报缺库位',async()=>{
+ const s=setupGuided();const d=s.document,page=s.page;
+ page.scan.startBatch('receive');
+ d.getElementById('itmCode').value='LOC:L-A';d.getElementById('itmScanBtn').click();await tickN();   /* 批量库位锚点（active）——走用户真实路径 itmScanBtn→acceptGuided→acceptBatchCode */
+ assert.match(d.getElementById('itmStatus').textContent,/库位锚点 L-A/);
+ d.getElementById('itmCode').value='CTN:C-OLD';d.getElementById('itmScanBtn').click();await tickN();
+ assert.doesNotMatch(d.getElementById('itmStatus').textContent,/请先扫描该容器所在的库位码/,'批量锚点已定，不得再要求扫库位');
+ const action=d.getElementById('itmStatus').querySelector('button');assert.ok(action,'容器未启用应提供现场启用引导');
+ action.click();await tickN(12);
+ assert.equal(s.queued&&s.queued.kind,'activateContainer');
+ assert.equal(s.queued&&s.queued.target.loc,'L-A','目标库位=批量锚点（旧实现在当前行 values 找不到 LOC 直接抛错）');
+ assert.deepEqual(page.scan.batchState()&&page.scan.batchState().anchor,{loc:'L-A',ctn:'C-OLD',ctnVersion:0},'APPLIED后自动重试锚点容器成功');
+});
+
+/* ================= P1b：屏障/版本拒绝的批量命令整批重建（旧实现只重建第一行→一批拆成一件） ================= */
+test('P1b 版本类拒绝的批量命令：重建按钮解锁全部行并重建为一条 N 件批量命令',async()=>{
+ const {parseHTML}=require('linkedom');
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const state={locations:[{code:'L-A',status:'active'}],containers:[{code:'C-A',loc:'L-A',status:'active',version:2}],items:[{code:'I-P',name:'p',status:'pending',version:0},{code:'I-Q',name:'q',status:'pending',version:0}],itemOperations:[]};
+ const oldOpId='batch-op-1';
+ const queuedAll=[{id:oldOpId,op:'itemOperation',status:'unknown',lastError:'提交结果未知：TRIAL_PRECONDITION_CHANGED: 版本过期',request:{schemaVersion:1,opId:oldOpId,kind:'receiveBatch',target:{loc:'L-A'},items:[{itemCode:'I-P',containerCode:'C-A',expectedItemVersion:0,expectedContainerVersion:2},{itemCode:'I-Q',containerCode:'C-A',expectedItemVersion:0,expectedContainerVersion:2}]}}];
+ const submitted=[];
+ const persistence={async enqueue(r){queuedAll.push({id:r.opId,op:'itemOperation',request:r});},async recover(){return{drafts:[],commands:[]}},async abandonCommand(id){const i=queuedAll.findIndex(c=>c.id===id);if(i>=0)queuedAll.splice(i,1);}};
+ let n=0;
+ const page=UI.mount({document:d,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>queuedAll,
+  getClient:()=>({submit:async c=>{submitted.push(structuredClone(c.request));return {phase:'APPLIED',code:c.id,kind:c.request.kind,request:c.request};}}),
+  id:()=>'new-'+(++n),refreshConflicts:async()=>{}});
+ /* 扫码会话：两行已锁定到旧批量 opId（模拟被拒后的现场） */
+ page.scan.restore({sessionId:'s1',active:0,batch:null,rows:[
+  {rowId:'r1',kind:'receive',generation:1,locked:true,opId:oldOpId,values:[{type:'LOC',code:'L-A',version:0},{type:'CTN',code:'C-A',version:2},{type:'ITM',code:'I-P',version:0}]},
+  {rowId:'r2',kind:'receive',generation:1,locked:true,opId:oldOpId,values:[{type:'LOC',code:'L-A',version:0},{type:'CTN',code:'C-A',version:2},{type:'ITM',code:'I-Q',version:0}]}]});
+ await page.pending();
+ const card=d.getElementById('itmPending').querySelector('article');
+ const btns=[...card.querySelectorAll('button')];
+ const rebuild=btns.find(b=>b.textContent.includes('按最新数据重建并重新提交'));
+ assert.ok(rebuild,'版本类拒绝的批量卡必须提供重建入口');
+ rebuild.click();await tickN(10);
+ assert.equal(submitted.length,1,'只提交一轮（P2a：不再 8 轮退避）');
+ const req=submitted[0];
+ assert.equal(req.kind,'receiveBatch','重建后仍是一条批量命令（旧实现变成单件 receive）');
+ assert.equal(req.items.length,2,'N 件仍是 N 件');
+ assert.notEqual(req.opId,oldOpId,'换新 opId');
+ assert.equal(queuedAll.find(c=>c.id===oldOpId),undefined,'旧命令已 abandon');
+ const locked=page.scan.snapshot().rows.filter(r=>r.locked);
+ assert.equal(locked.length,0,'APPLIED 后整批行移除');
+});
+
+/* ================= P4：在线确认后自动提交；离线保持待处理区手动提交 ================= */
+test('P4 在线时确认本行后自动提交一次；离线时只入队不提交',async()=>{
+ const {parseHTML}=require('linkedom');
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const state={locations:[{code:'L-A',status:'active'}],containers:[{code:'C-A',loc:'L-A',status:'active',version:2}],items:[{code:'I-P',name:'p',status:'pending',version:0}],itemOperations:[]};
+ const enqueued=[];let submitted=0;
+ const persistence={async enqueue(r){enqueued.push(r);},async saveDraft(){},async recover(){return{drafts:[],commands:enqueued.map(r=>({id:r.opId,op:'itemOperation',request:r}))}}};
+ const mk=(online)=>UI.mount({document:d,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>enqueued.map(r=>({id:r.opId,op:'itemOperation',request:r})),
+   getClient:()=>({submit:async c=>{submitted++;return {phase:'APPLIED',code:c.id,kind:c.request.kind,request:c.request};}}),
+   isOnline:()=>online,id:()=>'p4-'+enqueued.length});
+ /* 在线：确认 → 自动提交（无需去待处理区手动点） */
+ const p1=mk(true);
+ for(const t of ['LOC:L-A','CTN:C-A','ITM:I-P'])await p1.accept(t);
+ d.getElementById('itmConfirm').click();await tickN(12);
+ assert.equal(enqueued.length,1);assert.equal(submitted,1,'在线确认后必须自动提交');
+ assert.match(d.getElementById('itmStatus').textContent,/远端已确认/);
+ assert.equal(p1.scan.snapshot().rows.filter(r=>r.locked).length,0,'APPLIED 后行已清（可直接下一笔）');
+ /* 离线：确认 → 只入队，命令留在待处理区 */
+ enqueued.length=0;submitted=0;
+ const p2=mk(false);
+ for(const t of ['LOC:L-A','CTN:C-A','ITM:I-P'])await p2.accept(t);
+ d.getElementById('itmConfirm').click();await tickN(12);
+ assert.equal(enqueued.length,1);assert.equal(submitted,0,'离线不得自动提交');
+ assert.match(d.getElementById('itmStatus').textContent,/当前离线/);
+});
+
+/* ================= P3c：本地未启用但云端凭据已到 → 报错卡给「安全重拉」出口 ================= */
+test('P3c 本地已有 APPLIED 启用日志但状态未落地：报错卡提供安全重拉按钮并自动重试原步骤',async()=>{
+ const {parseHTML}=require('linkedom');
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ let n=0,refreshed=0;
+ const state={locations:[{code:'L-OLD',status:'unknown'}],containers:[],items:[],
+  itemOperations:[{code:'act-1',kind:'activateLocation',phase:'APPLIED',containerCode:'',after:{locations:[{code:'L-OLD',status:'active'}]}}]};
+ const persistence={async enqueue(r){},async saveDraft(){},async recover(){return{drafts:[],commands:[]}}};
+ const page=UI.mount({document:d,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>[],getClient:()=>({async submit(c){state.locations[0].status='active';return {phase:'APPLIED',code:c.id};}}),
+  id:()=>'p3c-'+(++n),refreshConflicts:async()=>{refreshed++;state.locations[0].status='active';}});
+ page.scan.add('receive');
+ d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN();
+ const btns=[...d.getElementById('itmStatus').querySelectorAll('button')];
+ assert.ok(btns[0]&&btns[0].textContent.includes('现场确认启用该库位并继续'),'现场启用仍是首选动作');
+ const refresh=btns.find(b=>b.textContent.includes('云端可能已启用：安全重拉核对'));
+ assert.ok(refresh,'云端凭据已到（本地状态未落地）必须给安全重拉出口');
+ refresh.click();await tickN(10);
+ assert.equal(refreshed,1,'安全重拉被调用');
+ assert.match(d.getElementById('itmStatus').textContent,/已填写草稿|库位锚点|目标库位/,'重拉落地后自动重试原步骤成功');
 });

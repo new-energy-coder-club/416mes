@@ -73,3 +73,51 @@ test('location proof survives multiple idempotent re-confirmations (dedupe by op
   assert.equal(S.proof('locations', row, [{ code: 'op-1', kind: 'activateLocation', phase: 'APPLIED', after: { locations: [{ code: 'L-A', status: 'active' }] } }, { code: 'op-1', kind: 'activateLocation', phase: 'APPLIED', after: { locations: [{ code: 'L-A', status: 'active' }] } }]), true, '同 opId 重复日志行按一次计');
   assert.equal(S.proof('locations', { code: 'L-B', status: 'unknown' }, logs), false, '非 active 永远无凭据');
 });
+
+/* ================= P3a（用户实测「库位已启用但显示未启用」）：增量自愈 revalidate ================= */
+test('revalidate heals location activated-remotely but stuck unknown by T1/T2 race', () => {
+  /* T1：轮询先拉到 locations 行（云端已 active），但 APPLIED 日志行（T2）还没拉到 →
+     merge 挂 unverified-controlled-change，本地保持 unknown */
+  const st = { locations: [{ code: 'L-A', status: 'unknown', desc: '现场' }], containers: [], items: [], itemOperations: [] };
+  const r = S.merge(st, { locations: [{ code: 'L-A', status: 'active', desc: '现场' }] });
+  assert.equal(st.locations[0].status, 'unknown', '无凭据时绝不采用');
+  assert.ok(st.__itmConflicts['locations:L-A']);
+  /* T2：APPLIED activateLocation 日志随后到达（locations 行不再变化、不会再被增量拉取） */
+  S.merge(st, { itemOperations: [{ code: 'act-1', kind: 'activateLocation', phase: 'APPLIED', after: { locations: [{ code: 'L-A', status: 'active' }] } }] });
+  const healed = S.revalidate(st);
+  assert.deepEqual(healed, ['locations:L-A']);
+  assert.equal(st.locations[0].status, 'active', '凭据到达后必须自愈');
+  assert.equal(st.__itmConflicts['locations:L-A'], undefined, '冲突同步解除');
+});
+test('revalidate heals container/item via lastOpId-matched APPLIED log with version gate', () => {
+  const st = { locations: [{ code: 'L-A', status: 'active' }], containers: [{ code: 'C-A', loc: 'L-A', status: 'active', version: 2, lastOpId: 'mv-1' }], items: [], itemOperations: [] };
+  /* 容器行（T1，version 2 已在途）先到、被拒（日志未到）；日志（T2，after.version=3）后到 */
+  const movedRow = { code: 'C-A', loc: 'L-B', status: 'active', version: 3, lastOpId: 'mv-2' };
+  st.locations.push({ code: 'L-B', status: 'active' });
+  S.merge(st, { containers: [movedRow] });
+  assert.equal(st.containers[0].loc, 'L-A');
+  assert.ok(st.__itmConflicts['containers:C-A']);
+  S.merge(st, { itemOperations: [{ code: 'mv-2', kind: 'moveContainer', phase: 'APPLIED', after: { containers: [movedRow] } }] });
+  const healed = S.revalidate(st);
+  assert.ok(healed.includes('containers:C-A'));
+  assert.equal(st.containers[0].loc, 'L-B', '按凭据落地');
+  assert.equal(st.containers[0].version, 3);
+  assert.equal(st.__itmConflicts['containers:C-A'], undefined);
+});
+test('revalidate refuses stale-log downgrade and dangling relations (same gates as merge)', () => {
+  /* 旧日志（版本不高于本地）不得倒灌 */
+  const st = { locations: [{ code: 'L-A', status: 'active' }], containers: [{ code: 'C-A', loc: 'L-A', status: 'active', version: 5, lastOpId: 'mv-1' }], items: [], itemOperations: [{ code: 'mv-1', kind: 'moveContainer', phase: 'APPLIED', after: { containers: [{ code: 'C-A', loc: 'L-B', status: 'active', version: 3, lastOpId: 'mv-1' }] } }] };
+  assert.deepEqual(S.revalidate(st), []);
+  assert.equal(st.containers[0].loc, 'L-A', '版本闸门：旧日志不落地');
+  /* 关系闸门：目标容器不存在 → 不落地，冲突保留（fail-closed） */
+  const st2 = { locations: [{ code: 'L-A', status: 'active' }], containers: [{ code: 'C-A', loc: 'L-A', status: 'active', version: 2, lastOpId: 'mv-1' }], items: [{ code: 'I-A', status: 'in_stock', container: 'C-A', version: 3, lastOpId: 'op-1' }], itemOperations: [{ code: 'op-1', kind: 'receive', phase: 'APPLIED', after: { items: [{ code: 'I-A', status: 'in_stock', container: 'C-MISSING', version: 4, lastOpId: 'op-1' }] } }] };
+  const healed2 = S.revalidate(st2);
+  assert.deepEqual(healed2, []);
+  assert.equal(st2.items[0].container, 'C-A', '悬空关系绝不落地');
+});
+test('revalidate quarantined logs are not credentials (untrusted logs never heal)', () => {
+  const st = { locations: [{ code: 'L-A', status: 'unknown' }], containers: [], items: [], itemOperations: [{ code: 'dup-1', kind: 'activateLocation', phase: 'APPLIED', after: { locations: [{ code: 'L-A', status: 'active' }] } }] };
+  st.__itmConflicts = { 'itemOperations:dup-1': { reason: 'duplicate-operation' } };
+  assert.deepEqual(S.revalidate(st), [], '被隔离的日志行不构成凭据');
+  assert.equal(st.locations[0].status, 'unknown');
+});

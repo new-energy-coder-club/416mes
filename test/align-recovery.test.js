@@ -830,3 +830,19 @@ test('E2：复制全部 / 导出 CSV 接线 —— 纯函数 + BOM + 文件名�
   assert.match(csvFn, /物品码,名称,关联物料,短码,短链接/, 'CSV 表头固定 5 列');
   assert.match(fnSrc('shortlinksCopyText'), /join\('\\n'\)/, '复制全部必须 LF 分隔、无表头');
 });
+
+/* ================= P3b（用户实测「库位已启用但界面显示未启用」）：资源档案露出启用状态 + 核实启用直达入口 ================= */
+test('P3b：库位/容器档案必须露出受控状态列，未启用行给核实启用直达入口（只跳转预填，绝不直接改状态）', () => {
+  const s = fnSrc('renderRes');
+  assert.match(s, /data-res-activate/, 'renderRes 必须渲染核实启用按钮');
+  assert.match(s, /needsActivate/, '只对非启用行渲染核实启用按钮');
+  assert.match(s, /statusTd/, '状态列必须经状态映射渲染（已启用/待核实/已退役），不裸出英文状态');
+  const handlerIdx = HTML.indexOf('d.resActivate');
+  assert.ok(handlerIdx > 0, '必须有 data-res-activate 点击处理');
+  const handler = HTML.slice(handlerIdx, handlerIdx + 700);
+  assert.match(handler, /data-tab=item-work/, '必须跳转 ITM作业 页签');
+  assert.match(handler, /不直接改状态|绝不直接改状态/, '注释明确不直接改状态（受控变更必须走命令）');
+  const cfgSrc = HTML.slice(HTML.indexOf('const RES_TYPES'), HTML.indexOf('const RES_TYPES') + 2600);
+  assert.match(cfgSrc, /locations:[\s\S]*?\['status', '状态'\]/, '库位必须有状态列');
+  assert.match(cfgSrc, /containers:[\s\S]*?\['status', '状态'\]/, '容器必须有状态列');
+});
