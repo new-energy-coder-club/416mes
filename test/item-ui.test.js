@@ -603,3 +603,76 @@ test('P3c 本地已有 APPLIED 启用日志但状态未落地：报错卡提供�
  assert.equal(refreshed,1,'安全重拉被调用');
  assert.match(d.getElementById('itmStatus').textContent,/已填写草稿|库位锚点|目标库位/,'重拉落地后自动重试原步骤成功');
 });
+
+/* ================= F2（v3.2.4）：版本类拒绝自动重建重提（用户实测死循环根治） ================= */
+test('F2 激活命令版本类被拒：自动重拉换新 opId 重试一次，不再推用户去待处理区',async()=>{
+ const s=setupGuided();const d=s.document,page=s.page;
+ let calls=0;s.clientSubmit=async c=>{calls++;
+  if(calls===1)return {phase:'REJECTED',code:c.id,error:'TRIAL_CONCURRENT_OPERATION_DETECTED'};
+  s.state.locations[0].status='active';return {phase:'APPLIED',code:c.id};};
+ d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN();
+ const action=d.getElementById('itmStatus').querySelector('button');assert.ok(action);
+ action.click();await tickN(16);
+ assert.equal(s.submitted,2,'首拒后自动换新 opId 重试一次');
+ assert.match(d.getElementById('itmStatus').textContent,/已启用|已填写草稿|目标库位/,'重试成功继续原流程');
+ assert.doesNotMatch(d.getElementById('itmStatus').textContent,/待处理区查询原命令/,'不再把用户推进待处理区');
+ assert.deepEqual(page.scan.row().values.map(v=>v.code),['L-OLD']);
+});
+test('F2 重建后再被拒：如实报「启用被拒绝」，不无限循环',async()=>{
+ const s=setupGuided();const d=s.document;
+ let calls=0;s.clientSubmit=async c=>{calls++;return {phase:'REJECTED',code:c.id,error:'VERSION_CONFLICT'};};
+ d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN();
+ const action=d.getElementById('itmStatus').querySelector('button');action.click();await tickN(16);
+ assert.equal(s.submitted,2,'只自动重试一次');
+ assert.match(d.getElementById('itmStatus').textContent,/启用被拒绝/,'第二次拒绝如实呈现');
+});
+
+/* ================= F3（v3.2.4）：激活类命令卡的重建按钮（lastError 保留错误码后可达） ================= */
+test('F3 激活卡版本类被拒：重建按钮可达，点击后 abandon 旧命令并按最新数据重发',async()=>{
+ const {parseHTML}=require('linkedom');
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const state={locations:[{code:'L-A',status:'active'}],containers:[{code:'C-OLD',loc:'L-A',status:'unknown',version:0}],items:[],itemOperations:[]};
+ const oldId='act-old';
+ const cards=[{id:oldId,op:'itemOperation',status:'needs_attention',lastError:'TRIAL_CONCURRENT_OPERATION_DETECTED｜本命令已放弃：与早前未完成的命令冲突（可能是你上一步超时的命令，并非其他设备）。可点「按最新数据重建并重新提交」，或重新扫码',
+  request:{schemaVersion:1,opId:oldId,kind:'activateContainer',containerCode:'C-OLD',target:{loc:'L-A'},expected:{containerVersion:0}}}];
+ const enqueued=[];const abandoned=[];
+ const persistence={async enqueue(r){enqueued.push(r);},async saveDraft(){},async recover(){return{drafts:[],commands:[]}},async abandonCommand(id){abandoned.push(id);}};
+ let n=0;const submitted=[];
+ const page=UI.mount({document:d,getState:()=>state,getPersistence:()=>persistence,
+  getCommands:async()=>cards.concat(enqueued.map(r=>({id:r.opId,op:'itemOperation',request:r}))),
+  getClient:()=>({submit:async c=>{submitted.push(structuredClone(c.request));state.containers[0].status='active';return {phase:'APPLIED',code:c.id,kind:c.request.kind,request:c.request};}}),
+  id:()=>'rebuild-'+(++n),refreshConflicts:async()=>{}});
+ await page.pending();
+ const card=d.getElementById('itmPending').querySelector('article');
+ const rebuild=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('按最新数据重建并重新提交'));
+ assert.ok(rebuild,'lastError 保留错误码后重建按钮必须可达（v3.2.3 回归：文案覆写错误码致按钮永不出现）');
+ rebuild.click();await tickN(12);
+ assert.deepEqual(abandoned,[oldId],'旧命令已收走');
+ const req=enqueued[0];
+ assert.equal(req.kind,'activateContainer','激活类重建 = 重取最新实体状态生成新激活命令');
+ assert.notEqual(req.opId,oldId,'换新 opId');
+ assert.equal(submitted.length,1,'重建后自动提交一轮');
+ assert.match(d.getElementById('itmStatus').textContent,/已启用|已填写草稿|目标库位/);
+});
+
+/* ================= F1 配套：可重建拒绝不丢扫码行绑定 ================= */
+test('F1 retryable 拒绝经待处理区提交后行绑定保留（重建按钮要靠 opId 找回行）',async()=>{
+ const {parseHTML}=require('linkedom');
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const state={locations:[{code:'L-A',status:'active'}],containers:[{code:'C-A',loc:'L-A',status:'active',version:2}],items:[{code:'I-P',name:'p',status:'pending',version:0}],itemOperations:[]};
+ const oldOpId='row-op-1';
+ const cards=[{id:oldOpId,op:'itemOperation',status:'pending',request:{schemaVersion:1,opId:oldOpId,kind:'receive',itemCode:'I-P',target:{loc:'L-A',container:'C-A'},expected:{itemVersion:0,containerVersion:2}}}];
+ const persistence={async enqueue(r){},async saveDraft(){},async recover(){return{drafts:[],commands:[]}}};
+ let n=0;
+ const page=UI.mount({document:d,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>cards,
+  getClient:()=>({submit:async c=>({phase:'REJECTED',code:c.id,error:'VERSION_CONFLICT',retryable:true,request:c.request})}),
+  id:()=>'keep-'+(++n)});
+ page.scan.restore({sessionId:'s1',active:0,batch:null,rows:[
+  {rowId:'r1',kind:'receive',generation:1,locked:true,opId:oldOpId,values:[{type:'LOC',code:'L-A',version:0},{type:'CTN',code:'C-A',version:2},{type:'ITM',code:'I-P',version:0}]}]});
+ await page.pending();
+ const card=d.getElementById('itmPending').querySelector('article');
+ const submit=[...card.querySelectorAll('button')].find(b=>b.textContent==='提交原命令');
+ submit.click();await tickN(8);
+ const row=page.scan.snapshot().rows.find(r=>r.opId===oldOpId);
+ assert.ok(row,'retryable 拒绝后行绑定必须保留（旧实现 forget 掉行 → 重建按钮报「找不到扫码行」）');
+});
