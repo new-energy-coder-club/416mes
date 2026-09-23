@@ -19,7 +19,7 @@ test('trial mode duplicate same opId returns existing result and different paylo
  await assert.rejects(()=>service.post({}, {...request,reason:'different'}),/OP_ID_PAYLOAD_CONFLICT/);assert.equal(repository.writes,1);
 });
 
-/* ================= P2b/P2c（用户实测「单设备也报并发、命令提交不了」） ================= */
+/* ================= S1（v3.3.0 拆锁）：claim 只做重放检测，不再有任何互斥阻塞 ================= */
 function trialFixture() {
   const repository = repositoryFixture();
   repository.allOperations = async () => repository.logs;
@@ -29,26 +29,35 @@ function trialFixture() {
 const freshTs = () => new Date(Date.now() - 30 * 1000).toISOString();          // 30s 前
 const staleTs = () => new Date(Date.now() - 11 * 60 * 1000).toISOString();     // 11 分钟前
 
-test('P2b: stale PREPARED row (11min old, impossible in-flight) no longer blocks new commands', async () => {
+test('S1: claim 对任何未决行（新鲜/陈旧/REPAIR_REQUIRED）都不再阻塞——互斥整体移除', async () => {
   const { repository, coord } = trialFixture();
-  repository.logs.push({ code: 'zombie-1', phase: 'PREPARED', kind: 'receive', request: { kind: 'receive', itemCode: 'I' }, requestHash: 'h', requestedAt: staleTs(), recordId: 'r1' });
-  const claim = await coord.claim({ opId: 'new-1', request: { kind: 'receive', itemCode: 'I' }, requestHash: 'h2' });
-  assert.equal(claim.acquired, true, '陈旧 PREPARED 必须放行（否则单设备被僵尸行永久堵死）');
+  repository.logs.push(
+    { code: 'live-1', phase: 'PREPARED', kind: 'receive', request: { kind: 'receive', itemCode: 'I' }, requestHash: 'h', requestedAt: freshTs(), recordId: 'r1' },
+    { code: 'rep-1', phase: 'REPAIR_REQUIRED', kind: 'receive', request: { kind: 'receive', itemCode: 'I' }, requestHash: 'h', requestedAt: staleTs(), recordId: 'r2' });
+  const same = await coord.claim({ opId: 'new-1', request: { kind: 'receive', itemCode: 'I' }, requestHash: 'h2' });
+  assert.equal(same.acquired, true, '同实体新鲜 PREPARED 行不再阻塞（正确性由版本前置+重计划兜底）');
+  const other = await coord.claim({ opId: 'new-2', request: { kind: 'receive', itemCode: 'OTHER' }, requestHash: 'h3' });
+  assert.equal(other.acquired, true, '不同实体可并行');
+  const withRepair = await coord.claim({ opId: 'new-3', request: { kind: 'receive', itemCode: 'I' }, requestHash: 'h4' });
+  assert.equal(withRepair.acquired, true, 'REPAIR_REQUIRED 不再全局屏障（仅影响其自身 opId 的 lookup）');
 });
-test('P2b: fresh PREPARED same-entity still blocks; disjoint entity does not (2.63.0 bucketing intact)', async () => {
-  const { repository, coord } = trialFixture();
-  repository.logs.push({ code: 'live-1', phase: 'PREPARED', kind: 'receive', request: { kind: 'receive', itemCode: 'I' }, requestHash: 'h', requestedAt: freshTs(), recordId: 'r1' });
-  const blocked = await coord.claim({ opId: 'new-1', request: { kind: 'receive', itemCode: 'I' }, requestHash: 'h2' });
-  assert.equal(blocked.acquired, false, '新鲜同实体仍互斥');
-  const pass = await coord.claim({ opId: 'new-2', request: { kind: 'receive', itemCode: 'OTHER' }, requestHash: 'h3' });
-  assert.equal(pass.acquired, true, '不同实体可并行（用户模型）');
+test('S1: 同实体两条命令先后执行都成功（不再互杀），真实冲突由版本前置拦截', async () => {
+  const { repository } = trialFixture();
+  const service = require('../lib/item-operation').create({ repository, coordinator: require('../lib/item-trial-coordinator').create(repository), enabled: true, mode: 'feishu-trial' });
+  /* 第一条出库 APPLIED（物品 in_stock@v3 → out@v4）；第二条出库带着过期版本 3 →
+     VERSION_CONFLICT 拒绝——「先确认者赢、后到者作废」由版本机制实现，而不是互斥互杀。 */
+  const r1 = await service.post({ roles: ['admin'] }, { schemaVersion: 1, opId: 'first', kind: 'issue', itemCode: 'I', source: { loc: 'L', container: 'C' }, expected: { itemVersion: 3, containerVersion: 2 } });
+  assert.equal(r1.phase, 'APPLIED', r1.error);
+  const r2 = await service.post({ roles: ['admin'] }, { schemaVersion: 1, opId: 'second', kind: 'issue', itemCode: 'I', source: { loc: 'L', container: 'C' }, expected: { itemVersion: 3, containerVersion: 2 } });
+  assert.equal(r2.phase, 'REJECTED');
+  assert.match(r2.error, /VERSION_CONFLICT/);
+  assert.equal(r2.newOpIdRequired, true);
+  /* 后到者按最新数据重建（out → receive 回库）→ 成功：同实体先后命令畅通，只有版本谎言被拦 */
+  const r3 = await service.post({ roles: ['admin'] }, { schemaVersion: 1, opId: 'third', kind: 'receive', itemCode: 'I', target: { loc: 'L', container: 'C' }, expected: { itemVersion: 4, containerVersion: 2 } });
+  assert.equal(r3.phase, 'APPLIED', r3.error);
 });
-test('P2b: REPAIR_REQUIRED remains global barrier regardless of age (consistency in doubt)', async () => {
-  const { repository, coord } = trialFixture();
-  repository.logs.push({ code: 'rep-1', phase: 'REPAIR_REQUIRED', kind: 'receive', request: { kind: 'receive', itemCode: 'I' }, requestHash: 'h', requestedAt: staleTs(), recordId: 'r1' });
-  const claim = await coord.claim({ opId: 'new-1', request: { kind: 'receive', itemCode: 'OTHER' }, requestHash: 'h2' });
-  assert.equal(claim.acquired, false, 'REPAIR_REQUIRED 仍全局屏障');
-});
+
+/* ================= P2c（保留）：settle 人工收口通道 ================= */
 test('P2c: coordinator.get exposes operation for REPAIR_REQUIRED rows so settle can reach them', async () => {
   const { repository, coord } = trialFixture();
   repository.logs.push({ code: 'rep-1', phase: 'REPAIR_REQUIRED', kind: 'receive', request: { kind: 'receive', itemCode: 'I' }, requestHash: 'h', requestedAt: freshTs(), recordId: 'r1' });
@@ -79,42 +88,74 @@ test('P2c: settle marks REJECTED when actual entity state drifted (readAfter mis
   assert.equal(settled.phase, 'REJECTED', '状态漂移 → 收口为未生效，绝不虚报成功');
 });
 
-/* ================= P2a（并发模型定稿：先确认者赢、后到者立即作废，无 20s 等待） ================= */
-test('P2a: loser is rejected immediately (no 20s wait) with rescan-or-rebuild policy', async () => {
+/* ================= S3（v3.3.0）：过期僵尸自动三态收口 ================= */
+test('S3: 过期 PREPARED 僵尸（已落盘但 finish 未落）→ 下一条命令顺带收口为 APPLIED', async () => {
   const { repository } = trialFixture();
   const service = require('../lib/item-operation').create({ repository, coordinator: require('../lib/item-trial-coordinator').create(repository), enabled: true, mode: 'feishu-trial' });
-  /* TOCTOU 模拟：claim 阶段看不到冲突（放行），写前裁决看到 winner 行（更早的 requestedAt+更小 opId） */
-  const winnerRow = { code: 'AAA-winner', phase: 'PREPARED', kind: 'receive', request: { kind: 'issue', itemCode: 'I' }, requestHash: 'h', requestedAt: freshTs(), recordId: 'r1' };
-  let calls = 0;
-  repository.unsettledOperations = async () => { calls++; return calls === 1 ? [] : [winnerRow]; };
-  const startedAt = Date.now();
-  const result = await service.post({ roles: ['admin'] }, { schemaVersion: 1, opId: 'zzz-loser', kind: 'issue', itemCode: 'I', source: { loc: 'L', container: 'C' }, expected: { itemVersion: 3, containerVersion: 2 } });
-  const elapsed = Date.now() - startedAt;
-  assert.equal(result.phase, 'REJECTED');
-  assert.equal(result.error, 'TRIAL_CONCURRENT_OPERATION_DETECTED');
-  assert.ok(elapsed < 2000, 'loser 必须立即返回（旧实现等待最长 20s），实测 ' + elapsed + 'ms');
-  assert.equal(result.retryable, false, '不再承诺自动重试（先确认者赢，后到者作废）');
-  assert.equal(result.newOpIdRequired, true);
-  assert.equal(result.policy.strategy, 'rescan-or-rebuild');
-  assert.equal(result.policy.maxAuto, 0);
+  /* 正常执行一条出库到 APPLIED（item → out@v4），再把日志行打回 PREPARED + 时间戳拨回
+     11 分钟前（模拟 apply 落了、finish 没落、进程被杀的半途） */
+  const post = await service.post({ roles: ['admin'] }, { schemaVersion: 1, opId: 'half-1', kind: 'issue', itemCode: 'I', source: { loc: 'L', container: 'C' }, expected: { itemVersion: 3, containerVersion: 2 } });
+  assert.equal(post.phase, 'APPLIED');
+  const row = repository.logs.find(l => l.code === 'half-1');
+  row.phase = 'PREPARED'; row.requestedAt = staleTs();
+  const r2 = await service.post({ roles: ['admin'] }, { schemaVersion: 1, opId: 'next-1', kind: 'receive', itemCode: 'I', target: { loc: 'L', container: 'C' }, expected: { itemVersion: 4, containerVersion: 2 } });
+  assert.equal(r2.phase, 'APPLIED', r2.error);
+  assert.equal(repository.logs.find(l => l.code === 'half-1').phase, 'APPLIED', '僵尸行被自动收口为 APPLIED（实体实际已写入）');
 });
-test('P2a: winner (smaller requestedAt|opId) proceeds without waiting', async () => {
+test('S3: 过期 PREPARED 僵尸（未检出任何写入）→ 自动收口为 REJECTED', async () => {
   const { repository } = trialFixture();
   const service = require('../lib/item-operation').create({ repository, coordinator: require('../lib/item-trial-coordinator').create(repository), enabled: true, mode: 'feishu-trial' });
-  const futureRow = { code: 'ZZZ-loser', phase: 'PREPARED', kind: 'receive', request: { kind: 'issue', itemCode: 'I' }, requestHash: 'h', requestedAt: '2999-01-01T00:00:00.000Z', recordId: 'r2' };
-  let calls = 0;
-  repository.unsettledOperations = async () => { calls++; return calls === 1 ? [] : [futureRow]; };
-  const result = await service.post({ roles: ['admin'] }, { schemaVersion: 1, opId: 'aaa-winner', kind: 'issue', itemCode: 'I', source: { loc: 'L', container: 'C' }, expected: { itemVersion: 3, containerVersion: 2 } });
-  assert.equal(result.phase, 'APPLIED', result.error);
+  repository.logs.push({ code: 'zombie-1', phase: 'PREPARED', kind: 'receive',
+    request: { kind: 'receive', itemCode: 'I', target: { loc: 'L', container: 'C' }, expected: { itemVersion: 3, containerVersion: 2 } },
+    requestHash: 'h', requestedAt: staleTs(), recordId: 'r1',
+    before: { items: [{ code: 'I', status: 'in_stock', container: 'C', version: 3 }] },
+    after: { items: [{ code: 'I', status: 'in_stock', container: 'C', version: 4 }] } });
+  const r = await service.post({ roles: ['admin'] }, { schemaVersion: 1, opId: 'next-1', kind: 'issue', itemCode: 'I', source: { loc: 'L', container: 'C' }, expected: { itemVersion: 3, containerVersion: 2 } });
+  assert.equal(r.phase, 'APPLIED', r.error);
+  const z = repository.logs.find(l => l.code === 'zombie-1');
+  assert.equal(z.phase, 'REJECTED', '实体仍是 before 形态（没动过）→ 收口为作废');
+  assert.match(z.error, /自动收口/);
 });
-test('P2a: barrier rejection keeps retryable with settle-then-resubmit (same opId can resubmit)', async () => {
+test('S3: 过期僵尸检出部分写入 → REPAIR_REQUIRED（仅该命令，需人工）；新鲜行不受影响', async () => {
   const { repository } = trialFixture();
   const service = require('../lib/item-operation').create({ repository, coordinator: require('../lib/item-trial-coordinator').create(repository), enabled: true, mode: 'feishu-trial' });
-  /* claim 阶段就被 REPAIR_REQUIRED 行挡住 → UNRESOLVED_OPERATION_BARRIER（HTTP 层 409 throw） */
-  repository.logs.push({ code: 'rep-1', phase: 'REPAIR_REQUIRED', kind: 'receive', request: { kind: 'receive', itemCode: 'I' }, requestHash: 'h', requestedAt: freshTs(), recordId: 'r1' });
-  await assert.rejects(() => service.post({ roles: ['admin'] }, { schemaVersion: 1, opId: 'new-1', kind: 'issue', itemCode: 'I', source: { loc: 'L', container: 'C' }, expected: { itemVersion: 3, containerVersion: 2 } }), /UNRESOLVED_OPERATION_BARRIER/);
-  /* 收口后同一 opId 可直接重提（屏障拒绝不留日志、编号未烧掉） */
-  repository.logs.length = 0;
-  const result = await service.post({ roles: ['admin'] }, { schemaVersion: 1, opId: 'new-1', kind: 'issue', itemCode: 'I', source: { loc: 'L', container: 'C' }, expected: { itemVersion: 3, containerVersion: 2 } });
-  assert.equal(result.phase, 'APPLIED', result.error);
+  repository.logs.push({ code: 'zombie-2', phase: 'PREPARED', kind: 'receive',
+    request: { kind: 'receive', itemCode: 'I', target: { loc: 'L', container: 'C' }, expected: { itemVersion: 3, containerVersion: 2 } },
+    requestHash: 'h', requestedAt: staleTs(), recordId: 'r1',
+    before: { items: [{ code: 'I', status: 'in_stock', container: 'C', version: 3 }] },
+    after: { items: [{ code: 'I', status: 'in_stock', container: 'C', version: 4 }] } });
+  repository.logs.push({ code: 'fresh-1', phase: 'PREPARED', kind: 'receive',
+    request: { kind: 'receive', itemCode: 'I' }, requestHash: 'h', requestedAt: freshTs(), recordId: 'r2',
+    before: { items: [{ code: 'I', status: 'in_stock', container: 'C', version: 3 }] },
+    after: { items: [{ code: 'I', status: 'in_stock', container: 'C', version: 4 }] } });
+  /* 部分写入：status=after（in_stock 不变看不出）——改 version 与 container 成既非 before 亦非 after */
+  repository.state.items[0].version = 7;
+  await service.post({ roles: ['admin'] }, { schemaVersion: 1, opId: 'next-1', kind: 'issue', itemCode: 'I', source: { loc: 'L', container: 'C' }, expected: { itemVersion: 3, containerVersion: 2 } });
+  assert.equal(repository.logs.find(l => l.code === 'zombie-2').phase, 'REPAIR_REQUIRED', '部分写入 → 人工核对');
+  assert.equal(repository.logs.find(l => l.code === 'fresh-1').phase, 'PREPARED', '新鲜行绝不被收口');
+});
+
+/* ================= S2（v3.3.0）：启用容器幂等化 ================= */
+test('S2: 已启用容器同库位重确认——本地版本陈旧也 APPLIED（不再 VERSION_CONFLICT 死循环）', async () => {
+  const { repository } = trialFixture();
+  const service = require('../lib/item-operation').create({ repository, coordinator: require('../lib/item-trial-coordinator').create(repository), enabled: true, mode: 'feishu-trial' });
+  /* 云端容器已是 active@L（比如上一次启用实际已生效但本机 ACK 未落），
+     本机镜像陈旧带旧版本 + 未核验冲突——重发启用命令必须幂等成功 */
+  repository.state.containers[0].status = 'active';
+  const r = await service.post({ roles: ['admin'] }, { schemaVersion: 1, opId: 're-act', kind: 'activateContainer', containerCode: 'C', target: { loc: 'L' }, expected: { containerVersion: 99 } });
+  assert.equal(r.phase, 'APPLIED', r.error);
+  const c = repository.state.containers[0];
+  assert.equal(c.status, 'active');assert.equal(c.loc, 'L');
+  assert.equal(c.lastOpId, 're-act', '重确认生成新凭据（同步合并要求）');
+});
+test('S2: 真实变更仍守版本与旧位——错版本拒 VERSION、旧位不确认拒 LEGACY、确认后成功', async () => {
+  const { repository } = trialFixture();
+  const service = require('../lib/item-operation').create({ repository, coordinator: require('../lib/item-trial-coordinator').create(repository), enabled: true, mode: 'feishu-trial' });
+  repository.state.containers[0].loc = 'L2';   // 旧位与目标 L 不同
+  const r1 = await service.post({ roles: ['admin'] }, { schemaVersion: 1, opId: 'move-stale', kind: 'activateContainer', containerCode: 'C', target: { loc: 'L' }, expected: { containerVersion: 99 } });
+  assert.equal(r1.phase, 'REJECTED');assert.match(r1.error, /VERSION_CONFLICT/, '真实变更版本前置保留（换位不是幂等重确认）');
+  const r2 = await service.post({ roles: ['admin'] }, { schemaVersion: 1, opId: 'move-noconfirm', kind: 'activateContainer', containerCode: 'C', target: { loc: 'L' }, expected: { containerVersion: 2 } });
+  assert.equal(r2.phase, 'REJECTED');assert.match(r2.error, /LEGACY_LOCATION_CONFLICT/, '换位是真实变更：旧位确认不可跳过');
+  const r3 = await service.post({ roles: ['admin'] }, { schemaVersion: 1, opId: 'move-ok', kind: 'activateContainer', containerCode: 'C', target: { loc: 'L' }, expected: { containerVersion: 2 }, confirmLegacyLocOverride: true });
+  assert.equal(r3.phase, 'APPLIED', r3.error);
 });

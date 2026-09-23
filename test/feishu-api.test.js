@@ -516,7 +516,7 @@ test('ITM feishu-trial HTTP: 服务端发号建档（不带码）→ receive →
   assert.equal(nonCanonical.status, 400); assert.equal(nonCanonical.body.error, 'NON_CANONICAL_ITEM_CODE');
 });
 
-test('ITM feishu-trial HTTP: REPAIR_REQUIRED blocks apply/retry/new command across fresh runtime', async t => {
+test('ITM feishu-trial HTTP: REPAIR_REQUIRED 只影响自身 opId，不再堵死新命令（v3.3.0 拆锁）', async t => {
   let rejectItemUpdate = false, f;
   f = await startItemTrialHttp(t, options => {
     options.delay = info => {
@@ -540,20 +540,24 @@ test('ITM feishu-trial HTTP: REPAIR_REQUIRED blocks apply/retry/new command acro
   assert.ok(log['错误与恢复说明']);
   assert.equal(f.tables.trialI.rows[0]['状态'], 'pending');
   rejectItemUpdate = false;
-  const writesAfterFailure = f.writes().length;
-  for (const fresh of [false, true]) {
-    if (fresh) f.restart();
-    const history = await f.get(command.opId);
-    assert.equal(history.status, 200);
-    assert.equal(history.body.operation.phase, 'REPAIR_REQUIRED');
-    const retry = await f.post(command);
-    assert.equal(retry.status, 200);
-    assert.equal(retry.body.operation.phase, 'REPAIR_REQUIRED');
-    const blocked = await f.post({ ...command, opId: 'new-receive-' + fresh });
-    assert.equal(blocked.status, 409);
-    assert.match(blocked.body.error, /^UNRESOLVED_OPERATION_BARRIER/, '屏障语义不变（可附带头一条未决命令信息）');
-    assert.equal(f.writes().length, writesAfterFailure, 'removing the fault never grants permission to reapply');
-  }
+  /* 同 opId 重提：幂等回读未决结果，绝不自动重发（旧不变量保留） */
+  const retry = await f.post(command);
+  assert.equal(retry.status, 200);
+  assert.equal(retry.body.operation.phase, 'REPAIR_REQUIRED');
+  /* 重启后同样：未决行只影响自身 opId 的 lookup，GET 保持只读 */
+  f.restart();
+  const history = await f.get(command.opId);
+  assert.equal(history.status, 200);
+  assert.equal(history.body.operation.phase, 'REPAIR_REQUIRED');
+  const retry2 = await f.post(command);
+  assert.equal(retry2.status, 200);
+  assert.equal(retry2.body.operation.phase, 'REPAIR_REQUIRED');
+  /* v3.3.0：新命令不再被全局屏障挡（旧实现 409 UNRESOLVED_OPERATION_BARRIER）——
+     故障移除后，用新 opId 提交的新命令直接收口残局成功 */
+  const next = await f.post({ ...command, opId: 'new-receive-after-repair' });
+  assert.equal(next.status, 200);
+  assert.equal(next.body.operation.phase, 'APPLIED', JSON.stringify(next.body.operation && next.body.operation.error));
+  assert.equal(f.tables.trialI.rows[0]['状态'], 'in_stock', '故障移除后新命令真正写入了实体');
   assert.equal(f.tables.trialO.rows.filter(r => r['操作ID'] === command.opId).length, 1);
 });
 

@@ -31,7 +31,7 @@ function handlerFor(service) {
     if (req.method === 'POST' && !assertSameOrigin(req, res)) return;   /* 2.50.2 同源标记（审计 I-B6；GET 只读豁免） */
     const identity = authenticateFromToken(req);
     try {
-      if (req.method === 'GET' && req.query && req.query.action === 'capabilities') return res.status(200).json({ ok: true, mode: service.mode || 'strict', authentication: Object.keys(OPERATOR_TOKENS).length ? 'token' : (service.mode === 'feishu-trial' ? 'none' : 'required'), concurrency: service.mode === 'feishu-trial' ? 'entity-scoped-best-effort' : 'strict', notice: '试运行请一次只操作一条，等待结果后再继续；未知结果不要重新提交。' });
+      if (req.method === 'GET' && req.query && req.query.action === 'capabilities') return res.status(200).json({ ok: true, mode: service.mode || 'strict', authentication: Object.keys(OPERATOR_TOKENS).length ? 'token' : (service.mode === 'feishu-trial' ? 'none' : 'required'), concurrency: service.mode === 'feishu-trial' ? 'version-guarded-idempotent' : 'strict', notice: '命令以 opId 幂等、数据版本前置自动裁决；提交超时会自动查询结果，无需重复提交。' });
       let result;
       if (req.method === 'GET') result = await service.get(req, req.query && req.query.opId);
       else {

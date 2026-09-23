@@ -229,18 +229,22 @@ test('D1 entityKeysOf: 命令派生实体键集（含 source/target/entity/无�
   const k4 = U.entityKeysOf({ kind: 'activateLocation', locationCode: 'L-A' });
   assert.ok(k4.has('locations:L-A'));
 });
-test('D2 trial 协调器：不同实体可并行，同实体互斥，REPAIR_REQUIRED 全局屏障', async () => {
+test('S1（v3.3.0 拆锁）：trial 协调器不再互斥——同实体/不同实体/REPAIR_REQUIRED 全部放行', async () => {
   const st = { locations: [{ code: 'L-A', status: 'active' }], containers: [{ code: 'C-A', loc: 'L-A', status: 'active', version: 1 }], items: [{ code: 'I-1', status: 'pending', container: '', version: 0 }, { code: 'I-2', status: 'pending', container: '', version: 0 }], itemOperations: [] };
   U.migrate(st);
   const coord = require('../lib/item-trial-coordinator').create({ allOperations: async () => st.itemOperations });
-  const mk = (opId, itemCode) => ({ opId, request: { schemaVersion: 1, opId, kind: 'verifyLegacy', itemCode, target: { loc: 'L-A', container: 'C-A' }, expected: {} } });
-  // verifyLegacy 用于占位 PREPARED 行（不需要真跑 plan——直接造行）
   st.itemOperations.push({ code: 'op-1', kind: 'receive', phase: 'PREPARED', request: { kind: 'receive', itemCode: 'I-1' } });
-  const r1 = await coord.claim({ opId: 'op-2', request: { kind: 'receive', itemCode: 'I-2' } });
-  assert.equal(r1.acquired, true, '不同实体（I-2 vs I-1）可并行');
-  const r2 = await coord.claim({ opId: 'op-3', request: { kind: 'receive', itemCode: 'I-1' } });
-  assert.equal(r2.acquired, false, '同实体（I-1）互斥');
   st.itemOperations.push({ code: 'op-r', kind: 'receive', phase: 'REPAIR_REQUIRED', request: { kind: 'receive', itemCode: 'I-9' } });
+  const r1 = await coord.claim({ opId: 'op-2', request: { kind: 'receive', itemCode: 'I-2' } });
+  assert.equal(r1.acquired, true, '不同实体可并行（不变量保留）');
+  const r2 = await coord.claim({ opId: 'op-3', request: { kind: 'receive', itemCode: 'I-1' } });
+  assert.equal(r2.acquired, true, '同实体新鲜 PREPARED 行不再互斥（正确性由版本前置+重计划兜底）');
   const r3 = await coord.claim({ opId: 'op-4', request: { kind: 'receive', itemCode: 'I-2' } });
-  assert.equal(r3.acquired, false, 'REPAIR_REQUIRED 保持全局屏障');
+  assert.equal(r3.acquired, true, 'REPAIR_REQUIRED 不再全局屏障（只影响其自身 opId 的 lookup）');
+  /* opId 幂等不变量保留：同号重放→existing，异载荷→冲突 */
+  st.itemOperations.push({ code: 'op-2', kind: 'receive', phase: 'APPLIED', requestHash: 'same-h' });
+  const r4 = await coord.claim({ opId: 'op-2', request: { kind: 'receive', itemCode: 'I-2' }, requestHash: 'same-h' });
+  assert.equal(r4.existing, true, '同 opId 幂等回读');
+  const r5 = await coord.claim({ opId: 'op-2', request: { kind: 'receive', itemCode: 'I-2' }, requestHash: 'other-h' });
+  assert.equal(r5.conflict, true, '同 opId 异载荷冲突');
 });
