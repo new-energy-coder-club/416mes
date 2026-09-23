@@ -561,6 +561,62 @@ test('ITM feishu-trial HTTP: REPAIR_REQUIRED 只影响自身 opId，不再堵死
   assert.equal(f.tables.trialO.rows.filter(r => r['操作ID'] === command.opId).length, 1);
 });
 
+/* ================= v3.3.1 端到端：上次遗留未决命令的死锁闭环（用户实测故事） =================
+   故事：上次会话把「启用容器」命令提交后进程中断（回执没送到）→ 云端留 PREPARED 僵尸 →
+   本次会话该命令查询永远非终态（卡「结果待确认」）→ 用户作废/放弃跟踪，重新扫容器启用。
+   验证整条链：查询非终态如实呈现 → 新命令不被僵尸阻塞（幂等 APPLIED）→ claim 顺带收口僵尸 →
+   人工收口通道（UI 收口按钮走的 settle API）→ 同 opId 幂等重放。 */
+test('ITM feishu-trial HTTP 端到端：遗留未决启用命令 → 不阻塞新命令 → 自动/人工收口/幂等闭环', async t => {
+  const f = await startItemTrialHttp(t);
+  await bootstrapTrialLocationContainer(f);   /* L-001 active；C-001 active@L-001，version 2，lastOpId=trial-activateContainer */
+  const reality = { code: 'C-001', loc: 'L-001', status: 'active', version: 2, lastOpId: 'trial-activateContainer' };
+  const beforeReality = { code: 'C-001', loc: 'L-001', status: 'unknown', version: 1, lastOpId: 'trial-registerContainer' };
+  /* 上次会话的僵尸行：目标快照===现实（实际已生效但 finish 没落），受理时间拨回 11 分钟前 */
+  f.tables.trialO.rows.push({
+    '操作ID': 'op-old', '操作类型': 'activateContainer',
+    '请求内容': JSON.stringify({ schemaVersion: 1, opId: 'op-old', kind: 'activateContainer', containerCode: 'C-001', target: { loc: 'L-001' }, expected: { containerVersion: 1 } }),
+    '请求摘要': 'hash-old',
+    '处理阶段': 'PREPARED',
+    '操作前快照': JSON.stringify({ containers: [beforeReality] }),
+    '目标快照': JSON.stringify({ containers: [reality] }),
+    '受理时间': new Date(Date.now() - 11 * 60 * 1000).toISOString()
+  });
+  /* ① 客户端查询该命令：如实报「原命令未决」（客户端落「结果待确认/需人工核验」卡——
+        v3.3.1 起 UI 给收口/作废出口，不再死等） */
+  const stuck = await f.get('op-old');
+  assert.equal(stuck.status, 200);
+  assert.equal(stuck.body.operation.phase, 'REPAIR_REQUIRED');
+  assert.match(stuck.body.operation.error, /未决/);
+  /* ② 用户放弃跟踪后重新扫容器启用（新 opId）：绝不被僵尸行阻塞；
+        容器已是 active@L-001 → S2 幂等化直接 APPLIED（不查版本、不比 opId） */
+  const freshRequest = { schemaVersion: 1, opId: 'op-new', kind: 'activateContainer', containerCode: 'C-001', target: { loc: 'L-001' }, expected: { containerVersion: 2 } };
+  const applied = await trialApplied(f, freshRequest);
+  assert.equal(applied.code, 'op-new');
+  /* ③ 新命令 claim 时顺带自动收口僵尸：目标快照与实体实际状态一致 → 判「已生效」 */
+  assert.equal(f.tables.trialO.rows.find(r => r['操作ID'] === 'op-old')['处理阶段'], 'APPLIED', '遗留僵尸被顺带收口为 APPLIED（实际已生效）');
+  /* ④ 人工收口通道（UI「收口此命令」按钮走 settle API）：另一条未决行立即三态判定。
+        其目标快照与 op-new 幂等落定后的现实一致（同样要 active@L-001）→ 回读一致 → APPLIED */
+  f.tables.trialO.rows.push({
+    '操作ID': 'op-fresh', '操作类型': 'activateContainer',
+    '请求内容': JSON.stringify({ schemaVersion: 1, opId: 'op-fresh', kind: 'activateContainer', containerCode: 'C-001', target: { loc: 'L-001' }, expected: { containerVersion: 2 } }),
+    '请求摘要': 'hash-fresh',
+    '处理阶段': 'PREPARED',
+    '操作前快照': JSON.stringify({ containers: [reality] }),
+    '目标快照': JSON.stringify({ containers: [{ code: 'C-001', loc: 'L-001', status: 'active', version: 3, lastOpId: 'op-new' }] }),
+    '受理时间': new Date().toISOString()
+  });
+  const settleResponse = await f.post({ action: 'settle', opId: 'op-fresh' });
+  assert.equal(settleResponse.status, 200, JSON.stringify(settleResponse.body));
+  assert.equal(settleResponse.body.operation.phase, 'APPLIED', '回读实际状态一致 → 收口为已生效');
+  assert.equal(f.tables.trialO.rows.find(r => r['操作ID'] === 'op-fresh')['处理阶段'], 'APPLIED');
+  /* ⑤ 幂等重放：同 opId 再提交 → 回放既有结果，不重复执行 */
+  const replay = await f.post(freshRequest);
+  assert.equal(replay.status, 200);
+  assert.equal(replay.body.operation.phase, 'APPLIED');
+  assert.equal(replay.body.operation.requestHash, applied.requestHash);
+  assert.equal(f.tables.trialO.rows.filter(r => r['操作ID'] === 'op-new').length, 1, '重放不产生第二条日志');
+});
+
 test('ITM feishu-trial HTTP: missing schema fails before any entity or operation write; unknown GET stays read-only', async t => {
   const f = await startItemTrialHttp(t, ({ fieldTypes }) => {
     fieldTypes.trialI = fieldTypes.trialI.filter(f => f.name !== '业务版本');

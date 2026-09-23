@@ -676,3 +676,111 @@ test('F1 retryable 拒绝经待处理区提交后行绑定保留（重建按钮�
  const row=page.scan.snapshot().rows.find(r=>r.opId===oldOpId);
  assert.ok(row,'retryable 拒绝后行绑定必须保留（旧实现 forget 掉行 → 重建按钮报「找不到扫码行」）');
 });
+
+/* ================= C1/C2/C3（v3.3.1）：待处理区死锁根治——全状态作废/收口通用化/取消补解锁 =================
+   用户实测：上次会话把启用命令提交到待处理区后没同意，本次继续操作时命令堆叠、
+   卡删不掉（取消按钮只对 pending 状态渲染）、扫码行锁死 → 死锁。 */
+function setupPendingCards(cards,opts={}){
+ const {parseHTML}=require('linkedom');
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const state=Object.assign({locations:[{code:'L-A',status:'active'}],containers:[{code:'C-A',loc:'L-A',status:'active',version:2}],items:[{code:'I-P',name:'p',status:'pending',version:0}],itemOperations:[]},opts.state||{});
+ const abandoned=[];const acknowledged=[];
+ const persistence={async enqueue(){},async saveDraft(){},async recover(){return{drafts:[],commands:[]}},
+  async abandonCommand(id){abandoned.push(id);},
+  async acknowledge(r){acknowledged.push(r);},
+  async markUnknown(){}};
+ let n=0;
+ const page=UI.mount({document:d,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>cards,
+  getClient:()=>({submit:async c=>({phase:'APPLIED',code:c.id,request:c.request}),
+   /* 模拟 item-client.call 的终态语义：APPLIED/REJECTED → acknowledge（落凭据+清卡） */
+   query:async c=>{const r=opts.query?opts.query(c):{phase:'APPLIED',code:c.id,kind:c.request.kind,request:c.request};if(['APPLIED','REJECTED'].includes(r.phase))await persistence.acknowledge(r);return r;},
+   settle:async opId=>opts.settle?opts.settle(opId):{phase:'APPLIED',code:opId}}),
+  id:()=>'pc-'+(++n),refreshConflicts:opts.refreshConflicts});
+ if(opts.row)page.scan.restore({sessionId:'s1',active:0,batch:null,rows:[opts.row]});
+ return {d,page,abandoned,acknowledged,persistence};
+}
+test('C1 卡死的未决命令卡可作废：按钮可达，点击后删卡+解锁扫码行',async t=>{
+ const oldConfirm=global.confirm;global.confirm=()=>true;t.after(()=>{global.confirm=oldConfirm;});
+ const opId='stuck-ctn';
+ const {d,page,abandoned}=setupPendingCards([
+  {id:opId,op:'itemOperation',status:'needs_attention',lastError:'提交超时且自动查询未获终态：云端仍在处理',
+   request:{schemaVersion:1,opId,kind:'activateContainer',containerCode:'C-A',target:{loc:'L-A'},expected:{containerVersion:2}}}],
+  {row:{rowId:'r1',kind:'activate',generation:1,locked:true,opId,values:[{type:'LOC',code:'L-A',version:0},{type:'CTN',code:'C-A',version:2}]}});
+ await page.pending();
+ const card=d.getElementById('itmPending').querySelector('article');
+ const discard=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('作废此命令'));
+ assert.ok(discard,'needs_attention 卡必须提供作废出口（旧实现只有 pending 卡能取消）');
+ discard.click();await tickN();
+ assert.deepEqual(abandoned,[opId],'命令卡已从本机删除');
+ assert.ok(!page.scan.snapshot().rows.some(r=>r.opId===opId),'扫码行已解锁/移除，不再「本行已锁定」死锁');
+ assert.match(d.getElementById('itmStatus').textContent,/已作废/);
+});
+test('C2 收口按钮通用可达：settle 终态后走查询回执路径清卡',async t=>{
+ const oldConfirm=global.confirm;global.confirm=()=>true;t.after(()=>{global.confirm=oldConfirm;});
+ const opId='undecided-1';
+ let settled=null;
+ const {d,page,acknowledged}=setupPendingCards([
+  {id:opId,op:'itemOperation',status:'needs_attention',lastError:'结果待确认',
+   request:{schemaVersion:1,opId,kind:'receive',itemCode:'I-P',target:{loc:'L-A',container:'C-A'},expected:{itemVersion:0,containerVersion:2}}}],
+  {settle:op=>{settled=op;return {phase:'APPLIED',code:op};}});
+ await page.pending();
+ const card=d.getElementById('itmPending').querySelector('article');
+ const btns=[...card.querySelectorAll('button')].map(b=>b.textContent);
+ assert.ok(btns.some(x=>x.includes('收口此命令')),'未决命令卡必须提供收口入口');
+ const settleBtn=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('收口此命令'));
+ settleBtn.click();await tickN();
+ assert.equal(settled,opId,'settle 按原 opId 收口');
+ assert.equal(acknowledged.length,1,'收口终态经 acknowledge 落凭据并清卡');
+ assert.match(d.getElementById('itmStatus').textContent,/远端已确认|收口/);
+});
+test('C2 REPAIR_REQUIRED 卡不再死路：收口与作废双出口齐备',async t=>{
+ const oldConfirm=global.confirm;let confirmed=0;global.confirm=()=>{confirmed++;return true;};t.after(()=>{global.confirm=oldConfirm;});
+ const opId='repair-1';
+ const {d,page}=setupPendingCards([
+  {id:opId,op:'itemOperation',status:'needs_attention',lastError:'写入中断｜人工收口：实体实际状态与目标快照不一致',
+   request:{schemaVersion:1,opId,kind:'activateContainer',containerCode:'C-A',target:{loc:'L-A'},expected:{containerVersion:2}}}],
+  {settle:op=>({phase:'REJECTED',code:op,error:'人工收口：实体实际状态与目标快照不一致（可能已被其他操作覆盖），命令标记为未生效'})});
+ await page.pending();
+ const card=d.getElementById('itmPending').querySelector('article');
+ const btns=[...card.querySelectorAll('button')].map(b=>b.textContent);
+ assert.ok(btns.some(x=>x.includes('收口此命令')),'REPAIR_REQUIRED 卡必须能收口');
+ assert.ok(btns.some(x=>x.includes('作废此命令')),'REPAIR_REQUIRED 卡必须能作废');
+ const discard=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('作废此命令'));
+ discard.click();await tickN();
+ assert.equal(confirmed,1,'作废前必须经确认（防误触）');
+ assert.match(d.getElementById('itmStatus').textContent,/已作废/);
+});
+test('C3 pending 卡手动取消后扫码行解锁（不再绕回「本行已锁定」）',async t=>{
+ const oldConfirm=global.confirm;global.confirm=()=>true;t.after(()=>{global.confirm=oldConfirm;});
+ const opId='pending-row-1';
+ const {d,page,abandoned}=setupPendingCards([
+  {id:opId,op:'itemOperation',status:'pending',
+   request:{schemaVersion:1,opId,kind:'receive',itemCode:'I-P',target:{loc:'L-A',container:'C-A'},expected:{itemVersion:0,containerVersion:2}}}],
+  {row:{rowId:'r1',kind:'receive',generation:1,locked:true,opId,values:[{type:'LOC',code:'L-A',version:0},{type:'CTN',code:'C-A',version:2},{type:'ITM',code:'I-P',version:0}]}});
+ await page.pending();
+ const card=d.getElementById('itmPending').querySelector('article');
+ const cancel=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('取消此命令'));
+ assert.ok(cancel,'pending 卡保留取消入口');
+ cancel.click();await tickN();
+ assert.deepEqual(abandoned,[opId]);
+ assert.ok(!page.scan.snapshot().rows.some(r=>r.opId===opId),'取消后行解锁（旧实现只删卡不解锁行）');
+});
+test('C1 retryable 拒绝卡：作废与重建并存，作废后不再保留行绑定',async t=>{
+ const oldConfirm=global.confirm;global.confirm=()=>true;t.after(()=>{global.confirm=oldConfirm;});
+ const opId='retry-row-1';
+ const {d,page,abandoned}=setupPendingCards([
+  {id:opId,op:'itemOperation',status:'needs_attention',
+   lastError:'VERSION_CONFLICT｜数据刚被更新（可能来自你上一步操作）',
+   request:{schemaVersion:1,opId,kind:'receive',itemCode:'I-P',target:{loc:'L-A',container:'C-A'},expected:{itemVersion:0,containerVersion:2}}}],
+  {row:{rowId:'r1',kind:'receive',generation:1,locked:true,opId,values:[{type:'LOC',code:'L-A',version:0},{type:'CTN',code:'C-A',version:2},{type:'ITM',code:'I-P',version:0}]}},
+  );
+ await page.pending();
+ const card=d.getElementById('itmPending').querySelector('article');
+ const btns=[...card.querySelectorAll('button')].map(b=>b.textContent);
+ assert.ok(btns.some(x=>x==='按最新数据重建并重新提交'),'重建按钮不受影响（F1/F3 语义保留）');
+ assert.ok(btns.some(x=>x.includes('作废此命令')),'作废与重建并存——不想重建时可以放弃');
+ const discard=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('作废此命令'));
+ discard.click();await tickN();
+ assert.deepEqual(abandoned,[opId]);
+ assert.ok(!page.scan.snapshot().rows.some(r=>r.opId===opId),'作废即放弃跟踪，行绑定解除');
+});
