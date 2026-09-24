@@ -229,14 +229,15 @@ test('E1：离线只入队不提交，提示提交后分配物品码',async()=>{
  assert.equal(s.submitted,null,'离线不得提交');
  assert.match(d.getElementById('itmRegisterResult').textContent,/提交后由服务端分配物品码/);
 });
-test('E1：手动码路径保留——填码即带码入队、不走发号提交',async()=>{
+test('E1：手动码路径保留——填码即带码入队；在线即时提交（v3.4.0 R4）',async()=>{
  const s=setupE1(),d=s.document;
  pick(d,'itmRegisterCat','TS');
  d.getElementById('itmRegisterName').value='现场扫到的码';d.getElementById('itmRegisterCode').value='WP-999';
  d.getElementById('itmRegister').click();await tickN();
  assert.equal(s.queued.entity.code,'WP-999','手动码原样带上（规范形校验在服务端）');
- assert.equal(s.submitted,null,'手动码只入队，待在待处理区提交');
- assert.match(d.getElementById('itmRegisterResult').textContent,/手动码/);
+ assert.equal(s.submitted&&s.submitted.request.entity.code,'WP-999','v3.4.0：在线即时提交（幂等低风险，不需要去待处理区手动执行）');
+ assert.match(d.getElementById('itmRegisterResult').textContent,/已建档：WP-999/,'结果就地显示');
+ assert.doesNotMatch(d.getElementById('itmRegisterResult').textContent,/已分配物品码/,'手动码不发号');
 });
 test('E1（P6）：pending 卡对无码 registerItem 显示「物品建档·分类·待发号」',async()=>{
  const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
@@ -322,7 +323,7 @@ test('pending card surfaces lastError and offers needs_attention submit',async()
  assert.match(card.textContent,/上次结果：/,'核验卡必须显示真实失败原因');
  assert.match(card.textContent,/超时/);
  const btns=[...card.querySelectorAll('button')].map(b=>b.textContent);
- assert.ok(btns.some(t=>t==='查询并确认原命令'),'needs_attention 卡提供查询并确认入口');
+ assert.ok(btns.some(t=>t==='重新执行'),'needs_attention 卡提供查询并确认入口');
 });
 test('work tab conflict banner lists blocked codes',()=>{
  const s=setupGuided();const d=s.document;
@@ -544,7 +545,7 @@ test('P1b 版本类拒绝的批量命令：重建按钮解锁全部行并重建�
  await page.pending();
  const card=d.getElementById('itmPending').querySelector('article');
  const btns=[...card.querySelectorAll('button')];
- const rebuild=btns.find(b=>b.textContent.includes('按最新数据重建并重新提交'));
+ const rebuild=btns.find(b=>b.textContent.includes('按最新数据重试'));
  assert.ok(rebuild,'版本类拒绝的批量卡必须提供重建入口');
  rebuild.click();await tickN(10);
  assert.equal(submitted.length,1,'只提交一轮（P2a：不再 8 轮退避）');
@@ -633,7 +634,7 @@ test('F3 激活卡版本类被拒：重建按钮可达，点击后 abandon 旧�
  const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
  const state={locations:[{code:'L-A',status:'active'}],containers:[{code:'C-OLD',loc:'L-A',status:'unknown',version:0}],items:[],itemOperations:[]};
  const oldId='act-old';
- const cards=[{id:oldId,op:'itemOperation',status:'needs_attention',lastError:'TRIAL_CONCURRENT_OPERATION_DETECTED｜本命令已放弃：与早前未完成的命令冲突（可能是你上一步超时的命令，并非其他设备）。可点「按最新数据重建并重新提交」，或重新扫码',
+ const cards=[{id:oldId,op:'itemOperation',status:'needs_attention',lastError:'TRIAL_CONCURRENT_OPERATION_DETECTED｜本命令已放弃：与早前未完成的命令冲突（可能是你上一步超时的命令，并非其他设备）。可点「按最新数据重试」，或重新扫码',
   request:{schemaVersion:1,opId:oldId,kind:'activateContainer',containerCode:'C-OLD',target:{loc:'L-A'},expected:{containerVersion:0}}}];
  const enqueued=[];const abandoned=[];
  const persistence={async enqueue(r){enqueued.push(r);},async saveDraft(){},async recover(){return{drafts:[],commands:[]}},async abandonCommand(id){abandoned.push(id);}};
@@ -644,10 +645,11 @@ test('F3 激活卡版本类被拒：重建按钮可达，点击后 abandon 旧�
   id:()=>'rebuild-'+(++n),refreshConflicts:async()=>{}});
  await page.pending();
  const card=d.getElementById('itmPending').querySelector('article');
- const rebuild=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('按最新数据重建并重新提交'));
+ const rebuild=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('按最新数据重试'));
  assert.ok(rebuild,'lastError 保留错误码后重建按钮必须可达（v3.2.3 回归：文案覆写错误码致按钮永不出现）');
  rebuild.click();await tickN(12);
- assert.deepEqual(abandoned,[oldId],'旧命令已收走');
+ /* v3.4.0 R2：guidedActivate 入队前的同实体清理与重建按钮自身的 abandon 各删一次同一 id——abandonCommand 幂等，去重后恰一条 */
+ assert.deepEqual([...new Set(abandoned)],[oldId],'旧命令已收走');
  const req=enqueued[0];
  assert.equal(req.kind,'activateContainer','激活类重建 = 重取最新实体状态生成新激活命令');
  assert.notEqual(req.opId,oldId,'换新 opId');
@@ -671,7 +673,7 @@ test('F1 retryable 拒绝经待处理区提交后行绑定保留（重建按钮�
   {rowId:'r1',kind:'receive',generation:1,locked:true,opId:oldOpId,values:[{type:'LOC',code:'L-A',version:0},{type:'CTN',code:'C-A',version:2},{type:'ITM',code:'I-P',version:0}]}]});
  await page.pending();
  const card=d.getElementById('itmPending').querySelector('article');
- const submit=[...card.querySelectorAll('button')].find(b=>b.textContent==='提交原命令');
+ const submit=[...card.querySelectorAll('button')].find(b=>b.textContent==='执行');
  submit.click();await tickN(8);
  const row=page.scan.snapshot().rows.find(r=>r.opId===oldOpId);
  assert.ok(row,'retryable 拒绝后行绑定必须保留（旧实现 forget 掉行 → 重建按钮报「找不到扫码行」）');
@@ -708,12 +710,12 @@ test('C1 卡死的未决命令卡可作废：按钮可达，点击后删卡+解�
   {row:{rowId:'r1',kind:'activate',generation:1,locked:true,opId,values:[{type:'LOC',code:'L-A',version:0},{type:'CTN',code:'C-A',version:2}]}});
  await page.pending();
  const card=d.getElementById('itmPending').querySelector('article');
- const discard=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('作废此命令'));
+ const discard=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('删除记录（不再跟踪）'));
  assert.ok(discard,'needs_attention 卡必须提供作废出口（旧实现只有 pending 卡能取消）');
  discard.click();await tickN();
  assert.deepEqual(abandoned,[opId],'命令卡已从本机删除');
  assert.ok(!page.scan.snapshot().rows.some(r=>r.opId===opId),'扫码行已解锁/移除，不再「本行已锁定」死锁');
- assert.match(d.getElementById('itmStatus').textContent,/已作废/);
+ assert.match(d.getElementById('itmStatus').textContent,/已删除记录/);
 });
 test('C2 收口按钮通用可达：settle 终态后走查询回执路径清卡',async t=>{
  const oldConfirm=global.confirm;global.confirm=()=>true;t.after(()=>{global.confirm=oldConfirm;});
@@ -726,12 +728,12 @@ test('C2 收口按钮通用可达：settle 终态后走查询回执路径清卡'
  await page.pending();
  const card=d.getElementById('itmPending').querySelector('article');
  const btns=[...card.querySelectorAll('button')].map(b=>b.textContent);
- assert.ok(btns.some(x=>x.includes('收口此命令')),'未决命令卡必须提供收口入口');
- const settleBtn=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('收口此命令'));
+ assert.ok(btns.some(x=>x.includes('核对云端实际状态')),'未决命令卡必须提供核对入口');
+ const settleBtn=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('核对云端实际状态'));
  settleBtn.click();await tickN();
  assert.equal(settled,opId,'settle 按原 opId 收口');
  assert.equal(acknowledged.length,1,'收口终态经 acknowledge 落凭据并清卡');
- assert.match(d.getElementById('itmStatus').textContent,/远端已确认|收口/);
+ assert.match(d.getElementById('itmStatus').textContent,/远端已确认|核对/);
 });
 test('C2 REPAIR_REQUIRED 卡不再死路：收口与作废双出口齐备',async t=>{
  const oldConfirm=global.confirm;let confirmed=0;global.confirm=()=>{confirmed++;return true;};t.after(()=>{global.confirm=oldConfirm;});
@@ -743,12 +745,12 @@ test('C2 REPAIR_REQUIRED 卡不再死路：收口与作废双出口齐备',async
  await page.pending();
  const card=d.getElementById('itmPending').querySelector('article');
  const btns=[...card.querySelectorAll('button')].map(b=>b.textContent);
- assert.ok(btns.some(x=>x.includes('收口此命令')),'REPAIR_REQUIRED 卡必须能收口');
- assert.ok(btns.some(x=>x.includes('作废此命令')),'REPAIR_REQUIRED 卡必须能作废');
- const discard=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('作废此命令'));
+ assert.ok(btns.some(x=>x.includes('核对云端实际状态')),'REPAIR_REQUIRED 卡必须能核对');
+ assert.ok(btns.some(x=>x.includes('删除记录（不再跟踪）')),'REPAIR_REQUIRED 卡必须能作废');
+ const discard=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('删除记录（不再跟踪）'));
  discard.click();await tickN();
  assert.equal(confirmed,1,'作废前必须经确认（防误触）');
- assert.match(d.getElementById('itmStatus').textContent,/已作废/);
+ assert.match(d.getElementById('itmStatus').textContent,/已删除记录/);
 });
 test('C3 pending 卡手动取消后扫码行解锁（不再绕回「本行已锁定」）',async t=>{
  const oldConfirm=global.confirm;global.confirm=()=>true;t.after(()=>{global.confirm=oldConfirm;});
@@ -759,7 +761,7 @@ test('C3 pending 卡手动取消后扫码行解锁（不再绕回「本行已锁
   {row:{rowId:'r1',kind:'receive',generation:1,locked:true,opId,values:[{type:'LOC',code:'L-A',version:0},{type:'CTN',code:'C-A',version:2},{type:'ITM',code:'I-P',version:0}]}});
  await page.pending();
  const card=d.getElementById('itmPending').querySelector('article');
- const cancel=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('取消此命令'));
+ const cancel=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('删除记录（不执行）'));
  assert.ok(cancel,'pending 卡保留取消入口');
  cancel.click();await tickN();
  assert.deepEqual(abandoned,[opId]);
@@ -777,9 +779,9 @@ test('C1 retryable 拒绝卡：作废与重建并存，作废后不再保留行�
  await page.pending();
  const card=d.getElementById('itmPending').querySelector('article');
  const btns=[...card.querySelectorAll('button')].map(b=>b.textContent);
- assert.ok(btns.some(x=>x==='按最新数据重建并重新提交'),'重建按钮不受影响（F1/F3 语义保留）');
- assert.ok(btns.some(x=>x.includes('作废此命令')),'作废与重建并存——不想重建时可以放弃');
- const discard=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('作废此命令'));
+ assert.ok(btns.some(x=>x==='按最新数据重试'),'重建按钮不受影响（F1/F3 语义保留）');
+ assert.ok(btns.some(x=>x.includes('删除记录（不再跟踪）')),'作废与重建并存——不想重建时可以放弃');
+ const discard=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('删除记录（不再跟踪）'));
  discard.click();await tickN();
  assert.deepEqual(abandoned,[opId]);
  assert.ok(!page.scan.snapshot().rows.some(r=>r.opId===opId),'作废即放弃跟踪，行绑定解除');
@@ -815,10 +817,104 @@ test('v3.3.2 提交失败落卡后待处理区必须刷新（不再停留在旧 
   id:()=>'fail'});
  await page.pending();
  const card=d.getElementById('itmPending').querySelector('article');
- const submit=[...card.querySelectorAll('button')].find(b=>b.textContent==='提交原命令');
+ const submit=[...card.querySelectorAll('button')].find(b=>b.textContent==='执行');
  submit.click();await tickN(10);
  assert.ok(unknownSaved,'item-client 已 markUnknown');
  const btns=[...d.getElementById('itmPending').querySelectorAll('article button')].map(b=>b.textContent);
- assert.ok(btns.some(t=>t.includes('查询并确认原命令')),'失败刷新后应看到 needs_attention 卡的入口（旧实现停在旧 pending 卡）');
- assert.ok(btns.some(t=>t.includes('作废此命令')),'作废/收口出口随刷新出现');
+ assert.ok(btns.some(t=>t.includes('重新执行')),'失败刷新后应看到 needs_attention 卡的入口（旧实现停在旧 pending 卡）');
+ assert.ok(btns.some(t=>t.includes('删除记录（不再跟踪）')),'作废/收口出口随刷新出现');
+});
+
+/* ================= v3.4.0：启用/建档即时化 + 同实体去重 + 文案简化 ================= */
+function setupActivateUI(opts={}){
+ const {parseHTML}=require('linkedom');
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const state=Object.assign({locations:[{code:'L-X',status:'unknown'}],containers:[{code:'C-X',loc:'L-X',status:'unknown',version:0}],items:[]},opts.state||{});
+ const preCards=opts.preCards||[];
+ const enqueued=[];const submitted=[];const abandoned=[];
+ const persistence={async enqueue(r){enqueued.push(r);},async saveDraft(){},async recover(){return{drafts:[],commands:[]}},async abandonCommand(id){abandoned.push(id);}};
+ const page=UI.mount({document:d,state,getState:()=>state,getPersistence:()=>persistence,
+  getCommands:async()=>preCards.concat(enqueued.map(r=>({id:r.opId,op:'itemOperation',request:r,status:'pending'}))),
+  getClient:()=>({submit:async c=>{submitted.push(structuredClone(c.request));return {phase:'APPLIED',code:c.id,kind:c.request.kind,request:c.request};},
+   query:async c=>({phase:'APPLIED',code:c.id,kind:c.request.kind,request:c.request})}),
+  id:()=>'act-'+(enqueued.length+1),isOnline:()=>opts.online!==false,refreshConflicts:async()=>{}});
+ return {d,page,enqueued,submitted,abandoned,state};
+}
+test('v3.4.0 R1：核实启用（库位）在线即时提交并就地显示「已启用」',async()=>{
+ const s=setupActivateUI();
+ s.d.getElementById('itmAdminLoc').value='L-X';
+ s.d.getElementById('itmActivateLoc').click();await tickN(8);
+ assert.equal(s.submitted.length,1,'在线时直接提交，不再只入队等用户去待处理区手动执行');
+ assert.equal(s.submitted[0].kind,'activateLocation');
+ assert.match(s.d.getElementById('itmRegisterResult').textContent,/已启用 L-X/,'结果镜像到建档管理页（itmStatus 在物品作业页，建档页用户看不见）');
+});
+test('v3.4.0 R1：核实启用（容器）用面板目标库位即时提交',async()=>{
+ const s=setupActivateUI();
+ s.d.getElementById('itmAdminLoc').value='L-X';s.d.getElementById('itmAdminContainer').value='C-X';
+ s.d.getElementById('itmActivateContainer').click();await tickN(8);
+ assert.equal(s.submitted.length,1,'容器启用同样即时提交');
+ assert.deepEqual(s.submitted[0].target,{loc:'L-X'},'目标库位=面板填写的 itmAdminLoc（guidedActivate 的 opts.targetLoc 覆盖）');
+});
+test('v3.4.0 R1：核实启用离线时仅入队并如实提示',async()=>{
+ const s=setupActivateUI({online:false});
+ s.d.getElementById('itmAdminLoc').value='L-X';
+ s.d.getElementById('itmActivateLoc').click();await tickN(8);
+ assert.equal(s.submitted.length,0,'离线不提交');
+ assert.equal(s.enqueued.length,1,'离线仍入队（联网后自动提交或在待处理区执行）');
+ assert.match(s.d.getElementById('itmRegisterResult').textContent,/当前离线/);
+});
+test('v3.4.0 R2：启用前自动删除同实体旧未决卡（杜绝「一个命令两个审核」）',async()=>{
+ const s=setupActivateUI({preCards:[{id:'old-act',op:'itemOperation',status:'needs_attention',lastError:'结果待确认',
+  request:{schemaVersion:1,opId:'old-act',kind:'activateLocation',locationCode:'L-X',expected:{locationStatus:'unknown'}}}]});
+ s.d.getElementById('itmAdminLoc').value='L-X';
+ s.d.getElementById('itmActivateLoc').click();await tickN(8);
+ assert.deepEqual(s.abandoned,['old-act'],'同 kind 同实体的旧卡入队前被自动替换');
+ assert.equal(s.submitted.length,1,'新命令照常即时提交');
+});
+test('v3.4.0 R4：库位建档在线即时提交，APPLIED 后显示「已建档」',async()=>{
+ const {parseHTML}=require('linkedom');
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const state={locations:[],containers:[],items:[]};
+ const enqueued=[];const submitted=[];
+ const persistence={async enqueue(r){enqueued.push(r);},async saveDraft(){},async recover(){return{drafts:[],commands:[]}}};
+ const page=UI.mount({document:d,state,getState:()=>state,getPersistence:()=>persistence,
+  getCommands:async()=>enqueued.map(r=>({id:r.opId,op:'itemOperation',request:r,status:'pending'})),
+  getClient:()=>({submit:async c=>{submitted.push(c.request);return {phase:'APPLIED',code:c.id,kind:c.request.kind,request:c.request};}}),
+  id:()=>'reg-'+(enqueued.length+1),isOnline:()=>true,qrSvg:t=>'QR['+t+']'});
+ pick(d,'itmRegisterType','registerLocation');
+ d.getElementById('itmRegisterName').value='A 区 1 层';
+ d.getElementById('itmRegisterCode').value='L-NEW';
+ d.getElementById('itmRegister').click();await tickN(8);
+ assert.equal(submitted.length,1,'建档在线即时提交（幂等低风险）');
+ assert.equal(submitted[0].kind,'registerLocation');
+ assert.match(d.getElementById('itmRegisterResult').textContent,/已建档：L-NEW/,'结果就地显示');
+});
+test('v3.4.0 R4：库位建档离线时仅入队',async()=>{
+ const {parseHTML}=require('linkedom');
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const state={locations:[],containers:[],items:[]};
+ const enqueued=[];const submitted=[];
+ const persistence={async enqueue(r){enqueued.push(r);},async saveDraft(){},async recover(){return{drafts:[],commands:[]}}};
+ const page=UI.mount({document:d,state,getState:()=>state,getPersistence:()=>persistence,
+  getCommands:async()=>enqueued.map(r=>({id:r.opId,op:'itemOperation',request:r,status:'pending'})),
+  getClient:()=>({submit:async c=>{submitted.push(c.request);return {phase:'APPLIED',code:c.id,kind:c.request.kind,request:c.request};}}),
+  id:()=>'rego-'+(enqueued.length+1),isOnline:()=>false,qrSvg:t=>'QR['+t+']'});
+ pick(d,'itmRegisterType','registerLocation');
+ d.getElementById('itmRegisterName').value='A 区 1 层';
+ d.getElementById('itmRegisterCode').value='L-NEW';
+ d.getElementById('itmRegister').click();await tickN(8);
+ assert.equal(submitted.length,0,'离线不提交');
+ assert.equal(enqueued.length,1,'离线仍入队');
+ assert.match(d.getElementById('itmRegisterResult').textContent,/已保存/);
+});
+test('v3.4.0 R3：摘要行零计数类目不显示（「需人工核验 0」噪音根除）',async()=>{
+ const {parseHTML}=require('linkedom');
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const command={id:'sum-1',status:'pending',request:{kind:'receive',itemCode:'I-P',target:{loc:'L-A',container:'C-A'}}};
+ const page=UI.mount({document:d,getState:()=>({}),id:()=>'id',getPersistence:()=>null,getCommands:async()=>[command],getClient:()=>({submit:async()=>({phase:'APPLIED'}),query:async()=>({phase:'PREPARED'})})});
+ await page.pending();
+ const sum=d.getElementById('itmPending').querySelector('.itm-pending-summary').textContent;
+ assert.match(sum,/待提交 1/);
+ assert.doesNotMatch(sum,/需人工核验/,'零计数不再出现');
+ assert.doesNotMatch(sum,/已完结/,'零计数不再出现');
 });
