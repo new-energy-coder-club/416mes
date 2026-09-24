@@ -106,3 +106,25 @@ test('store[indexeddb]：iterate 走真实游标，1200 条分批读完', async 
   assert.equal(new Set(seen).size, 1200);
   await s.close();
 });
+
+test('store：wipeAll 清空全部 7 个仓库（memory + indexeddb）', async () => {
+  const fidb = (() => { try { return require('fake-indexeddb'); } catch (_) { return null; } })();
+  const makes = [['memory', () => Store.createMemoryStore()]];
+  if (fidb) makes.push(['indexeddb', () => Store.createIndexedDbStore({ indexedDB: new fidb.IDBFactory(), IDBKeyRange: fidb.IDBKeyRange, dbName: 'mes416-wipe-' + Date.now() + '-' + Math.random() })]);
+  for (const [kind, make] of makes) {
+    const s = make(); await s.open();
+    await s.put('records', { table: 'items', key: 'A', v: 1 });
+    await s.put('transactions', { seq: 1, matCode: 'A', delta: 1, ts: 't1' });
+    await s.put('outbox', { id: 'op-1', op: 'itemOperation' });
+    await s.put('syncMeta', { key: 'itmDraft:s1', value: {} });
+    await s.put('conflicts', { key: 'conflict-pool-v1', value: [] });
+    await s.put('baselines', { key: 'checkpoint-meta', value: {} });
+    await s.put('deletionJournal', { key: '0001', value: {} });
+    const wiped = await s.wipeAll();
+    assert.equal(wiped.length, 7, kind + ' 必须清 7 个仓库');
+    for (const name of ['records', 'transactions', 'outbox', 'syncMeta', 'conflicts', 'baselines', 'deletionJournal']) {
+      assert.equal((await s.getAll(name)).length, 0, kind + '/' + name + ' wipe 后必须为空');
+    }
+    await s.close();
+  }
+});

@@ -109,3 +109,9 @@ fab-*.png
 ls-v1-*.png
 v2-wide-*.png
 v3-*.png
+
+# 多代理插件注入的角色文件与验证截图（本地用，不入库）
+AGENTS.md
+CLAUDE.md
+.multi-agents-data/
+.verify-*.png
