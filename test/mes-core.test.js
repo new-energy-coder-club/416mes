@@ -1153,7 +1153,7 @@ test('闲鱼字段映射：兼容英文键与大小写', () => {
 
 test('闲鱼合并：新商品建档，分类默认 QT', () => {
   const s = { materials: [] };
-  const stat = Core.mergeXianyu(s, [{ outer_id: 'NEW-1', '标题': '新商品', stock: 7, '售价': 990, '首图': 'u' }]);
+  const stat = Core.mergeXianyu(s, [{ outer_id: 'NEW-1', '标题': '新商品', stock: 7, '售价': 990, '首图': 'u' }], { allowDirectQty: true });
   assert.equal(stat.created, 1);
   const m = s.materials[0];
   assert.equal(m.code, 'NEW-1');
@@ -1167,7 +1167,7 @@ test('闲鱼合并：新商品建档，分类默认 QT', () => {
 
 test('闲鱼合并【核心】不覆盖本地已维护的分类/库位/容器/模块区/安全库存/规格', () => {
   const s = XY_LOCAL();
-  Core.mergeXianyu(s, [{ outer_id: 'XY-001', product_id: 'P1', '标题': '新名字', stock: 0, '售价': 850 }]);
+  Core.mergeXianyu(s, [{ outer_id: 'XY-001', product_id: 'P1', '标题': '新名字', stock: 0, '售价': 850 }], { allowDirectQty: true });
   const m = s.materials[0];
   assert.equal(m.cat, 'GJ', '分类不得被覆盖');
   assert.equal(m.loc, 'B-01-01-01', '库位不得被覆盖');
@@ -1179,7 +1179,7 @@ test('闲鱼合并【核心】不覆盖本地已维护的分类/库位/容器/�
 
 test('闲鱼合并：数量与成本例外，外部值始终采用（0 表示售罄）', () => {
   const s = XY_LOCAL();
-  Core.mergeXianyu(s, [{ outer_id: 'XY-001', stock: 0, '售价': 850 }]);
+  Core.mergeXianyu(s, [{ outer_id: 'XY-001', stock: 0, '售价': 850 }], { allowDirectQty: true });
   assert.equal(s.materials[0].qty, 0, 'stock=0 表示售罄，必须采用');
   assert.equal(s.materials[0].cost, 8.5);
 });
@@ -1188,7 +1188,7 @@ test('闲鱼合并：空值不覆盖旧值', () => {
   const s = XY_LOCAL();
   s.materials[0].xy = 'KEEP-XY';
   s.materials[0].img = 'keep.jpg';
-  Core.mergeXianyu(s, [{ outer_id: 'XY-001', '标题': '', product_id: '', '首图': '', stock: 5, '售价': 1000 }]);
+  Core.mergeXianyu(s, [{ outer_id: 'XY-001', '标题': '', product_id: '', '首图': '', stock: 5, '售价': 1000 }], { allowDirectQty: true });
   const m = s.materials[0];
   assert.equal(m.name, '旧名字', '空标题不得清掉旧名称');
   assert.equal(m.xy, 'KEEP-XY', '空 product_id 不得清掉旧编号');
@@ -1198,12 +1198,12 @@ test('闲鱼合并：空值不覆盖旧值', () => {
 test('闲鱼合并：幂等，重复执行不产生重复记录', () => {
   const s = XY_LOCAL();
   const rows = [{ outer_id: 'XY-001', product_id: 'P1', '标题': '螺丝刀', stock: 4, '售价': 850 }, { outer_id: 'XY-002', '标题': '新品', stock: 2, '售价': 500 }];
-  const a = Core.mergeXianyu(s, rows);
+  const a = Core.mergeXianyu(s, rows, { allowDirectQty: true });
   assert.equal(a.created, 1);
   assert.equal(a.updated, 1);
   assert.equal(s.materials.length, 2);
 
-  const b = Core.mergeXianyu(s, rows);
+  const b = Core.mergeXianyu(s, rows, { allowDirectQty: true });
   assert.equal(b.created, 0, '第二次不应再新建');
   assert.equal(b.updated, 0, '第二次不应再更新');
   assert.equal(b.unchanged, 2);
@@ -1212,7 +1212,7 @@ test('闲鱼合并：幂等，重复执行不产生重复记录', () => {
 
 test('闲鱼合并：缺少 outer_id 的行被跳过并给出原因', () => {
   const s = { materials: [] };
-  const stat = Core.mergeXianyu(s, [{ '标题': '没有编码' }, { outer_id: 'OK', '标题': '正常', stock: 1 }]);
+  const stat = Core.mergeXianyu(s, [{ '标题': '没有编码' }, { outer_id: 'OK', '标题': '正常', stock: 1 }], { allowDirectQty: true });
   assert.equal(stat.created, 1);
   assert.equal(stat.skipped.length, 1);
   assert.match(stat.skipped[0].reason, /缺少 outer_id/);
@@ -1224,7 +1224,7 @@ test('闲鱼合并：同一批里 outer_id 重复的行只取第一条并提示'
   const stat = Core.mergeXianyu(s, [
     { outer_id: 'DUP', '标题': '第一次', stock: 1 },
     { outer_id: 'DUP', '标题': '第二次', stock: 9 }
-  ]);
+  ], { allowDirectQty: true });
   assert.equal(stat.created, 1);
   assert.equal(stat.skipped.length, 1);
   assert.match(stat.skipped[0].reason, /重复/);
@@ -1234,19 +1234,47 @@ test('闲鱼合并：同一批里 outer_id 重复的行只取第一条并提示'
 
 test('闲鱼合并：数量非法（非数字）时保留原值而不是清零', () => {
   const s = XY_LOCAL();
-  Core.mergeXianyu(s, [{ outer_id: 'XY-001', stock: '不是数字', '售价': 850 }]);
+  Core.mergeXianyu(s, [{ outer_id: 'XY-001', stock: '不是数字', '售价': 850 }], { allowDirectQty: true });
   assert.equal(s.materials[0].qty, 5, '非法 stock 不得把库存清零');
 });
 
 test('闲鱼合并：changes 记录可审计的字段变化', () => {
   const s = XY_LOCAL();
-  const stat = Core.mergeXianyu(s, [{ outer_id: 'XY-001', '标题': '新名字', stock: 0, '售价': 850 }]);
+  const stat = Core.mergeXianyu(s, [{ outer_id: 'XY-001', '标题': '新名字', stock: 0, '售价': 850 }], { allowDirectQty: true });
   assert.equal(stat.changes.length, 1);
   assert.equal(stat.changes[0].kind, 'update');
   const joined = stat.changes[0].fields.join('；');
   assert.match(joined, /qty: 5 → 0/);
   assert.match(joined, /cost: 10 → 8\.5/);
   assert.match(joined, /name: 旧名字 → 新名字/);
+});
+
+/* TASK-08 M6：qty 直写硬闸——默认调用必须抛错 */
+test('闲鱼合并【M6】默认调用带 qty 差异 → 抛 DEPRECATED（硬闸）', () => {
+  const s = XY_LOCAL();
+  assert.throws(() => Core.mergeXianyu(s, [{ outer_id: 'XY-001', stock: 9, '售价': 850 }]), /DEPRECATED.*applyStockChange/);
+});
+
+test('闲鱼合并【M6】默认调用 qty 相同（无差异）→ 正常走字段合并', () => {
+  const s = XY_LOCAL();
+  const stat = Core.mergeXianyu(s, [{ outer_id: 'XY-001', stock: 5, '售价': 850 }]);
+  assert.equal(stat.updated, 1);
+  assert.equal(s.materials[0].qty, 5, 'qty 未变不应触发硬闸');
+  assert.equal(s.materials[0].cost, 8.5, 'cost 合并正常');
+});
+
+test('闲鱼合并【M6】显式 allowDirectQty:true → qty 照常合并（历史路径）', () => {
+  const s = XY_LOCAL();
+  const stat = Core.mergeXianyu(s, [{ outer_id: 'XY-001', stock: 9, '售价': 850 }], { allowDirectQty: true });
+  assert.equal(stat.updated, 1);
+  assert.equal(s.materials[0].qty, 9, '显式放行后 qty 正常合并');
+});
+
+test('闲鱼合并【M6】新建物料不受硬闸影响（qty 初始值来自建档）', () => {
+  const s = { materials: [] };
+  const stat = Core.mergeXianyu(s, [{ outer_id: 'FRESH-1', '标题': '新品', stock: 3, '售价': 500 }]);
+  assert.equal(stat.created, 1);
+  assert.equal(s.materials[0].qty, 3, '新建时 qty 来自外部初始值（不受硬闸）');
 });
 
 /* ================= 云端合并 mergeRemote（飞书为真源） =================

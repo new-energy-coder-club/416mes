@@ -1959,9 +1959,10 @@
 
       var changed = [];
       /* 📦 G3 封存（k3 审计）：qty 直写不走 applyStockChange、零流水——仅限 xianyu-sync
-         历史脚本（已停用）。新代码禁止调用本函数；数量变更唯一入口是 applyStockChange。 */
-      // 数量 / 成本：外部值始终采用（0 表示售罄）
+         历史脚本（已停用）。新代码禁止调用本函数；数量变更唯一入口是 applyStockChange。
+         TASK-08 M6：默认 throw 硬闸，显式传 opts.allowDirectQty=true 才放行（闲鱼同步历史路径）。 */
       if (r.qty !== null && r.qty !== m.qty) {
+        if (!opts.allowDirectQty) throw new Error('DEPRECATED: 数量变更必须走 applyStockChange（mergeXianyu qty 直写已封存，如需历史路径请显式传 allowDirectQty:true）');
         /* 2.52.1（k3 审计 MAT-3）：拒绝负数直写——外部脏值曾可直接造成负库存且零流水 */
         if (!(r.qty >= 0)) { changed.push('qty 负值 ' + r.qty + ' 已拒绝'); }
         else { changed.push('qty: ' + m.qty + ' → ' + r.qty); m.qty = r.qty; }
