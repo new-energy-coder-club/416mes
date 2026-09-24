@@ -800,3 +800,25 @@ test('v3.3.2 并发 pending() 不叠卡：两次调用交错后同一条命令�
  assert.equal(d.querySelectorAll('#itmPending article').length,1,'并发渲染必须收敛为一张卡（旧写法叠成两张，用户看到「命令堆积」）');
  assert.equal(d.querySelectorAll('#itmPending article button').length,3,'按钮不得翻倍（提交/查询/取消）');
 });
+test('v3.3.2 提交失败落卡后待处理区必须刷新（不再停留在旧 pending 卡）',async()=>{
+ const {parseHTML}=require('linkedom');
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const command={id:'fail-1',op:'itemOperation',status:'pending',
+  request:{schemaVersion:1,opId:'fail-1',kind:'activateLocation',locationCode:'L-A',expected:{locationStatus:'unknown'}}};
+ let unknownSaved=null;
+ const persistence={async enqueue(){},async saveDraft(){},async abandonCommand(){},
+  async recover(){return {drafts:[],commands:[command]};},
+  async markUnknown(id,msg){unknownSaved={id,msg};command.status='needs_attention';command.lastError=msg;}};
+ const page=UI.mount({document:d,getState:()=>({locations:[{code:'L-A',status:'active'}],containers:[],items:[]}),
+  getPersistence:()=>persistence,getCommands:async()=>[command],
+  getClient:()=>({submit:async c=>{await persistence.markUnknown(c.id,'操作接口拒绝');throw Error('操作接口拒绝');},query:async c=>({phase:'APPLIED',code:c.id,kind:c.request.kind,request:c.request})}),
+  id:()=>'fail'});
+ await page.pending();
+ const card=d.getElementById('itmPending').querySelector('article');
+ const submit=[...card.querySelectorAll('button')].find(b=>b.textContent==='提交原命令');
+ submit.click();await tickN(10);
+ assert.ok(unknownSaved,'item-client 已 markUnknown');
+ const btns=[...d.getElementById('itmPending').querySelectorAll('article button')].map(b=>b.textContent);
+ assert.ok(btns.some(t=>t.includes('查询并确认原命令')),'失败刷新后应看到 needs_attention 卡的入口（旧实现停在旧 pending 卡）');
+ assert.ok(btns.some(t=>t.includes('作废此命令')),'作废/收口出口随刷新出现');
+});
