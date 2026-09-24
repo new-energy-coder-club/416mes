@@ -133,3 +133,51 @@ test('v3.5.0：同 opId 重放遇超时 PREPARED 行先 sweep 收口再返回真
   assert.equal(f.repository.logs[0].phase,'REJECTED','超时未决行已被 sweep 收口（实体未写入 → 按作废处理）');
   assert.equal(r.phase,'REJECTED','重放拿到真实终态，不再是「原命令未决」');
 });
+
+/* ================= 3.7.0 C3（单端直提）：trial apply 异常同请求内回读定性，不再留 REPAIR_REQUIRED 给 sweep ================= */
+const trialCoordinator=require('../lib/item-trial-coordinator');
+function trialService(f,overrides={}){
+  const trial={contract:'feishu-trial-best-effort-v1',claim:async()=>({acquired:true}),prepare:async()=>{},progress:async()=>{},finish:async()=>{},uncertain:async()=>{},get:async()=>null,...overrides};
+  return create({repository:f.repository,coordinator:trial,enabled:true,mode:'feishu-trial',authenticate:async()=>({id:'u',roles:['admin','operator']})});
+}
+test('C3-① apply 抛错但写已落地（回读 after 匹配）→ APPLIED，行收终态',async()=>{
+  const f=setup();
+  /* 模拟「apply 实际已写、随后抛错（如 finish 前断连）」：先劫持 apply 让它写完再抛 */
+  const realApply=f.repository.apply.bind(f.repository);
+  f.repository.apply=async(after,operation)=>{await realApply(after,operation);throw Error('connection reset after write');};
+  const r=await trialService(f).post({},request());
+  assert.equal(r.phase,'APPLIED','写已落，回读定性为成功');
+  assert.equal(f.repository.logs[0].phase,'APPLIED','日志行同步收终态，不留未决');
+});
+test('C3-② apply 抛错且写未落地（回读 before 匹配）→ REJECTED「未生效」，可直接重试',async()=>{
+  const f=setup();
+  f.repository.faults.apply=true;
+  const r=await trialService(f).post({},request());
+  assert.equal(r.phase,'REJECTED','未检出实际写入 → 未生效');
+  assert.match(String(r.error||''),/未生效/,'用户文案：可重试而非天书');
+  assert.equal(f.repository.logs[0].phase,'REJECTED','日志行同步收终态');
+  assert.equal(f.repository.state.items[0].container,'C','实体未被写入（issue 未执行）');
+});
+test('C3-③ 回读失败/都不匹配 → REPAIR_REQUIRED（真未知兜底，语义与旧版一致）',async()=>{
+  const f=setup();
+  f.repository.faults.apply=true;
+  const origRead=f.repository.readAfter.bind(f.repository);
+  f.repository.readAfter=async after=>{await origRead(after);throw Error('readback down');};
+  const r=await trialService(f).post({},request());
+  assert.equal(r.phase,'REPAIR_REQUIRED','回读不可用 → 如实未知');
+  assert.equal(f.repository.logs[0].phase,'REPAIR_REQUIRED');
+});
+test('C4 trial 模式三种 claim 返回形状（acquired/existing/conflict）均不触发 UNRESOLVED_OPERATION_BARRIER',async()=>{
+  const f=setup();
+  const coord=trialCoordinator.create(f.repository);   /* 真实 trial 协调器：claim 按 opId 查仓储 */
+  const svc=()=>create({repository:f.repository,coordinator:coord,enabled:true,mode:'feishu-trial',authenticate:async()=>({id:'u',roles:['admin','operator']})});
+  /* 新命令 → acquired；同 opId 重放 → existing（sweep+lookup）；同 opId 异载荷 → conflict（OP_ID_PAYLOAD_CONFLICT） */
+  f.repository.faults.apply=true;
+  const r1=await svc().post({},request());
+  assert.equal(r1.phase,'REJECTED','acquired 形状：C3 回读定性，非屏障');
+  f.repository.faults.apply=false;
+  const r2=await svc().post({},request());
+  assert.equal(r2.phase,'REJECTED','existing 重放拿到真实终态（C3 已收终态，sweep/lookup 直达）');
+  await assert.rejects(svc().post({},{...request(),expected:{itemVersion:3,containerVersion:2,drifted:true}}),e=>/PAYLOAD_CONFLICT/.test(e.message),'异载荷走 OP_ID_PAYLOAD_CONFLICT');
+  assert.ok(!String(r1.error||'').includes('BARRIER')&&!String(r2.error||'').includes('BARRIER'),'trial 全链路无一处触发 BARRIER');
+});

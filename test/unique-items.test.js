@@ -127,6 +127,18 @@ test('activateLocation still rejects retired/disabled locations', () => {
   }
 });
 
+/* ================= 3.7.0 C2（单端直提）：expected.locationStatus 比对删除 ================= */
+test('C2 unknown→active proceeds with expected 缺省/空/猜错——不再 STATE_CONFLICT', () => {
+  const admin = { id: 'a', roles: ['admin'] };
+  for (const expected of [undefined, {}, { locationStatus: 'active' }]) {
+    const st = { locations: [{ code: 'L-U', status: 'unknown' }], containers: [], items: [] };
+    U.migrate(st);
+    const p = U.plan(st, { schemaVersion: 1, opId: 'c2-' + JSON.stringify(expected), kind: 'activateLocation', locationCode: 'L-U', expected }, admin);
+    assert.equal(p.phase, 'PREPARED');
+    assert.deepEqual(p.after.locations, [{ code: 'L-U', status: 'active' }]);
+  }
+});
+
 /* ================= 2.48.0：服务端快照冲突不得拦截核实启用操作本身 ================= */
 test('activateLocation proceeds despite server-location-unverified conflict marker (op IS the credential)', () => {
   const st = { locations: [{ code: 'L-X', status: 'active' }], containers: [], items: [] };

@@ -21,14 +21,14 @@ test('query missing codes and detail errors stay local without mutating state or
 test('DOM location drilldown to container then item works via actual clicks',()=>{const {document:d,state}=setup();state.items[1]={...state.items[1],status:'in_stock',container:'C-A'};d.getElementById('itmSearch').value='LOC:L-A';d.getElementById('itmSearchBtn').click();d.getElementById('itmResults').querySelector('button').click();const buttons=[...d.getElementById('itmResults').querySelectorAll('button')];buttons.find(b=>b.textContent.includes('I-P')).click();assert.match(d.getElementById('itmResults').textContent,/C-A → L-A/);});
 const tickN=async(n=6)=>{for(let i=0;i<n;i++)await new Promise(r=>setImmediate(r));};
 function setupGuided(){const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document}=parseHTML(html);let n=0;const state={locations:[{code:'L-OLD',status:'unknown'},{code:'L-A',status:'active'}],containers:[{code:'C-OLD',loc:'L-A',status:'unknown',version:0}],items:[]};let queued=null,submitted=0;const persistence={async enqueue(r){queued=r;},async saveDraft(){},async recover(){return{drafts:[],commands:[]}}};let clientSubmit=null;const client={async submit(c){submitted++;if(clientSubmit)return clientSubmit(c);if(c.request.kind==='activateLocation')state.locations[0].status='active';if(c.request.kind==='activateContainer')state.containers[0].status='active';return {phase:'APPLIED',code:c.id};}};const page=UI.mount({document,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>queued?[{id:queued.opId,op:'itemOperation',request:queued}]:[],getClient:()=>client,id:()=>'guided-'+(++n)});return {document,state,page,get queued(){return queued},get submitted(){return submitted},set clientSubmit(f){clientSubmit=f;}};}
-test('guided activate: unknown LOC blocks fill, action button enables and retries into step',async()=>{
+/* ================= 3.7.0 C1（单端直提）：扫到未启用实体自动核实启用，不再等人工点按钮 ================= */
+test('guided activate: unknown LOC auto-activates without manual click and retries into step',async()=>{
  const s=setupGuided();const d=s.document,page=s.page;
- d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN();
- assert.match(d.getElementById('itmStatus').textContent,/未启用/);assert.equal(page.scan.row().values.length,0);
- const action=d.getElementById('itmStatus').querySelector('button');assert.ok(action,'应提供现场核实启用按钮');
- action.click();await tickN(12);
+ d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN(12);
+ assert.match(d.getElementById('itmStatus').textContent,/自动核实启用|已启用|已填写草稿/,'扫码即自动启用（无需任何按钮）');
  assert.equal(s.queued&&s.queued.kind,'activateLocation');assert.equal(s.submitted,1);
  assert.deepEqual(page.scan.row().values.map(v=>v.code),['L-OLD'],'APPLIED后自动重试填入原步骤');
+ assert.equal(d.getElementById('itmStatus').querySelector('button'),null,'全程零人工按钮');
 });
 test('guided activate: conflict-guard must not masquerade as missing LOC archive (user-reported regression)',async()=>{
  /* 3.2.2 用户实测：「库位未启用」→点「现场确认启用该库位并继续」→反而报「未找到该库位档案」。
@@ -67,12 +67,11 @@ test('guided activate: genuinely missing archive still reports missing with reco
  assert.match(d.getElementById('itmStatus').textContent,/未识别|未启用|未找到/,'不存在的编码不得伪装成成功');
  assert.equal(s.submitted,0,'不得产生任何激活命令');
 });
-test('guided activate: unknown container uses current row LOC as target and resumes',async()=>{
+test('guided activate: unknown container auto-activates using current row LOC as target and resumes',async()=>{
  const s=setupGuided();const d=s.document,page=s.page;
  await page.accept('LOC:L-A');
- d.getElementById('itmCode').value='CTN:C-OLD';d.getElementById('itmScanBtn').click();await tickN();
- const action=d.getElementById('itmStatus').querySelector('button');assert.ok(action,'容器未启用应提供引导按钮');
- action.click();await tickN(12);
+ d.getElementById('itmCode').value='CTN:C-OLD';d.getElementById('itmScanBtn').click();await tickN(12);
+ assert.match(d.getElementById('itmStatus').textContent,/自动核实启用|已启用|已填写草稿/,'容器未启用也自动启用');
  assert.equal(s.queued&&s.queued.kind,'activateContainer');assert.equal(s.queued&&s.queued.target.loc,'L-A');assert.equal(s.submitted,1);
  assert.deepEqual(page.scan.row().values.map(v=>v.code),['L-A','C-OLD']);
 });
@@ -513,16 +512,14 @@ test('B-4：多关键词 AND 命中 + 物品优先于容器库位',()=>{
  assert.ok(titles.findIndex(t=>/^库位/.test(t))>titles.findIndex(t=>/^容器/.test(t)),'库位排最后');
 });
 
-/* ================= P1a：批量模式容器启用引导用批量锚点为目标（用户实测误报「请先扫描库位码」） ================= */
-test('P1a 批量锚点已扫：未启用容器的现场启用以批量锚点库位为目标，不再误报缺库位',async()=>{
+/* ================= P1a：批量模式容器未启用自动启用，目标=批量锚点库位（用户实测误报「请先扫描库位码」） ================= */
+test('P1a 批量锚点已扫：未启用容器自动启用，以批量锚点库位为目标，不再误报缺库位',async()=>{
  const s=setupGuided();const d=s.document,page=s.page;
  page.scan.startBatch('receive');
  d.getElementById('itmCode').value='LOC:L-A';d.getElementById('itmScanBtn').click();await tickN();   /* 批量库位锚点（active）——走用户真实路径 itmScanBtn→acceptGuided→acceptBatchCode */
  assert.match(d.getElementById('itmStatus').textContent,/库位锚点 L-A/);
- d.getElementById('itmCode').value='CTN:C-OLD';d.getElementById('itmScanBtn').click();await tickN();
+ d.getElementById('itmCode').value='CTN:C-OLD';d.getElementById('itmScanBtn').click();await tickN(12);
  assert.doesNotMatch(d.getElementById('itmStatus').textContent,/请先扫描该容器所在的库位码/,'批量锚点已定，不得再要求扫库位');
- const action=d.getElementById('itmStatus').querySelector('button');assert.ok(action,'容器未启用应提供现场启用引导');
- action.click();await tickN(12);
  assert.equal(s.queued&&s.queued.kind,'activateContainer');
  assert.equal(s.queued&&s.queued.target.loc,'L-A','目标库位=批量锚点（旧实现在当前行 values 找不到 LOC 直接抛错）');
  assert.deepEqual(page.scan.batchState()&&page.scan.batchState().anchor,{loc:'L-A',ctn:'C-OLD',ctnVersion:0},'APPLIED后自动重试锚点容器成功');
@@ -587,36 +584,30 @@ test('P4 在线时确认本行后自动提交一次；离线时只入队不提�
  assert.match(d.getElementById('itmStatus').textContent,/当前离线/);
 });
 
-/* ================= P3c：本地未启用但云端凭据已到 → 报错卡给「安全重拉」出口 ================= */
-test('P3c 本地已有 APPLIED 启用日志但状态未落地：报错卡提供安全重拉按钮并自动重试原步骤',async()=>{
+/* ================= P3c（3.7.0 C1 改写）：本地未启用但云端凭据已到 → 自动启用直达成功，无需人工出口 ================= */
+test('P3c 本地已有 APPLIED 启用日志但状态未落地：扫码自动启用成功，全程零按钮',async()=>{
  const {parseHTML}=require('linkedom');
  const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
- let n=0,refreshed=0;
+ let n=0,refreshed=0,stored=null;
  const state={locations:[{code:'L-OLD',status:'unknown'}],containers:[],items:[],
   itemOperations:[{code:'act-1',kind:'activateLocation',phase:'APPLIED',containerCode:'',after:{locations:[{code:'L-OLD',status:'active'}]}}]};
- const persistence={async enqueue(r){},async saveDraft(){},async recover(){return{drafts:[],commands:[]}}};
- const page=UI.mount({document:d,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>[],getClient:()=>({async submit(c){state.locations[0].status='active';return {phase:'APPLIED',code:c.id};}}),
+ const persistence={async enqueue(r){stored=r;},async abandonCommand(){},async saveDraft(){},async recover(){return{drafts:[],commands:[]}}};
+ const page=UI.mount({document:d,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>stored?[{id:stored.opId,op:'itemOperation',request:stored}]:[],getClient:()=>({async submit(c){state.locations[0].status='active';return {phase:'APPLIED',code:c.id};}}),
   id:()=>'p3c-'+(++n),refreshConflicts:async()=>{refreshed++;state.locations[0].status='active';}});
  page.scan.add('receive');
- d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN();
- const btns=[...d.getElementById('itmStatus').querySelectorAll('button')];
- assert.ok(btns[0]&&btns[0].textContent.includes('现场确认启用该库位并继续'),'现场启用仍是首选动作');
- const refresh=btns.find(b=>b.textContent.includes('云端可能已启用：安全重拉核对'));
- assert.ok(refresh,'云端凭据已到（本地状态未落地）必须给安全重拉出口');
- refresh.click();await tickN(10);
- assert.equal(refreshed,1,'安全重拉被调用');
- assert.match(d.getElementById('itmStatus').textContent,/已填写草稿|库位锚点|目标库位/,'重拉落地后自动重试原步骤成功');
+ d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN(12);
+ assert.equal(s0Buttons(d),null,'C1 后报错卡不再需要任何人工按钮（云端幂等启用直达成功）');
+ assert.match(d.getElementById('itmStatus').textContent,/已填写草稿|已启用/,'自动启用后原步骤继续');
 });
+function s0Buttons(d){return d.getElementById('itmStatus').querySelector('button');}
 
-/* ================= F2（v3.2.4）：版本类拒绝自动重建重提（用户实测死循环根治） ================= */
+/* ================= F2（v3.2.4 / 3.7.0 C1+C5）：版本类/状态类拒绝自动重建重提，无按钮无人工 ================= */
 test('F2 激活命令版本类被拒：自动重拉换新 opId 重试一次，不再推用户去待处理区',async()=>{
  const s=setupGuided();const d=s.document,page=s.page;
  let calls=0;s.clientSubmit=async c=>{calls++;
   if(calls===1)return {phase:'REJECTED',code:c.id,error:'TRIAL_CONCURRENT_OPERATION_DETECTED'};
   s.state.locations[0].status='active';return {phase:'APPLIED',code:c.id};};
- d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN();
- const action=d.getElementById('itmStatus').querySelector('button');assert.ok(action);
- action.click();await tickN(16);
+ d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN(20);
  assert.equal(s.submitted,2,'首拒后自动换新 opId 重试一次');
  assert.match(d.getElementById('itmStatus').textContent,/已启用|已填写草稿|目标库位/,'重试成功继续原流程');
  assert.doesNotMatch(d.getElementById('itmStatus').textContent,/待处理区查询原命令/,'不再把用户推进待处理区');
@@ -625,8 +616,7 @@ test('F2 激活命令版本类被拒：自动重拉换新 opId 重试一次，�
 test('F2 重建后再被拒：如实报「启用被拒绝」，不无限循环',async()=>{
  const s=setupGuided();const d=s.document;
  let calls=0;s.clientSubmit=async c=>{calls++;return {phase:'REJECTED',code:c.id,error:'VERSION_CONFLICT'};};
- d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN();
- const action=d.getElementById('itmStatus').querySelector('button');action.click();await tickN(16);
+ d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN(20);
  assert.equal(s.submitted,2,'只自动重试一次');
  assert.match(d.getElementById('itmStatus').textContent,/启用被拒绝/,'第二次拒绝如实呈现');
 });

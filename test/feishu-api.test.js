@@ -516,7 +516,7 @@ test('ITM feishu-trial HTTP: 服务端发号建档（不带码）→ receive →
   assert.equal(nonCanonical.status, 400); assert.equal(nonCanonical.body.error, 'NON_CANONICAL_ITEM_CODE');
 });
 
-test('ITM feishu-trial HTTP: REPAIR_REQUIRED 只影响自身 opId，不再堵死新命令（v3.3.0 拆锁）', async t => {
+test('ITM feishu-trial HTTP: apply 异常同请求内回读定性（C3），失败只影响自身 opId，不堵死新命令', async t => {
   let rejectItemUpdate = false, f;
   f = await startItemTrialHttp(t, options => {
     options.delay = info => {
@@ -532,28 +532,29 @@ test('ITM feishu-trial HTTP: REPAIR_REQUIRED 只影响自身 opId，不再堵死
   rejectItemUpdate = true;
   const failed = await f.post(command);
   assert.equal(failed.status, 200);
-  assert.equal(failed.body.operation.phase, 'REPAIR_REQUIRED');
+  /* 3.7.0 C3：entity 写失败 → 回读 before 匹配 → REJECTED「未生效」，不再留 REPAIR_REQUIRED 给 sweep */
+  assert.equal(failed.body.operation.phase, 'REJECTED');
+  assert.match(String(failed.body.operation.error || ''), /未生效/);
   assert.equal(f.entityWrites().length, entityAttempts + 1, 'the real repository attempted apply exactly once');
   const log = f.tables.trialO.rows.find(r => r['操作ID'] === command.opId);
-  assert.equal(log['处理阶段'], 'REPAIR_REQUIRED');
+  assert.equal(log['处理阶段'], 'REJECTED');
   assert.equal(log['错误与恢复说明'], failed.body.operation.error);
   assert.ok(log['错误与恢复说明']);
   assert.equal(f.tables.trialI.rows[0]['状态'], 'pending');
   rejectItemUpdate = false;
-  /* 同 opId 重提：幂等回读未决结果，绝不自动重发（旧不变量保留） */
+  /* 同 opId 重提：幂等回读终态结果，绝不自动重发（旧不变量保留） */
   const retry = await f.post(command);
   assert.equal(retry.status, 200);
-  assert.equal(retry.body.operation.phase, 'REPAIR_REQUIRED');
-  /* 重启后同样：未决行只影响自身 opId 的 lookup，GET 保持只读 */
+  assert.equal(retry.body.operation.phase, 'REJECTED');
+  /* 重启后同样：终态行只影响自身 opId 的 lookup，GET 保持只读 */
   f.restart();
   const history = await f.get(command.opId);
   assert.equal(history.status, 200);
-  assert.equal(history.body.operation.phase, 'REPAIR_REQUIRED');
+  assert.equal(history.body.operation.phase, 'REJECTED');
   const retry2 = await f.post(command);
   assert.equal(retry2.status, 200);
-  assert.equal(retry2.body.operation.phase, 'REPAIR_REQUIRED');
-  /* v3.3.0：新命令不再被全局屏障挡（旧实现 409 UNRESOLVED_OPERATION_BARRIER）——
-     故障移除后，用新 opId 提交的新命令直接收口残局成功 */
+  assert.equal(retry2.body.operation.phase, 'REJECTED');
+  /* 新 opId 提交的新命令不受影响，直接收口残局成功 */
   const next = await f.post({ ...command, opId: 'new-receive-after-repair' });
   assert.equal(next.status, 200);
   assert.equal(next.body.operation.phase, 'APPLIED', JSON.stringify(next.body.operation && next.body.operation.error));
