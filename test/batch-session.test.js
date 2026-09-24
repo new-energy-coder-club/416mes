@@ -77,12 +77,15 @@ test('S4 重复物品静默忽略；已在库物品拒绝', () => {
   assert.throws(() => s.acceptBatchCode({ type: 'ITM', code: 'I-3' }), /已在库/);
 });
 
-test('S5 出库批量：首件派生锚点、异库位件拒绝', () => {
+test('S5 出库批量：首件派生锚点、跨库位件可入批（TASK-06）', () => {
   const s = mk(mkState());
   s.startBatch('issue');
   { const snap = s.snapshot(); snap.batch.targetQty = 3; s.restore(snap); }
-  assert.match(s.acceptBatchCode({ type: 'ITM', code: 'I-3' }).text, /锚点库位 L-1 已派生/);
-  assert.throws(() => s.acceptBatchCode({ type: 'ITM', code: 'I-4' }), /不在本批库位/);
+  const r1 = s.acceptBatchCode({ type: 'ITM', code: 'I-3' });
+  assert.ok(r1.text.includes('L-1'), '首件库位仍显示');
+  assert.ok(!r1.text.includes('须同库位'), '不再宣称后续件须同库位');
+  const r2 = s.acceptBatchCode({ type: 'ITM', code: 'I-4' });
+  assert.ok(r2.text, '异库位件也可入批（TASK-06 跨库位混拣）');
 });
 
 test('S6 stopBatch 后可重新开始；startBatch 只收 receive/issue', () => {
