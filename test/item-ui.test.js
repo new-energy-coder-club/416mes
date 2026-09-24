@@ -784,3 +784,19 @@ test('C1 retryable 拒绝卡：作废与重建并存，作废后不再保留行�
  assert.deepEqual(abandoned,[opId]);
  assert.ok(!page.scan.snapshot().rows.some(r=>r.opId===opId),'作废即放弃跟踪，行绑定解除');
 });
+test('v3.3.2 并发 pending() 不叠卡：两次调用交错后同一条命令只渲染一张',async()=>{
+ const {parseHTML}=require('linkedom');
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const cards=[{id:'dup-1',op:'itemOperation',status:'pending',
+  request:{schemaVersion:1,opId:'dup-1',kind:'activateLocation',locationCode:'L-A',expected:{locationStatus:'unknown'}}}];
+ let calls=0;
+ const persistence={async enqueue(){},async saveDraft(){},async abandonCommand(){},async recover(){calls++;await new Promise(r=>setTimeout(r,calls===1?30:1));return{drafts:[],commands:structuredClone(cards)};}};
+ const page=UI.mount({document:d,getState:()=>({locations:[{code:'L-A',status:'active'}],containers:[],items:[]}),
+  getPersistence:()=>persistence,getCommands:async()=>(await persistence.recover()).commands,
+  getClient:()=>({submit:async c=>({phase:'APPLIED',code:c.id,request:c.request}),query:async c=>({phase:'APPLIED',code:c.id,kind:c.request.kind,request:c.request})}),
+  id:()=>'dup'});
+ const p1=page.pending();await new Promise(r=>setImmediate(r));   /* P1 挂起在 getCommands 上 */
+ const p2=page.pending();await Promise.all([p1,p2]);await tickN();
+ assert.equal(d.querySelectorAll('#itmPending article').length,1,'并发渲染必须收敛为一张卡（旧写法叠成两张，用户看到「命令堆积」）');
+ assert.equal(d.querySelectorAll('#itmPending article button').length,3,'按钮不得翻倍（提交/查询/取消）');
+});
