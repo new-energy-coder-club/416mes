@@ -71,7 +71,7 @@ function makeContext(opts) {
 }
 
 const HANDLER_SRC = slice('const HARD_RESET_LS_KEYS', '/* ================= 库存工单管理');
-const BOOT_SRC = slice('// v3.6.0 一键重置完成后的一次性提示', 'fsBoot();   // 飞书真源');
+const BOOT_SRC = '(async()=>{' + slice('// v3.6.0 一键重置完成后的一次性提示', 'fsBoot();   // 飞书真源') + '})();';
 
 test('两段式：第一次点击只武装（变文案 + 5 秒取消定时器），不执行任何清空', async () => {
   const { ctx, vmCtx, el } = makeContext();
@@ -104,13 +104,9 @@ test('两段式：第二次点击执行清空序列（7 仓库 wipe + LS 键删�
   for (const k of ['mes416_state_v1', 'mes416_state_v1.corrupt', 'mes416_fs_queue', 'mes416_write_fail_v1', 'mes416_idb_behind_v1', 'mes416_last_backup']) {
     assert.equal(ctx.localStorage.getItem(k), null, '必须删除 ' + k);
   }
-  assert.equal(ctx._saveCount, 1, '必须写 LS');
-  assert.equal(ctx._idbCount, 1, '必须写 IDB（确保刷新后读到干净种子）');
+  assert.equal(ctx._saveCount, 0, '不写盘：reload 后从零初始化（load() 读不到 blob 走出厂种子）');
+  assert.equal(ctx._idbCount, 0, '不写 IDB（wipeAll 已清空，无需写 fresh state）');
   assert.notEqual(ctx.localStorage.getItem('mes416_hard_reset_done'), null, '必须写一次性完成标记');
-  assert.equal(JSON.stringify(ctx.state.materials), '[]', '内存台账必须清空');
-  assert.equal(JSON.stringify(ctx.state.__syncedKeys), '{}', '__syncedKeys 必须清空');
-  assert.equal(ctx.state.deviceId, 'dev-test', 'deviceId 必须保留');
-  assert.ok(ctx.state.__base === null || ctx.state.__base === undefined, '__base 必须清空');
   // 600ms 后 reload
   const reloadTimer = ctx.timers.find(t => t.ms === 600 && !t.cancelled);
   assert.ok(reloadTimer, '必须有 reload 定时器');
@@ -139,10 +135,13 @@ test('只读页签：非写入页签点击必须拦截，不执行任何清空',
   assert.equal(ctx._saveCount, 0, '不能写盘');
 });
 
-test('boot：一次性标记 → 移除标记 + 延后跳同步页 + headline 重置提示', () => {
+test('boot：一次性标记 → 补刀 wipeAll + 移除标记 + 延后跳同步页 + headline 重置提示', async () => {
   const { ctx, vmCtx, el } = makeContext();
   ctx.localStorage.setItem('mes416_hard_reset_done', '123');
+  ctx.localStore.wipeAllCount = 0;
   vm.runInContext(BOOT_SRC, vmCtx);
+  await new Promise(r => setTimeout(r, 20));   // boot 切片是 async IIFE，让 await 跑完
+  assert.equal(ctx.localStore.wipeAllCount, 1, 'boot 必须补刀 wipeAll（兜底上次超时未清净的仓库）');
   assert.equal(ctx.localStorage.getItem('mes416_hard_reset_done'), null, '标记必须一次性消费');
   assert.ok(el('syncHeadline').textContent.includes('本地环境已重置'), 'headline 必须立即显示重置提示');
   // tab 切换必须延后（setTimeout 0）——避免在浮层 DOM 解析前触发 goTab→stopCamera
@@ -150,6 +149,23 @@ test('boot：一次性标记 → 移除标记 + 延后跳同步页 + headline �
   assert.ok(tabTimer, 'tab 切换必须延后到 DOM 解析完成');
   tabTimer.fn();
   assert.ok(ctx.clicked.sync >= 1, '延后执行后必须跳到同步页');
+});
+
+test('wipeAll 卡死（事务挂起）→ 15 秒超时也继续走 reload，boot 补刀兜底', async () => {
+  const { ctx, vmCtx, el } = makeContext();
+  ctx.localStore.wipeAll = () => new Promise(() => {});   // 永不 resolve，模拟 IDB 事务挂起
+  vm.runInContext(HANDLER_SRC, vmCtx);
+  await el('btnHardReset').dispatch('click');
+  el('btnHardReset').dispatch('click');   // 不 await：handler 挂在 race 上，等超时定时器手动触发
+  await new Promise(r => setTimeout(r, 30));
+  assert.ok(ctx.timers.some(t => t.ms === 15000), '必须有 15 秒超时保护定时器');
+  assert.equal(ctx.localStorage.getItem('mes416_hard_reset_done'), null, '超时前不应写标记');
+  const t15 = ctx.timers.find(t => t.ms === 15000);
+  t15.fn(); await new Promise(r => setTimeout(r, 30));   // 超时触发 → race 结束 → 走完剩余序列
+  assert.notEqual(ctx.localStorage.getItem('mes416_hard_reset_done'), null, '超时后必须继续写完成标记');
+  const reloadTimer = ctx.timers.find(t => t.ms === 600 && !t.cancelled);
+  reloadTimer.fn();
+  assert.equal(ctx.location.reloadCount, 1, '卡死场景也必须 reload');
 });
 
 test('boot：无标记时不动 headline', () => {

@@ -6977,16 +6977,12 @@ document.getElementById('btnHardReset').addEventListener('click', async () => {
   stat.textContent = '正在清空本地数据…';
   try {
     if (_pollTimer) { clearTimeout(_pollTimer); _pollTimer = null; }   // 停增量轮询，防止清空窗口期内回写
-    await localStore.wipeAll();   // IDB 全部 7 个仓库：records/transactions/outbox/baselines/conflicts/syncMeta/deletionJournal
+    /* wipeAll 加 15s 超时保护：刚开页就点重置时，启动链（fsBoot 全量写入）的 IDB 事务
+       可能还没提交完，wipeAll 会被排队的长事务卡住——超时也继续走 reload，
+       reload 后 boot 检测到完成标记会补刀再清一次（新页面无挂起事务，必成功）。 */
+    try { await Promise.race([localStore.wipeAll(), new Promise(r => setTimeout(r, 15000))]); } catch (_) {}
     HARD_RESET_LS_KEYS.forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
-    // 内存 state 归零（保留 deviceId），同步写 LS + 确保写完 IDB——刷新后 load() 读到干净种子而不是空页
-    const deviceId = state.deviceId;
-    Object.keys(state).forEach(k => { delete state[k]; });
-    Object.assign(state, { materials: [], locations: [], containers: [], items: [], manuals: [], members: [], workorders: [], transactions: [], serials: {}, necOrders: [], necSerials: {}, scanHistory: [], scanSeq: 0, txnSeq: 0, operators: ['管理员'], operator: '管理员', scanLog: [] });
-    state.deviceId = deviceId || ('dev-' + Math.random().toString(36).slice(2, 8));
-    state.__syncedKeys = {};
-    save();
-    await persistStateToIdb();
+    // 不写盘 fresh state：reload 后 load() 读不到 LS blob → 出厂种子；IDB 已被 wipeAll 清空 → 无旧 blob 可复活
     try { localStorage.setItem(HARD_RESET_DONE_KEY, String(Date.now())); } catch (_) {}
     stat.textContent = '已清空，正在重新加载页面并从飞书全量拉取…';
     setTimeout(() => { try { location.reload(); } catch (e) {} }, 600);
@@ -12872,12 +12868,14 @@ renderScanHistory();
   // performance.now() 就是「距导航开始」的毫秒数，这里正是本地数据渲染完的时刻
   try { HEALTH.bootMs = Math.round(performance.now()); } catch (e) { HEALTH.bootMs = null; }
   if (!state.__healthHidden) { const hb = document.getElementById('healthBox'); if (hb) hb.style.display = 'block'; renderHealthPanel(); }
-  // v3.6.0 一键重置完成后的一次性提示：重置写盘 → reload → 这里检测并显示（15 秒后自动清除）。
-  // 注意必须延后到本轮同步脚本执行完（浮层 DOM 在文件尾部 :scanCamOverlay）：立即 click 会让
+  // v3.6.0 一键重置完成后的一次性提示 + 补刀：重置写标记 → reload → 这里先再清一次
+  // （上次 wipeAll 若被启动链事务卡住超时，本页无挂起事务必清干净），再显示提示并跳同步页。
+  // tab 切换必须延后到本轮同步脚本执行完（浮层 DOM 在文件尾部 :scanCamOverlay）：立即 click 会让
   // goTab→stopCamera→getScanCamera 在浮层解析前跑，抛「页面缺少 scanCam* 浮层结构」并中断 goTab 后半段。
   try {
     if (localStorage.getItem('mes416_hard_reset_done')) {
       localStorage.removeItem('mes416_hard_reset_done');
+      if (localStore) { try { await localStore.wipeAll(); } catch (_) {} }
       const hl = document.getElementById('syncHeadline');
       if (hl) hl.textContent = '✓ 本地环境已重置，正在从飞书全量拉取…（完成后此提示自动消失）';
       setTimeout(() => { try { document.querySelector('nav.tabs button[data-tab=sync]').click(); } catch (_) {} }, 0);
