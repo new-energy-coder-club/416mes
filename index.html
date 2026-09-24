@@ -12872,13 +12872,15 @@ renderScanHistory();
   // performance.now() 就是「距导航开始」的毫秒数，这里正是本地数据渲染完的时刻
   try { HEALTH.bootMs = Math.round(performance.now()); } catch (e) { HEALTH.bootMs = null; }
   if (!state.__healthHidden) { const hb = document.getElementById('healthBox'); if (hb) hb.style.display = 'block'; renderHealthPanel(); }
-  // v3.6.0 一键重置完成后的一次性提示：重置写盘 → reload → 这里检测并显示（15 秒后自动清除）
+  // v3.6.0 一键重置完成后的一次性提示：重置写盘 → reload → 这里检测并显示（15 秒后自动清除）。
+  // 注意必须延后到本轮同步脚本执行完（浮层 DOM 在文件尾部 :scanCamOverlay）：立即 click 会让
+  // goTab→stopCamera→getScanCamera 在浮层解析前跑，抛「页面缺少 scanCam* 浮层结构」并中断 goTab 后半段。
   try {
     if (localStorage.getItem('mes416_hard_reset_done')) {
       localStorage.removeItem('mes416_hard_reset_done');
-      try { document.querySelector('nav.tabs button[data-tab=sync]').click(); } catch (_) {}
       const hl = document.getElementById('syncHeadline');
       if (hl) hl.textContent = '✓ 本地环境已重置，正在从飞书全量拉取…（完成后此提示自动消失）';
+      setTimeout(() => { try { document.querySelector('nav.tabs button[data-tab=sync]').click(); } catch (_) {} }, 0);
       setTimeout(() => { const h = document.getElementById('syncHeadline'); if (h && h.textContent.indexOf('本地环境已重置') === 0) h.textContent = '—'; }, 15000);
     }
   } catch (_) {}

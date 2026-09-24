@@ -139,13 +139,17 @@ test('只读页签：非写入页签点击必须拦截，不执行任何清空',
   assert.equal(ctx._saveCount, 0, '不能写盘');
 });
 
-test('boot：一次性标记 → 移除标记 + 跳同步页 + headline 重置提示', () => {
+test('boot：一次性标记 → 移除标记 + 延后跳同步页 + headline 重置提示', () => {
   const { ctx, vmCtx, el } = makeContext();
   ctx.localStorage.setItem('mes416_hard_reset_done', '123');
   vm.runInContext(BOOT_SRC, vmCtx);
   assert.equal(ctx.localStorage.getItem('mes416_hard_reset_done'), null, '标记必须一次性消费');
-  assert.ok(ctx.clicked.sync >= 1, '必须跳到同步页');
-  assert.ok(el('syncHeadline').textContent.includes('本地环境已重置'), 'headline 必须显示重置提示');
+  assert.ok(el('syncHeadline').textContent.includes('本地环境已重置'), 'headline 必须立即显示重置提示');
+  // tab 切换必须延后（setTimeout 0）——避免在浮层 DOM 解析前触发 goTab→stopCamera
+  const tabTimer = ctx.timers.find(t => t.ms === 0 && !t.cancelled);
+  assert.ok(tabTimer, 'tab 切换必须延后到 DOM 解析完成');
+  tabTimer.fn();
+  assert.ok(ctx.clicked.sync >= 1, '延后执行后必须跳到同步页');
 });
 
 test('boot：无标记时不动 headline', () => {
