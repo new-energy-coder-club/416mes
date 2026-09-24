@@ -285,7 +285,8 @@ test('guided activate REJECTED (STATE_CONFLICT) reports rejection honestly witho
  action.click();await tickN(12);
  const text=d.getElementById('itmStatus').textContent;
  assert.match(text,/启用被拒绝/,'如实说被拒绝');
- assert.match(text,/重新扫码生成新命令/,'给出下一步');
+ assert.match(text,/请核对现场状态后重试/,'给出下一步（v3.5.0：重试启用按钮就地重建，不再要求重新扫码）');
+ assert.match(text,/重试启用/,'v3.5.0：就地重试按钮');
  assert.doesNotMatch(text,/启用结果待确认/,'不得再说「待确认」');
  assert.doesNotMatch(text,/请查询原命令/,'拒绝后卡已删除，不得指向查询');
 });
@@ -313,7 +314,7 @@ test('guided activate REJECTED legacy mismatch offers override resubmit',async()
  assert.equal(queued.confirmLegacyLocOverride,true,'重发命令带现场确认覆盖标记');
  assert.doesNotMatch(d.getElementById('itmStatus').textContent,/请查询原命令/,'拒绝后不再指向已删除的卡');
 });
-test('pending card surfaces lastError and offers needs_attention submit',async()=>{
+test('pending card surfaces lastError and offers needs_attention retry (v3.5.0：同 opId 重放键已删)',async()=>{
  const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
  const command={id:'stuck-1',status:'needs_attention',lastError:'请求超时，结果未知，请查询原opId',request:{schemaVersion:1,opId:'stuck-1',kind:'registerItem',entity:{category:'TS',name:'示波器'}}};
  let submitted=0;
@@ -323,7 +324,9 @@ test('pending card surfaces lastError and offers needs_attention submit',async()
  assert.match(card.textContent,/上次结果：/,'核验卡必须显示真实失败原因');
  assert.match(card.textContent,/超时/);
  const btns=[...card.querySelectorAll('button')].map(b=>b.textContent);
- assert.ok(btns.some(t=>t==='重新执行'),'needs_attention 卡提供查询并确认入口');
+ assert.ok(btns.some(t=>t==='重试（按最新数据）'),'v3.5.0：未决卡主键=重试（按最新数据），所有卡可达');
+ assert.ok(btns.some(t=>t==='查询云端结果'),'只读查询保留');
+ assert.ok(!btns.some(t=>t==='重新执行'),'同 opId 重放键已删（云端未决时它是死循环）');
 });
 test('work tab conflict banner lists blocked codes',()=>{
  const s=setupGuided();const d=s.document;
@@ -545,7 +548,7 @@ test('P1b 版本类拒绝的批量命令：重建按钮解锁全部行并重建�
  await page.pending();
  const card=d.getElementById('itmPending').querySelector('article');
  const btns=[...card.querySelectorAll('button')];
- const rebuild=btns.find(b=>b.textContent.includes('按最新数据重试'));
+ const rebuild=btns.find(b=>b.textContent.includes('重试（按最新数据）'));
  assert.ok(rebuild,'版本类拒绝的批量卡必须提供重建入口');
  rebuild.click();await tickN(10);
  assert.equal(submitted.length,1,'只提交一轮（P2a：不再 8 轮退避）');
@@ -645,7 +648,7 @@ test('F3 激活卡版本类被拒：重建按钮可达，点击后 abandon 旧�
   id:()=>'rebuild-'+(++n),refreshConflicts:async()=>{}});
  await page.pending();
  const card=d.getElementById('itmPending').querySelector('article');
- const rebuild=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('按最新数据重试'));
+ const rebuild=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('重试（按最新数据）'));
  assert.ok(rebuild,'lastError 保留错误码后重建按钮必须可达（v3.2.3 回归：文案覆写错误码致按钮永不出现）');
  rebuild.click();await tickN(12);
  /* v3.4.0 R2：guidedActivate 入队前的同实体清理与重建按钮自身的 abandon 各删一次同一 id——abandonCommand 幂等，去重后恰一条 */
@@ -710,46 +713,43 @@ test('C1 卡死的未决命令卡可作废：按钮可达，点击后删卡+解�
   {row:{rowId:'r1',kind:'activate',generation:1,locked:true,opId,values:[{type:'LOC',code:'L-A',version:0},{type:'CTN',code:'C-A',version:2}]}});
  await page.pending();
  const card=d.getElementById('itmPending').querySelector('article');
- const discard=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('删除记录（不再跟踪）'));
+ const discard=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('删除记录'));
  assert.ok(discard,'needs_attention 卡必须提供作废出口（旧实现只有 pending 卡能取消）');
  discard.click();await tickN();
  assert.deepEqual(abandoned,[opId],'命令卡已从本机删除');
  assert.ok(!page.scan.snapshot().rows.some(r=>r.opId===opId),'扫码行已解锁/移除，不再「本行已锁定」死锁');
  assert.match(d.getElementById('itmStatus').textContent,/已删除记录/);
 });
-test('C2 收口按钮通用可达：settle 终态后走查询回执路径清卡',async t=>{
- const oldConfirm=global.confirm;global.confirm=()=>true;t.after(()=>{global.confirm=oldConfirm;});
+test('v3.5.0 C2：未决卡不再提供 settle/重放入口——主键=重试（按最新数据），死亡按钮全部移除',async t=>{
+ const oldConfirm=global.confirm;let confirmed=0;global.confirm=()=>{confirmed++;return true;};t.after(()=>{global.confirm=oldConfirm;});
  const opId='undecided-1';
  let settled=null;
- const {d,page,acknowledged}=setupPendingCards([
+ const {d,page}=setupPendingCards([
   {id:opId,op:'itemOperation',status:'needs_attention',lastError:'结果待确认',
    request:{schemaVersion:1,opId,kind:'receive',itemCode:'I-P',target:{loc:'L-A',container:'C-A'},expected:{itemVersion:0,containerVersion:2}}}],
   {settle:op=>{settled=op;return {phase:'APPLIED',code:op};}});
  await page.pending();
  const card=d.getElementById('itmPending').querySelector('article');
  const btns=[...card.querySelectorAll('button')].map(b=>b.textContent);
- assert.ok(btns.some(x=>x.includes('核对云端实际状态')),'未决命令卡必须提供核对入口');
- const settleBtn=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('核对云端实际状态'));
- settleBtn.click();await tickN();
- assert.equal(settled,opId,'settle 按原 opId 收口');
- assert.equal(acknowledged.length,1,'收口终态经 acknowledge 落凭据并清卡');
- assert.match(d.getElementById('itmStatus').textContent,/远端已确认|核对/);
+ assert.ok(btns.some(x=>x==='重试（按最新数据）'),'未决卡主键=重试（按最新数据）');
+ assert.ok(!btns.some(x=>x.includes('核对云端实际状态')),'settle 键已删（operator 必 403，且 confirm 被吞后是死按钮）');
+ assert.ok(!btns.some(x=>x==='重新执行'),'同 opId 重放键已删');
+ assert.equal(settled,null,'不提供 settle 入口');
 });
-test('C2 REPAIR_REQUIRED 卡不再死路：收口与作废双出口齐备',async t=>{
+test('v3.5.0 C2：REPAIR_REQUIRED 卡单击直接删除（无 confirm——用户环境 confirm 被吞导致按钮失效的根因）',async t=>{
  const oldConfirm=global.confirm;let confirmed=0;global.confirm=()=>{confirmed++;return true;};t.after(()=>{global.confirm=oldConfirm;});
  const opId='repair-1';
- const {d,page}=setupPendingCards([
+ const {d,page,abandoned}=setupPendingCards([
   {id:opId,op:'itemOperation',status:'needs_attention',lastError:'写入中断｜人工收口：实体实际状态与目标快照不一致',
    request:{schemaVersion:1,opId,kind:'activateContainer',containerCode:'C-A',target:{loc:'L-A'},expected:{containerVersion:2}}}],
-  {settle:op=>({phase:'REJECTED',code:op,error:'人工收口：实体实际状态与目标快照不一致（可能已被其他操作覆盖），命令标记为未生效'})});
+  {});
  await page.pending();
  const card=d.getElementById('itmPending').querySelector('article');
- const btns=[...card.querySelectorAll('button')].map(b=>b.textContent);
- assert.ok(btns.some(x=>x.includes('核对云端实际状态')),'REPAIR_REQUIRED 卡必须能核对');
- assert.ok(btns.some(x=>x.includes('删除记录（不再跟踪）')),'REPAIR_REQUIRED 卡必须能作废');
- const discard=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('删除记录（不再跟踪）'));
+ const discard=[...card.querySelectorAll('button')].find(b=>b.textContent==='删除记录');
+ assert.ok(discard,'删除记录按钮可达');
  discard.click();await tickN();
- assert.equal(confirmed,1,'作废前必须经确认（防误触）');
+ assert.equal(confirmed,0,'v3.5.0：不再弹任何 confirm');
+ assert.deepEqual(abandoned,[opId],'单击直接删除本机记录');
  assert.match(d.getElementById('itmStatus').textContent,/已删除记录/);
 });
 test('C3 pending 卡手动取消后扫码行解锁（不再绕回「本行已锁定」）',async t=>{
@@ -761,7 +761,7 @@ test('C3 pending 卡手动取消后扫码行解锁（不再绕回「本行已锁
   {row:{rowId:'r1',kind:'receive',generation:1,locked:true,opId,values:[{type:'LOC',code:'L-A',version:0},{type:'CTN',code:'C-A',version:2},{type:'ITM',code:'I-P',version:0}]}});
  await page.pending();
  const card=d.getElementById('itmPending').querySelector('article');
- const cancel=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('删除记录（不执行）'));
+ const cancel=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('删除记录'));
  assert.ok(cancel,'pending 卡保留取消入口');
  cancel.click();await tickN();
  assert.deepEqual(abandoned,[opId]);
@@ -779,9 +779,9 @@ test('C1 retryable 拒绝卡：作废与重建并存，作废后不再保留行�
  await page.pending();
  const card=d.getElementById('itmPending').querySelector('article');
  const btns=[...card.querySelectorAll('button')].map(b=>b.textContent);
- assert.ok(btns.some(x=>x==='按最新数据重试'),'重建按钮不受影响（F1/F3 语义保留）');
- assert.ok(btns.some(x=>x.includes('删除记录（不再跟踪）')),'作废与重建并存——不想重建时可以放弃');
- const discard=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('删除记录（不再跟踪）'));
+ assert.ok(btns.some(x=>x==='重试（按最新数据）'),'重建按钮不受影响（F1/F3 语义保留）');
+ assert.ok(btns.some(x=>x.includes('删除记录')),'作废与重建并存——不想重建时可以放弃');
+ const discard=[...card.querySelectorAll('button')].find(b=>b.textContent.includes('删除记录'));
  discard.click();await tickN();
  assert.deepEqual(abandoned,[opId]);
  assert.ok(!page.scan.snapshot().rows.some(r=>r.opId===opId),'作废即放弃跟踪，行绑定解除');
@@ -821,8 +821,8 @@ test('v3.3.2 提交失败落卡后待处理区必须刷新（不再停留在旧 
  submit.click();await tickN(10);
  assert.ok(unknownSaved,'item-client 已 markUnknown');
  const btns=[...d.getElementById('itmPending').querySelectorAll('article button')].map(b=>b.textContent);
- assert.ok(btns.some(t=>t.includes('重新执行')),'失败刷新后应看到 needs_attention 卡的入口（旧实现停在旧 pending 卡）');
- assert.ok(btns.some(t=>t.includes('删除记录（不再跟踪）')),'作废/收口出口随刷新出现');
+ assert.ok(btns.some(t=>t==='重试（按最新数据）'),'失败刷新后应看到 needs_attention 卡的新主键（旧实现停在旧 pending 卡）');
+ assert.ok(btns.some(t=>t==='删除记录'),'删除出口随刷新出现');
 });
 
 /* ================= v3.4.0：启用/建档即时化 + 同实体去重 + 文案简化 ================= */
@@ -917,4 +917,60 @@ test('v3.4.0 R3：摘要行零计数类目不显示（「需人工核验 0」噪
  assert.match(sum,/待提交 1/);
  assert.doesNotMatch(sum,/需人工核验/,'零计数不再出现');
  assert.doesNotMatch(sum,/已完结/,'零计数不再出现');
+});
+
+/* ================= v3.5.0 P2：启用发后不管——失败路径待处理区零残留 ================= */
+test('v3.5.0 P2：启用提交异常 → 本机卡被删除 + 就地「重试启用」按钮',async()=>{
+ const {parseHTML}=require('linkedom');
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const state={locations:[{code:'L-X',status:'unknown'}],containers:[{code:'C-X',loc:'L-X',status:'unknown',version:0}],items:[]};
+ const enqueued=[];const abandoned=[];let submitted=0;
+ const persistence={async enqueue(r){enqueued.push(r);},async saveDraft(){},async recover(){return{drafts:[],commands:[]}},async abandonCommand(id){abandoned.push(id);}};
+ const page=UI.mount({document:d,state,getState:()=>state,getPersistence:()=>persistence,
+  getCommands:async()=>enqueued.filter(r=>!abandoned.includes(r.opId)).map(r=>({id:r.opId,op:'itemOperation',request:r,status:'pending'})),
+  getClient:()=>({submit:async()=>{submitted++;throw Error('Failed to fetch');}}),
+  id:()=>'fa-'+(enqueued.length+1),isOnline:()=>true,refreshConflicts:async()=>{}});
+ d.getElementById('itmAdminLoc').value='L-X';
+ d.getElementById('itmActivateLoc').click();await tickN(8);
+ assert.equal(submitted,1,'在线即时提交');
+ assert.deepEqual(abandoned,[enqueued[0].opId],'v3.5.0：失败后本机卡被删除（待处理区零残留）');
+ assert.match(d.getElementById('itmRegisterResult').textContent,/启用命令提交失败/,'就地报错');
+ assert.match(d.getElementById('itmRegisterResult').textContent,/重试启用/,'就地「重试启用」按钮（镜像自状态行）');
+ assert.equal(d.getElementById('itmPending').querySelectorAll('article').length,0,'待处理区没有任何启用卡');
+});
+test('v3.5.0 P2：启用返回「原命令未决」→ 本机卡被删除 + 就地重试（不再推进待处理区死循环）',async()=>{
+ const {parseHTML}=require('linkedom');
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const state={locations:[{code:'L-X',status:'unknown'}],containers:[{code:'C-X',loc:'L-X',status:'unknown',version:0}],items:[]};
+ const enqueued=[];const abandoned=[];
+ const persistence={async enqueue(r){enqueued.push(r);},async saveDraft(){},async recover(){return{drafts:[],commands:[]}},async abandonCommand(id){abandoned.push(id);}};
+ const page=UI.mount({document:d,state,getState:()=>state,getPersistence:()=>persistence,
+  getCommands:async()=>enqueued.filter(r=>!abandoned.includes(r.opId)).map(r=>({id:r.opId,op:'itemOperation',request:r,status:'needs_attention'})),
+  getClient:()=>({submit:async()=>({phase:'REPAIR_REQUIRED',code:'x',error:'原命令未决，不能自动重发'})}),
+  id:()=>'fr-'+(enqueued.length+1),isOnline:()=>true,refreshConflicts:async()=>{}});
+ d.getElementById('itmAdminLoc').value='L-X';
+ d.getElementById('itmActivateLoc').click();await tickN(8);
+ assert.deepEqual(abandoned,[enqueued[0].opId],'未决返回同样删本机卡');
+ assert.match(d.getElementById('itmStatus').textContent,/云端仍在处理.*自动核对/,'如实告知云端在处理');
+ const btn=[...d.getElementById('itmStatus').querySelectorAll('button')].find(b=>b.textContent==='重试启用');
+ assert.ok(btn,'就地「重试启用」');
+});
+test('v3.5.0 P2：版本类重建轮仍拒 → 本机卡被删除 + 就地重试（旧实现留 retryable 卡）',async()=>{
+ const {parseHTML}=require('linkedom');
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const state={locations:[{code:'L-X',status:'unknown'}],containers:[{code:'C-X',loc:'L-X',status:'unknown',version:0}],items:[]};
+ const enqueued=[];const abandoned=[];let calls=0;
+ const persistence={async enqueue(r){enqueued.push(r);},async saveDraft(){},async recover(){return{drafts:[],commands:[]}},async abandonCommand(id){abandoned.push(id);},
+  async markUnknown(){},async acknowledge(){}};
+ const page=UI.mount({document:d,state,getState:()=>state,getPersistence:()=>persistence,
+  getCommands:async()=>enqueued.map(r=>({id:r.opId,op:'itemOperation',request:r,status:'pending'})),
+  getClient:()=>({submit:async c=>{calls++;const c2={...c,request:c.request};if(calls===1)return {phase:'REJECTED',code:c.id,kind:c.request.kind,request:c.request,error:'VERSION_CONFLICT',retryable:true};return {phase:'REJECTED',code:c.id,kind:c.request.kind,request:c.request,error:'VERSION_CONFLICT',retryable:true};}}),
+  id:()=>'fv-'+(enqueued.length+1),isOnline:()=>true,refreshConflicts:async()=>{}});
+ // mock item-client 语义：REJECTED retryable → markUnknown 保留卡（模拟 finishTerminal）
+ d.getElementById('itmAdminLoc').value='L-X';
+ d.getElementById('itmActivateLoc').click();await tickN(10);
+ assert.ok(calls>=2,'版本类拒绝触发自动重建重试一轮');
+ assert.match(d.getElementById('itmStatus').textContent,/启用被拒绝/,'重建轮仍拒如实报');
+ const btn=[...d.getElementById('itmStatus').querySelectorAll('button')].find(b=>b.textContent==='重试启用');
+ assert.ok(btn,'就地「重试启用」');
 });

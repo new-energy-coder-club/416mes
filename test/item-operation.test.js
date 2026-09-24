@@ -116,3 +116,20 @@ test('trial concurrent-precheck: REPAIR_REQUIRED 屏障下同实体命令被拒�
   }
   assert.ok(outcomes.some(p => p !== 'APPLIED'), 'REPAIR_REQUIRED 屏障下不应全部静默成功');
 });
+
+/* ================= v3.5.0：同 opId 重放遇超时未决行先自动收口（死锁根治） ================= */
+test('v3.5.0：同 opId 重放遇超时 PREPARED 行先 sweep 收口再返回真实终态',async()=>{
+  const f=setup();
+  /* 真实制造一条未决行：写入超时 → prepare 已落日志（PREPARED）→ 实体未写入 */
+  f.repository.faults.apply=true;
+  const first=await f.service().post({},request());
+  assert.equal(first.phase,'REPAIR_REQUIRED');
+  f.repository.faults.apply=false;
+  assert.equal(f.repository.logs[0].phase,'PREPARED');
+  /* 把行龄拨到 11 分钟前（超过 STALE_PREPARED_MS） */
+  f.repository.logs[0].requestedAt=new Date(Date.now()-11*60*1000).toISOString();
+  /* 重放同 opId 同内容 → claim.existing → sweep → lookup 返回真实终态（旧实现恒 REPAIR_REQUIRED 死循环） */
+  const r=await f.service().post({},request());
+  assert.equal(f.repository.logs[0].phase,'REJECTED','超时未决行已被 sweep 收口（实体未写入 → 按作废处理）');
+  assert.equal(r.phase,'REJECTED','重放拿到真实终态，不再是「原命令未决」');
+});
