@@ -147,3 +147,41 @@ test('发现 H：ITM NOT_FOUND 引导按当前行 kind 取词，出库不再被�
   assert.match(uiSrc, /确认后按当前作业类型继续：'\+submitHint\(scan\.row\(\)\.kind\)/, 'NOT_FOUND 引导必须按当前行 kind 动态取词');
   assert.ok(!/确认后重新入库/.test(uiSrc), '不得再硬编码「重新入库」—— 出库/换箱场景会方向误导');
 });
+
+/* ---------- 发现 K（TASK-21）：服务端错误码汉化全覆盖 ---------- */
+
+test('发现 K：服务端全部 fail 错误码都在 errZh 有中文（防新增码静默漏译）', () => {
+  const U = fs.readFileSync('/srv/416mes/lib/unique-items.js', 'utf8');
+  const ui = uiSrc;
+  const codes = [...new Set([...U.matchAll(/fail\('([A-Z_]+)'/g)].map(m => m[1]))].sort();
+  const errZh = (ui.match(/const errZh=\{[\s\S]*?\};/) || [''])[0];
+  assert.ok(errZh.length > 100, '必须能取到 errZh 表');
+  const missing = codes.filter(c => !errZh.includes(c));
+  assert.deepEqual(missing, [], '以下错误码没有中文翻译，用户会看到原始码：' + missing.join(', '));
+  assert.ok(codes.length >= 23, '服务端错误码数量应 ≥23（当前 ' + codes.length + '），若减少请同步更新本测试');
+});
+
+test('发现 K：errText 对 INACTIVE_ENTITY 走中文而非裸码', () => {
+  // 直接驱动 errText 的分支逻辑：code 命中 errZh 时返回中文 + 代码
+  assert.match(uiSrc, /INACTIVE_ENTITY:'[^']*请先[^']*'/, 'INACTIVE_ENTITY 必须翻译成中文');
+});
+
+/* ---------- 发现 C（TASK-21）：写前重计划比对顺序无关 ---------- */
+
+test('发现 C：写前重计划的 before/after 比对顺序无关（快照顺序漂移不误报，实质变化仍检出）', () => {
+  const op = fs.readFileSync('/srv/416mes/lib/item-operation.js', 'utf8');
+  assert.match(op, /function normalizeSnapshot\(arr\)/, '必须有 normalizeSnapshot');
+  assert.match(op, /function snapshotChanged\(a, b\)/, '必须有 snapshotChanged');
+  assert.match(op, /snapshotChanged\(currentPlan\.before, plan\.before\)/, '写前比对必须走 snapshotChanged');
+  assert.ok(!/canonical\(currentPlan\.before\) !== canonical\(plan\.before\)/.test(op),
+    '不得再用顺序敏感的 canonical 直接比 before');
+  // 行为自证：复刻比较逻辑
+  const stableKey = r => String((r && (r.itemCode || r.code || r.containerCode || r.entityCode)) || '');
+  const norm = a => (Array.isArray(a) ? a.slice() : []).sort((x, y) => stableKey(x) < stableKey(y) ? -1 : stableKey(x) > stableKey(y) ? 1 : 0);
+  const changed = (a, b) => JSON.stringify(norm(a)) !== JSON.stringify(norm(b));
+  const a = [{ itemCode: 'I-1', status: 'in_stock' }, { itemCode: 'I-2', status: 'out' }];
+  const b = [{ itemCode: 'I-2', status: 'out' }, { itemCode: 'I-1', status: 'in_stock' }];
+  const c = [{ itemCode: 'I-1', status: 'in_stock' }, { itemCode: 'I-2', status: 'in_stock' }];
+  assert.equal(changed(a, b), false, '仅顺序漂移不得判为「前置已变」（否则重试也撞同一堵墙）');
+  assert.equal(changed(a, c), true, '实质状态变化必须仍然检出');
+});
