@@ -200,10 +200,12 @@ test('E1：在线建档不带码提交 → APPLIED 展示物品码 + 8 位短码
  assert.equal(s.queued.entity.category,'TS');
  assert.ok(s.submitted,'在线应立即提交发号');
  assert.equal(s.submitted.request.entity.code,undefined,'提交服务端的请求同样不带 code');
- const box=d.getElementById('itmRegisterResult');
- assert.match(box.textContent,/已分配物品码：WP-TS-001/);
- assert.match(box.textContent,new RegExp('短码：'+LINK.fromItemCode('WP-TS-001')));
- assert.ok(box.querySelector('.itm-qr'),'应有二维码预览容器');
+  const box=d.getElementById('itmRegisterResult');
+  assert.match(box.textContent,/已分配物品码：WP-TS-001/);
+  assert.match(box.textContent,new RegExp('短码：'+LINK.fromItemCode('WP-TS-001')));
+  const linkText=(box.textContent.match(/短链：(HTTPS:\/\/MES\.NEWENERGYCODER\.CLUB\/I\/[0-9A-HJKMNP-TV-Z]{8})/)||[])[1];
+  assert.equal(linkText,LINK.linkFor('WP-TS-001'),'BUG-6：短链文本与 ItemLink 生成值逐字符一致（无二次大写变换）');
+  assert.ok(box.querySelector('.itm-qr'),'应有二维码预览容器');
  assert.match(box.querySelector('.itm-qr').textContent,new RegExp('QR\\['+LINK.linkFor('WP-TS-001').toUpperCase().replace(/[/.]/g,'\\$&')+'\\]'),'二维码内容为冻结规格整条大写短链');
  assert.match(d.getElementById('itmRegisterResult').textContent,/建档完成：WP-TS-001/,'完成语追加在预览之后（不覆盖二维码）');
 });
@@ -963,4 +965,34 @@ test('v3.5.0 P2：版本类重建轮仍拒 → 本机卡被删除 + 就地重试
  assert.match(d.getElementById('itmStatus').textContent,/启用被拒绝/,'重建轮仍拒如实报');
  const btn=[...d.getElementById('itmStatus').querySelectorAll('button')].find(b=>b.textContent==='重试启用');
  assert.ok(btn,'就地「重试启用」');
+});
+
+/* ================= TASK-15 BUG-8：切「作业类型」下拉即时生效 ================= */
+test('BUG-8①：空行时切作业类型 → 当前行类型直接跟随切换且状态行提示',()=>{
+ const {document:d,page}=setup();
+ assert.equal(page.scan.row().kind,'receive','初始为入库行');
+ pick(d,'itmKind','issue');
+
+ assert.equal(page.scan.row().kind,'issue','空行应直接切成出库');
+ assert.equal(page.scan.row().values.length,0,'切换不产生任何已扫数据');
+ assert.match(d.getElementById('itmStatus').textContent,/已切换为「出库」/,'状态行必须给出明确提示');
+});
+test('BUG-8②：已有已扫数据的行切类型 → 行类型与数据都不变，仅提示去点新建行',async()=>{
+ const {document:d,page}=setup();
+ await page.accept('LOC:L-A');                       // 当前行已有 1 步数据
+ const before=JSON.stringify(page.scan.row());
+ pick(d,'itmKind','issue');
+
+ assert.equal(page.scan.row().kind,'receive','已有数据的行绝不静默改类型');
+ assert.equal(JSON.stringify(page.scan.row()),before,'已扫数据一个都不能丢');
+ assert.match(d.getElementById('itmStatus').textContent,/点『按所选类型新建行』生效/);
+ assert.match(d.getElementById('itmStatus').textContent,/当前行已有数据，未改动/);
+});
+test('BUG-8③：批量模式中切类型 → 不改行，提示先结束批量',()=>{
+ const {document:d,page}=setup();
+ page.scan.startBatch('receive');
+ pick(d,'itmKind','issue');
+
+ assert.equal(page.scan.batchState().kind,'receive','批量模式类型不被下拉改变');
+ assert.match(d.getElementById('itmStatus').textContent,/批量模式中/);
 });

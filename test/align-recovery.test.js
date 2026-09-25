@@ -846,3 +846,12 @@ test('P3b：库位/容器档案必须露出受控状态列，未启用行给核�
   assert.match(cfgSrc, /locations:[\s\S]*?\['status', '状态'\]/, '库位必须有状态列');
   assert.match(cfgSrc, /containers:[\s\S]*?\['status', '状态'\]/, '容器必须有状态列');
 });
+
+/* TASK-15 BUG-2：操作记录页补 h2 标题（其余页签都有 h2，该页曾只有孤立的 h3） */
+test('BUG-2：#tab-oplog 必须有且只有一个 h2 页标题', () => {
+  const sec = HTML.match(/<section class="tab" id="tab-oplog">[\s\S]*?<\/section>/);
+  assert.ok(sec, '#tab-oplog 段必须存在');
+  const h2s = sec[0].match(/<h2>/g) || [];
+  assert.equal(h2s.length, 1, '#tab-oplog 内 h2 数量应为 1');
+  assert.match(sec[0], /<h2>操作记录（谁、何时、对哪个物品、做了什么）<\/h2>/);
+});
