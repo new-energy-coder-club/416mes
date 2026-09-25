@@ -1,6 +1,6 @@
 {
   "APP_VERSION": "3.13.0",
-  "generatedAt": "2026-09-25T08:08:22.697Z",
+  "generatedAt": "2026-09-25T08:17:12.301Z",
   "hashes": {
     "nec-gallery.js?v=3.13.0": "efbb620e319efe9cc7d5107715ae77722ad97b27f7a141ec6c2204e0555ed23b",
     "jsqr.min.js?v=3.13.0": "bc40c8a15196236b2314db0856f72ca0b49980cd5413b8c852a7349f5fee0859",
@@ -17,7 +17,7 @@
     "lib/item-link.js?v=3.13.0": "c615e83753d38e5a26ae8bff3fb2d33621ba9bb50826f3519f3d22cba3b36430",
     "lib/item-scan.js?v=3.13.0": "2f5cb7a6fec4b38fcf159583cb1e7b26bc0d576661eaf5110b875e722ccde441",
     "lib/item-client.js?v=3.13.0": "560c658dfc3926ee5d900b28437427d6e7ce92df38ae9677a7e1b9ecf6651fcf",
-    "lib/item-ui.js?v=3.13.0": "ff4cea24f863714aa21544bd55768f66b4766c770af75ece6f4c591008cb27d2",
+    "lib/item-ui.js?v=3.13.0": "6128ac7a316d9ce966d96fe2608d6a09bb3d67e42ecd05e1e7ae1a7726ac3113",
     "lib/replay-checkpoint.js?v=3.13.0": "9b7eb8fd1b0baf43cc8e4ccb8eda3a7c7157ac1f5d5ea62096d98dc3355f97ed",
     "lib/incremental.js?v=3.13.0": "815ae52f14bbc0a15e02f733d4e29c1b6ed6a71806af73628a71f682cb345df6",
     "lib/census-status.js?v=3.13.0": "67e571bc7f2c39bfe2e302017aac240d0dd70caed5f7fe8859a62dc6d44cf9bb",

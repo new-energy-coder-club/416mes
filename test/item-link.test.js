@@ -124,3 +124,19 @@ test('parseScanText 容忍尾斜杠', () => {
   assert.deepEqual(L.parseScanText(base + '/'), L.parseScanText(base));
   assert.deepEqual(L.parseScanText(base + '/?to=feishu'), L.parseScanText(base));
 });
+
+/* ⚠️ BUG-6 撤销记录（v3.13.0）：
+   全量实测时曾把「建档结果里短链显示为全大写」误判为 bug，并让 opencode 去掉了
+   展示层的 toUpperCase()。核实后发现：**全大写是有意冻结的印刷规格**，
+   有 4 个测试文件锁死（本文件 :10、item-link-endpoint.test.js:57、
+   item-shortlinks.test.js:36/:42/:139）。
+   那个 toUpperCase() 的作用正是「让屏幕显示与标签印刷/二维码编码逐字一致」，
+   去掉后一旦 BASE_URL 或短码大小写形态变化，展示就会与印刷版不符。
+   本测试把该决策钉死，防止再次被"顺手修掉"。 */
+test('短链展示必须与印刷版一致（整条大写）—— 防 BUG-6 误修回流', () => {
+  const UI = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'lib', 'item-ui.js'), 'utf8');
+  assert.match(UI, /line\(box,'短链：'\+link\.toUpperCase\(\)\)/, '建档结果的短链展示必须 toUpperCase（与印刷版一致）');
+  assert.match(UI, /qrSvg\(link\.toUpperCase\(\)\)/, '二维码编码值也必须是印刷版大写短链');
+  /* 冻结值本身不可变 */
+  assert.equal(L.linkFor('WP-001'), 'HTTPS://MES.NEWENERGYCODER.CLUB/I/KW4QYSBD');
+});
