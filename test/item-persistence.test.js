@@ -182,3 +182,92 @@ test('clearDrafts removes all itmDraft: keys without touching outbox', async t =
   const r = await f.client.recover();
   assert.equal(r.drafts.length, 0, '草稿全清');
 });
+
+/* ================= 发现 E（TASK-21）：升级兼容 —— 旧卡带 device 不得炸 =================
+   v3.13.1 把 device 从 request 主体改到 header。但 v3.12.1~3.13.0 期间入队的**旧卡**
+   其 request 里可能已带 device 字段（那是 BUG-12 的病根补丁写进去的）。
+   升级后新旧客户端交替提交这些旧卡，不得触发 RESULT_REQUEST_MISMATCH 或 hash 失败。 */
+
+test('发现 E：旧卡 request 带 device 原样重发，ACK 一致性校验通过（升级兼容）', async t => {
+  const f = await setup(t);
+  f.state().items = [{ code: 'I-1', container: 'C-1', status: 'in_stock', version: 3 }];
+  f.state().containers = [{ code: 'C-1', loc: 'L-1', status: 'active', version: 2 }];
+  // 旧客户端形态：device 在 request 主体里
+  const legacyRequest = { schemaVersion: 1, opId: 'legacy-dev-1', kind: 'issue', itemCode: 'I-1',
+    source: { loc: 'L-1', container: 'C-1' }, device: 'dev-OLDCLIENT',
+    expected: { itemVersion: 3, containerVersion: 2 } };
+  await f.client.enqueue(structuredClone(legacyRequest));
+  // 回执原样带回同一个 request（旧客户端不移植 header，服务端也不解析）
+  await f.client.acknowledge({
+    code: 'legacy-dev-1', kind: 'issue', phase: 'APPLIED',
+    request: structuredClone(legacyRequest),
+    before: { items: [{ code: 'I-1', container: 'C-1', status: 'in_stock', version: 3 }] },
+    // 真实回执形态：after 行必须带 version + lastOpId（item-persistence.js:162 的落账守卫）
+    after: { items: [{ code: 'I-1', container: '', status: 'out', version: 4, lastOpId: 'legacy-dev-1' }] }
+  });
+  assert.equal(await f.store.get('outbox', 'legacy-dev-1'), undefined, '旧卡正常清卡');
+  assert.equal(f.state().items[0].status, 'out', '旧卡结果正常落本地');
+});
+
+test('发现 E：新客户端不得再把 device 写进 request 主体（防 BUG-12 复发）', async t => {
+  const f = await setup(t);
+  f.state().items = [{ code: 'I-2', container: 'C-1', status: 'in_stock', version: 3 }];
+  f.state().containers = [{ code: 'C-1', loc: 'L-1', status: 'active', version: 2 }];
+  await f.client.enqueue({ schemaVersion: 1, opId: 'new-dev-1', kind: 'issue', itemCode: 'I-2',
+    source: { loc: 'L-1', container: 'C-1' }, expected: { itemVersion: 3, containerVersion: 2 } });
+  const cmd = await f.store.get('outbox', 'new-dev-1');
+  assert.ok(cmd && cmd.request, '命令应已入队');
+  assert.ok(!('device' in cmd.request), '新入队命令的 request 不得含 device —— device 走 header');
+  // 同样内容但因 device 在场而被判 mismatch 的组合，必须不再出现
+  const withDevice = Object.assign(structuredClone(cmd.request), { device: 'dev-X' });
+  const P = require('../lib/item-persistence.js');
+  assert.notEqual(P.canonical(withDevice), P.canonical(cmd.request),
+    '带 device 与不带 device 的 canonical 必须不同 —— 这正是 BUG-12 的判定点，本条锁死「新命令不得带」');
+});
+
+test('发现 E：device 只允许出现在 header，不进 request 也不进回执比对', () => {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'lib', 'item-client.js'), 'utf8');
+  const op = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'lib', 'item-operation.js'), 'utf8');
+  assert.match(src, /'X-416mes-Device':deviceHeader\(\)/, '客户端必须通过 header 发 device');
+  assert.match(op, /device:\s*\(declaredDevice\(headerSource\)/, '服务端必须从 header 取 device');
+  const persist = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'lib', 'item-persistence.js'), 'utf8');
+  assert.ok(!/frozen\.device\s*=/.test(persist), 'item-persistence 不得再往 request 注入 device');
+});
+
+/* ================= 发现 F（TASK-21）：REPAIR_REQUIRED 附「受影响件清单」 ================= */
+
+test('发现 F：部分写入时按 before/after 精确算出受影响行，不误报未变行', () => {
+  // 复刻 item-operation.js 的 partialWriteDetail 逻辑做行为自证
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'lib', 'item-operation.js'), 'utf8');
+  assert.match(src, /function partialWriteDetail\(before, after\)/, '必须有 partialWriteDetail');
+  assert.match(src, /function withPartialDetail\(/, '必须有 withPartialDetail 包装器');
+  // 三处 REPAIR_REQUIRED 出口都要带明细
+  const sites = src.match(/withPartialDetail\(\{[^]*?phase: 'REPAIR_REQUIRED'/g) || [];
+  assert.ok(sites.length >= 2, '至少 sweep 与 trial 回读两条 REPAIR_REQUIRED 路径要带明细，实测 ' + sites.length);
+
+  const canonical = v => JSON.stringify(v);
+  const ENTITY_LABEL = { items: '物品', containers: '容器', locations: '库位', materials: '物料' };
+  const keyOf = (t, r) => String((r && (r.code || r.itemCode || r.matCode || r.entityCode)) || '');
+  const detail = (before, after) => {
+    const out = [];
+    ['items', 'containers', 'locations', 'materials'].forEach(function (table) {
+      const b = (before && before[table]) || [], a = (after && after[table]) || [];
+      const bk = new Set(b.map(r => keyOf(table, r))), ak = new Set(a.map(r => keyOf(table, r)));
+      a.forEach(r => { const k = keyOf(table, r);
+        if (!bk.has(k)) out.push('新增 ' + (ENTITY_LABEL[table] || table) + ' ' + k);
+        else { const p = b.find(x => keyOf(table, x) === k); if (p && canonical(p) !== canonical(r)) out.push('变更 ' + (ENTITY_LABEL[table] || table) + ' ' + k); } });
+      b.forEach(r => { const k = keyOf(table, r); if (!ak.has(k)) out.push('移除 ' + (ENTITY_LABEL[table] || table) + ' ' + k); });
+    });
+    return out;
+  };
+  // 批量第 2 件失败：只有第 1 件真的变了
+  const d = detail(
+    { items: [{ code: 'I-1', container: 'C-1', status: 'in_stock', version: 1 }, { code: 'I-2', container: 'C-1', status: 'in_stock', version: 1 }] },
+    { items: [{ code: 'I-1', container: '', status: 'out', version: 2 }, { code: 'I-2', container: 'C-1', status: 'in_stock', version: 1 }] });
+  assert.deepEqual(d, ['变更 物品 I-1'], '只报真正变化的那一件，不得把未变的 I-2 也列进去');
+  // 容器库位变化也要报
+  assert.deepEqual(detail({ containers: [{ code: 'C-1', loc: 'L-1', status: 'active' }] },
+                          { containers: [{ code: 'C-1', loc: 'L-2', status: 'active' }] }), ['变更 容器 C-1']);
+  // 完全一致时不报（此时本就不该是 REPAIR_REQUIRED）
+  assert.deepEqual(detail({ items: [{ code: 'I-1', status: 'out' }] }, { items: [{ code: 'I-1', status: 'out' }] }), []);
+});
