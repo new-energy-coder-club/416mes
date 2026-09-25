@@ -1965,3 +1965,49 @@ test('reverseOrder 部分失败重试：已冲销物料不再反向，补齐后�
   assert.equal(revTxns.length, txnCountAfterFirst + 1, '重试只补 B 一条冲销流水');
   assert.equal(Core.replayAudit(s).ok, true, '回放校验仍一致');
 });
+
+/* ================= 发现 I（TASK-21）：首错连带偏差标注 ================= */
+
+test('发现 I：首错之后的 mismatch 标注为连带，汇总给出「实际坏点可能远少于条数」提示', () => {
+  const st = {
+    materials: [], items: [], containers: [], locations: [], workorders: [],
+    transactions: [
+      { seq: 1, matCode: 'GJ', type: '期初', delta: 0,  balance: 100, time: 'T1' },
+      { seq: 2, matCode: 'GJ', type: '入库', delta: 5,  balance: 99,  time: 'T2' },   // ← 真坏点（应为 105）
+      { seq: 3, matCode: 'GJ', type: '出库', delta: -2, balance: 97,  time: 'T3' },   // 连带
+      { seq: 4, matCode: 'GJ', type: '入库', delta: 7,  balance: 104, time: 'T4' }    // 连带
+    ],
+    necOrders: [], members: [], scanHistory: [], txnSeq: 4
+  };
+  const r = Core.replayAudit(st, { assumeOrdered: true });
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 'mismatch');
+  assert.equal(r.mismatches.length, 3, '三条都 mismatch');
+  assert.equal(r.rootCauseCandidates, 1, '首错（真坏点）只有 1 处');
+  assert.equal(r.cascadedMismatches, 2, '另 2 条是累加传导的连带偏差');
+  assert.equal(r.mismatches[0].firstForMaterial, true, 'seq=2 是该物料首个 mismatch');
+  assert.equal(r.mismatches[1].firstForMaterial, false);
+  assert.match(r.mismatchNote, /实际坏点可能只有 1 处/, '提示要点明坏点数远小于 mismatch 条数');
+  assert.match(r.mismatchNote, /建议先看每个物料的第 1 条/, '提示要给出可操作的排查建议');
+});
+
+test('发现 I：无 mismatch 与单一坏点都不产生误导性提示', () => {
+  const clean = { materials: [], items: [], containers: [], locations: [], workorders: [],
+    transactions: [{ seq: 1, matCode: 'GJ', type: '期初', delta: 0, balance: 10, time: 'T1' },
+                   { seq: 2, matCode: 'GJ', type: '入库', delta: 5, balance: 15, time: 'T2' }],
+    necOrders: [], members: [], scanHistory: [], txnSeq: 2 };
+  const ok = Core.replayAudit(clean, { assumeOrdered: true });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.mismatchNote, '', '全对时不得有无端提示');
+
+  // 每物料各自独立：两个物料的第一个 mismatch 都要标 first
+  const two = { materials: [], items: [], containers: [], locations: [], workorders: [],
+    transactions: [{ seq: 1, matCode: 'GJ', type: '期初', delta: 0, balance: 10, time: 'T1' },
+                   { seq: 2, matCode: 'GJ', type: '入库', delta: 5, balance: 99, time: 'T2' },
+                   { seq: 3, matCode: 'HC', type: '期初', delta: 0, balance: 20, time: 'T3' },
+                   { seq: 4, matCode: 'HC', type: '入库', delta: 2, balance: 88, time: 'T4' }],
+    necOrders: [], members: [], scanHistory: [], txnSeq: 4 };
+  const r2 = Core.replayAudit(two, { assumeOrdered: true });
+  assert.equal(r2.rootCauseCandidates, 2, '两个物料各 1 处首错');
+  assert.equal(r2.mismatches.filter(m => m.firstForMaterial).length, 2);
+});

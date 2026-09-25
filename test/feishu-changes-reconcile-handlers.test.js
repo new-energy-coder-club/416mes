@@ -225,3 +225,25 @@ test('reconcile：空 body / 空 state 也应走到 200（对账允许本地为�
   assert.equal(res._code, 200, '空 state 应正常出具报告');
   await new Promise(r => mock.server.close(r));
 });
+
+/* ================= 发现 J（TASK-21）：reconcile 同键记录不得静默覆盖 ================= */
+
+test('发现 J：飞书侧同编码多条记录时计入 duplicateRemoteKeys，且不得静默覆盖', () => {
+  const api = require('../lib/feishu-api.js');
+  assert.equal(typeof api.reconcile, 'function', 'reconcile 应存在');
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'lib', 'feishu-api.js'), 'utf8');
+  assert.match(src, /const duplicateRemoteKeys = \[\];/, '必须声明 duplicateRemoteKeys');
+  assert.match(src, /if \(k && remoteByKey\[k\]\) \{ if \(duplicateRemoteKeys\.indexOf\(k\) < 0\) duplicateRemoteKeys\.push\(k\); return; \}/,
+    '同键第二条必须被检出并 return（不能覆盖第一条）');
+  assert.match(src, /diffs, diffCount,\s*\n\s*duplicateRemoteKeys/, 'report.tables 必须暴露 duplicateRemoteKeys');
+  assert.match(src, /summary\.duplicateRemoteKeys \+= duplicateRemoteKeys\.length/, 'summary 必须累加');
+});
+
+test('发现 J：同键冲突必须计入「不一致」（不得检出了却报一致）', () => {
+  const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'index.html'), 'utf8');
+  const line = (html.match(/const isConsistent = t => t &&[^;]*;/) || [''])[0];
+  assert.ok(line, '必须能取到 isConsistent');
+  assert.match(line, /duplicateRemoteKeys/, 'isConsistent 必须把同键冲突算作不一致');
+  assert.match(html, /reconcile-keys--dup/, '明细必须展示同键冲突');
+  assert.match(html, /这些编码在飞书有多条记录/, '必须给出可操作的处置指引');
+});

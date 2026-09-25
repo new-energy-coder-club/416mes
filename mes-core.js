@@ -1601,6 +1601,11 @@
 
     var mismatches = [];
     var compared = 0;
+    /* v3.13.6（发现 I）：首错会把其后每一行都带偏（run 是累加的）。
+       100 条 mismatch 可能只是 1 处坏账。给每个物料的**首个** mismatch 打上 cascadeOfSelf，
+       汇总时据此提示「实际坏点数可能远少于 mismatch 条数」，避免人工逐条白查。 */
+    var firstMismatchByMat = Object.create(null);
+    var cascadeCount = 0;
     Object.keys(byMat).forEach(function (code) {
       /* 有快照时，该物料的起始余额直接取快照值（它就是截止 cp.seq 的结存）；
          快照里没有这个物料（说明它的流水都在快照之后）→ 退回「首条的 余量−变动」，
@@ -1612,9 +1617,13 @@
         run += t.delta;
         compared++;
         if (Math.abs(t.balance - run) > EPS) {
+          var isFirstForMat = !firstMismatchByMat[code];
+          if (isFirstForMat) firstMismatchByMat[code] = true;
+          else cascadeCount++;
           mismatches.push({
             seq: t.seq === null || t.seq === undefined ? '旧' : t.seq,
-            matCode: code, type: t.type, expected: round6(run), actual: t.balance, time: t.time
+            matCode: code, type: t.type, expected: round6(run), actual: t.balance, time: t.time,
+            firstForMaterial: isFirstForMat
           });
         }
       });
@@ -1630,6 +1639,13 @@
       transactions: ord.length,
       compared: compared,
       mismatches: mismatches,
+      // 首错之后的 deviation 是累加传导，不是独立坏点
+      rootCauseCandidates: mismatches.filter(function (m) { return m.firstForMaterial; }).length,
+      cascadedMismatches: cascadeCount,
+      mismatchNote: cascadeCount > 0
+        ? '注意：其中 ' + cascadeCount + ' 条是首错之后的连带偏差（同一物料余额累加传导），实际坏点可能只有 ' +
+          mismatches.filter(function (m) { return m.firstForMaterial; }).length + ' 处——建议先看每个物料的第 1 条'
+        : '',
       coverage: coverage,
       fromCheckpoint: useCp ? Number(useCp.seq) : null,   // 从哪条之后开始算（null=全量）
       // 跳过的条数 = 快照覆盖的前缀条数（不是「总数 − 剩余数」，那样在快照覆盖到末尾时会算成 0）
