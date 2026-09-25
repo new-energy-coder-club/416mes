@@ -180,3 +180,26 @@ test('T19-6 批量坏清单（items 缺 itemCode）：同样人话兜底', async
   const ids = await s.outboxIds();
   assert.ok(ids.includes('op-bb'), '坏批量卡保留');
 });
+
+/* ---------- 发现 R（v3.13.13）：同一命令的提交/查询必须进程内串行 ---------- */
+
+test('发现 R：executeCommand 以 method+id 为键复用 in-flight Promise（连点不产生重复请求）', () => {
+  const src = fs.readFileSync('/srv/416mes/lib/item-ui.js', 'utf8');
+  assert.match(src, /const _execInFlight = Object\.create\(null\);/, '必须有 in-flight 表');
+  assert.match(src, /const inFlightKey = method \+ ':' \+ String\(\(c && c\.id\) \|\| ''\);/, '键必须是 method+命令id');
+  assert.match(src, /if \(_execInFlight\[inFlightKey\]\) return _execInFlight\[inFlightKey\];/, '重复调用必须直接复用同一个 Promise');
+  assert.match(src, /\.finally\(\(\) => \{ delete _execInFlight\[inFlightKey\]; \}\)/, '结束后必须清键（否则后续重试被永久挡住）');
+  // 原函数体必须被保留为 _execCommandInner，而不是被替换掉
+  assert.match(src, /async function _execCommandInner\(method,c,request\)\{/, '原逻辑必须搬到 _execCommandInner');
+  assert.match(src, /let result;/, '回执处理逻辑保持原样');
+});
+
+test('发现 R：待处理卡动作按钮在飞行中禁用，结束后恢复', () => {
+  const src = fs.readFileSync('/srv/416mes/lib/item-ui.js', 'utf8');
+  assert.match(src, /const own=\[\.\.\.section\.querySelectorAll\('button'\)\];\s*own\.forEach\(b=>\{b\.disabled=true;\}\);/,
+    '执行前必须禁用本卡所有按钮');
+  assert.match(src, /finally\{ own\.forEach\(b=>\{b\.disabled=false;\}\);/,
+    '结束后必须恢复（不能被永久禁用，否则用户只能刷新）');
+  // 恢复后还要刷新待处理区（否则卡面状态不更新）
+  assert.ok(src.includes("if(typeof pending==='function'){try{await pending();}catch(_){ }"), '恢复后必须刷新待处理区');
+});
