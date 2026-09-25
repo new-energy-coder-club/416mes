@@ -169,3 +169,56 @@ test('N3 物品化工单的冲销路径不受影响（回归 v3.3.1 的三重守
     '未执行仍不得冲（应走取消）');
   assert.ok(/buildItemReverseCommands/.test(m), '物品化单仍走 buildItemReverseCommands 计划');
 });
+
+/* ===================== TASK-11 阶段 4：工单建议项 ===================== */
+
+test('S1 详情页有「剩余清单」只读摘要（现场最需要的「还差哪几件」）', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  assert.ok(/let remainList = '';/.test(html), '必须有 remainList 变量（TASK-11 改为独立变量，不往 innerHTML 的 + 链里塞 IIFE）');
+  assert.ok(/剩余清单（还差 ' \+ remain\.length \+ ' 项）/.test(html),
+    '必须有剩余清单区块');
+  assert.ok(/if \(remain\.length\) \{/.test(html),
+    '全部完成时不渲染（不制造空块噪音）');
+  /* 只读：剩余清单区块内不得出现 button / input。
+     只取 remainList 赋值那一段（不要切到整个 innerHTML 链，那里本就有按钮）。 */
+  const i = html.indexOf('let remainList');
+  assert.ok(i > 0, '必须能定位 remainList');
+  /* 只切到 remainList 赋值结束（下一个马上出现的 `  }` 否则剩余都不看） */
+  const blkEnd = html.indexOf('\n  }\n', i);
+  const end = blkEnd > 0 ? blkEnd : i + 1400;
+  const seg = html.slice(i, end);
+  assert.ok(seg.length > 50, '必须能切出 remainList 源码段');
+  assert.ok(!/<button|<input/.test(seg), '剩余清单必须是只读的（无按钮/输入框）');
+});
+
+test('S1b 剩余清单覆盖两种形态：物品化按件、旧 MAT 按物料', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const m = html.match(/const remain = \[\];([\s\S]{0,900}?)if \(remain\.length\) \{/);
+  assert.ok(m, '必须能取到 remain 计算块');
+  const src = m[1];
+  assert.ok(/execSet\.has\(c\)/.test(src), '物品化单必须按 execSet 判未扫');
+  assert.ok(/it\.remaining > 0/.test(src), '旧 MAT 单必须按 remaining > 0 判剩余');
+});
+
+test('S2 出库批量不再传 source.loc（假锚点），入库仍传 target.loc', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const m = html.match(/const anchorLoc = \(WIP_EXEC\.target && WIP_EXEC\.target\.loc\);\n  if \(inbound && !anchorLoc\)[\s\S]{0,700}?kind: 'issueBatch'[\s\S]{0,200}?source: \{\}/);
+  assert.ok(m, '出库分支必须 source: {}（不再传假锚点）');
+  assert.ok(/kind: 'receiveBatch', target: \{ loc: anchorLoc \}/.test(html),
+    '入库必须保留 target.loc（东西要放到某个架子上）');
+});
+
+test('S2b 出库提交不再从 batch[0].source 推导 anchorLoc', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  assert.ok(!/const anchorLoc = inbound \? \(WIP_EXEC\.target && WIP_EXEC\.target\.loc\) : \(batch\[0\]\.source && batch\[0\]\.source\.loc\)/.test(html),
+    '不得再从首件 source 推导锚点（该值已不参与任何判定）');
+});
+
+test('S3 切单必须清空 WIP_EXEC.batch（防 A 单的件被提交进 B 单）', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const m = html.match(/if \(!closed && WIP_EXEC\.code !== w\.code\) \{[\s\S]{0,700}?\n  \}/);
+  assert.ok(m, '必须能取到切单清理块');
+  assert.ok(/WIP_EXEC\.batch = \[\];/.test(m[0]), '切单必须清空 batch');
+  assert.ok(/WIP_EXEC\.target = null;/.test(m[0]), '原有 target 清理保留');
+  assert.ok(/WIP_EXEC\.hint = null;/.test(m[0]), '原有 hint 清理保留');
+});

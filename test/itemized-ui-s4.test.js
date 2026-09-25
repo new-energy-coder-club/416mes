@@ -39,7 +39,10 @@ test('S4 逐件扫码（批量版）：扫码入批 → 提交本批 → 一条 
   await context.wipExecSubmitBatch();          // 提交本批
   assert.equal(calls.enqueue.length, 1, '整批一条命令');
   assert.equal(calls.enqueue[0].kind, 'issueBatch', 'LL 出库 → issueBatch');
-  assert.deepEqual(j(calls.enqueue[0].source), { loc: 'L-1' }, '锚点库位');
+  /* TASK-11 S2：出库不再传“假锚点库位”——服务端已把 issueBatch 的 source.loc
+     降级为可选兼容字段、逐件由 containerCode 反查（lib/unique-items.js:204-206），
+     再传一个 source:{loc} 只会让用户误以为“本批有库位约束”。入库分支保留（:148 的 target）。 */
+  assert.deepEqual(j(calls.enqueue[0].source), {}, '出库不带 source.loc（虚锚点已去掉）');
   assert.equal(calls.enqueue[0].items.length, 2);
   assert.deepEqual(j(calls.enqueue[0].items[0]), { itemCode: 'IT-1', containerCode: 'CT-1', expectedItemVersion: 1, expectedContainerVersion: 1 }, '每件带现状派生的双版本');
   assert.deepEqual(j(w.execItems), ['IT-1', 'IT-2'], 'APPLIED 回执展开记进度');
