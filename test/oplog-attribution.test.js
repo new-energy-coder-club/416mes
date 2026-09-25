@@ -68,10 +68,19 @@ test('A7 中文操作人必须 percent-encode 后才进 header（否则 fetch �
 
 /* ============ 二、device attribution ============ */
 
-test('A5 enqueue 总闸补 device（服务端一直在读 frozen.device）', () => {
-  assert.match(PERSIST, /if \(frozen && !frozen\.device\)/, 'enqueue 必须补 device');
-  assert.match(PERSIST, /st\.deviceId/, 'device 来源应为 state.deviceId');
-  assert.match(OP, /device: String\(frozen\.device \|\| ''\)/, '服务端必须仍从 frozen.device 读（通路不变）');
+/* ⚠️ v3.13.1 有意变更（BUG-11/12 修复）：
+   v3.12.0 曾在 enqueue() 里往 request 副本补 device —— 结果「落库那份有 device、
+   提交/回执那份没有」，item-persistence.js:142 的 canonical 一致性校验
+   直接判 RESULT_REQUEST_MISMATCH → **工单执行成功却不记账**（BUG-10/12）。
+   现改为与 operator 同思路：**走 header**，不进 request 主体。
+   本测试钉死新契约，防止回流。 */
+test('A5 device 走 header（不进 request）—— BUG-11/12 修复后的契约', () => {
+  assert.match(CLIENT, /X-416mes-Device/, '客户端必须发 X-416mes-Device header');
+  assert.match(OP, /function declaredDevice\(req\)/, '服务端必须有 declaredDevice（从 header 取）');
+  assert.match(OP, /declaredDevice\(headerSource\)/, '写 operation 时必须用 header 取到的 device');
+  /* 关键：不得再往 request 里补 device（会破坏回执一致性校验） */
+  assert.ok(!/frozen\.device\s*=/.test(PERSIST), 'enqueue 不得再向 request 副本注入 device');
+  assert.ok(!/if \(frozen && !frozen\.device\)/.test(PERSIST), '旧的 device 补丁必须已移除');
 });
 
 test('A6 device 不进域层判定（补它是安全的）', () => {

@@ -324,6 +324,12 @@ test('S5 铁律：物品化执行全程不碰 applyStockChange / state.transacti
   const o = Core.createOrder(st, { type: 'LL', code: 'LL-1', items: [{ itemCodes: ['IT-1', 'IT-2'] }] }).order;
   const built = Core.buildItemExecCommands(st, o, ['IT-1', 'IT-2'], {});
   Core.applyItemExecResult(st, o, built.ops.map(x => ({ ...x, phase: 'APPLIED' })), { now: T0 });
+  /* TASK-17：物品状态由服务端落账（issue APPLIED → out），applyItemExecResult 不模拟该步，
+     冲销计划按物品现状判定——现场须先补上服务端落账结果 */
+  st.items.find(x => x.code === 'IT-1').status = 'out';
+  st.items.find(x => x.code === 'IT-1').container = '';
+  st.items.find(x => x.code === 'IT-2').status = 'out';
+  st.items.find(x => x.code === 'IT-2').container = '';
   const rev = Core.buildItemReverseCommands(st, o, {});
   Core.applyItemReverseResult(st, o, rev.commands.map(c => ({ ...c, phase: 'APPLIED' })), { now: T1 });
   assert.equal(st.transactions.length, 0, '物品化执行+冲销不得产生任何库存流水');
@@ -357,6 +363,11 @@ test('S6 冲销计划：LL/JH→receive 回原位；BH/TL→issue 由留痕位�
   const ll = Core.createOrder(st, { type: 'LL', code: 'LL-1', items: [{ itemCodes: ['IT-1', 'IT-2'] }] }).order;
   const b1 = Core.buildItemExecCommands(st, ll, ['IT-1', 'IT-2'], {});
   Core.applyItemExecResult(st, ll, b1.ops.map(x => ({ ...x, phase: 'APPLIED' })), { now: T0 });
+  /* TASK-17：补服务端落账（issue APPLIED → out），否则现状已是 in_stock 会被判「已回库」跳过 */
+  st.items.find(x => x.code === 'IT-1').status = 'out';
+  st.items.find(x => x.code === 'IT-1').container = '';
+  st.items.find(x => x.code === 'IT-2').status = 'out';
+  st.items.find(x => x.code === 'IT-2').container = '';
   const revL = Core.buildItemReverseCommands(st, ll, {});
   assert.equal(revL.ok, true, JSON.stringify(revL.errors));
   assert.deepEqual(revL.commands.map(c => [c.kind, c.itemCode, c.target]),
@@ -368,6 +379,9 @@ test('S6 冲销计划：LL/JH→receive 回原位；BH/TL→issue 由留痕位�
   const bh = Core.createOrder(st, { type: 'BH', code: 'BH-1', items: [{ itemCodes: ['IT-3'] }] }).order;
   const b2 = Core.buildItemExecCommands(st, bh, ['IT-3'], { target: { loc: 'L-2', container: 'CT-2' } });
   Core.applyItemExecResult(st, bh, [{ ...b2.ops[0], phase: 'APPLIED' }], { now: T0 });
+  /* TASK-17：补服务端落账（receive APPLIED → in_stock@CT-2） */
+  st.items.find(x => x.code === 'IT-3').status = 'in_stock';
+  st.items.find(x => x.code === 'IT-3').container = 'CT-2';
   const revB = Core.buildItemReverseCommands(st, bh, {});
   assert.equal(revB.ok, true);
   assert.deepEqual(revB.commands.map(c => [c.kind, c.itemCode, c.source]),
@@ -386,6 +400,11 @@ test('S6 冲销回执：全部 APPLIED 才关单留痕；缺回执不关单', ()
   const o = Core.createOrder(st, { type: 'LL', code: 'LL-1', items: [{ itemCodes: ['IT-1', 'IT-2'] }] }).order;
   const built = Core.buildItemExecCommands(st, o, ['IT-1', 'IT-2'], {});
   Core.applyItemExecResult(st, o, built.ops.map(x => ({ ...x, phase: 'APPLIED' })), { now: T0 });
+  /* TASK-17：补服务端落账（issue APPLIED → out） */
+  st.items.find(x => x.code === 'IT-1').status = 'out';
+  st.items.find(x => x.code === 'IT-1').container = '';
+  st.items.find(x => x.code === 'IT-2').status = 'out';
+  st.items.find(x => x.code === 'IT-2').container = '';
   const rev = Core.buildItemReverseCommands(st, o, {});
 
   // 只回一件 → 不关单
