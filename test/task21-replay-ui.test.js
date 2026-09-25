@@ -26,18 +26,24 @@ test('BUG-19：首错优先排序，且同组内 seq 按数字比（#10 不得�
     { seq: 10, matCode: 'GJ', firstForMaterial: false },
     { seq: 4,  matCode: 'GJ', firstForMaterial: false }
   ];
-  const ranked = bad.slice().sort((x, y) => {
-    const fx = x.firstForMaterial ? 0 : 1, fy = y.firstForMaterial ? 0 : 1;
-    if (fx !== fy) return fx - fy;
-    const nx = Number(x.seq), ny = Number(y.seq);
-    if (Number.isFinite(nx) && Number.isFinite(ny)) return nx - ny;
-    return String(x.seq).localeCompare(String(y.seq));
-  });
-  assert.deepEqual(ranked.map(b => b.seq), [2, 7, 3, 4, 10], '首错靠前 + 同组 seq 数字升序');
-  // 源码里不得再用字符串比 seq
-  const sortBlock = (HTML.match(/var ranked = bad\.slice\(\)\.sort\([\s\S]*?\}\);\s*\n\s*var shown/) || [''])[0];
-  assert.ok(sortBlock.length > 0, '必须能取到排序块');
-  assert.match(sortBlock, /Number\(x\.seq\)/, '必须转数字比较');
+  // v3.13.14：直接调用产品代码的真函数（mes-core.rankMismatches），
+  // 不再复制一份比较器“自证”——那份副本与产品代码各写一份，
+  // 产品改了排序而副本没改时，测试依然会绿。
+  const Core = require('../mes-core.js');
+  assert.equal(typeof Core.rankMismatches, 'function', 'mes-core 必须导出 rankMismatches');
+  const ranked = Core.rankMismatches(bad);
+  assert.deepEqual(ranked.map(b => b.seq), [2, 7, 3, 4, 10], '首错靠前 + 同组 seq 数字升序（#10 不得排到 #4 前）');
+  // 纯函数：不得修改入参顺序
+  assert.deepEqual(bad.map(b => b.seq), [3, 2, 7, 10, 4], 'rankMismatches 必须是纯函数（slice 后排序）');
+  // 旧数据 seq 可能是字符串'旧' → 退化字符串比，但首错优先仍成立
+  const legacy = Core.rankMismatches([{ seq: '旧', firstForMaterial: false }, { seq: '旧', firstForMaterial: true }]);
+  assert.deepEqual(legacy.map(b => b.firstForMaterial), [true, false], '非数字 seq 时首错优先仍成立');
+  // null/非法入参不得抛错
+  assert.deepEqual(Core.rankMismatches(null), []);
+  assert.deepEqual(Core.rankMismatches('x'), []);
+  // index.html 必须真的调用共享函数，而不是再自带一份比较器
+  assert.match(HTML, /var ranked = CORE\.rankMismatches\(bad\);/, 'index.html 必须调用 CORE.rankMismatches（单一来源）');
+  assert.ok(!/var ranked = bad\.slice\(\)\.sort/.test(HTML), 'index.html 不得再自带排序副本');
 });
 
 test('BUG-19：只有 1 处坏点时不得出现「连带」提示（不制造噪音）', () => {

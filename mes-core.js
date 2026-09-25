@@ -1653,6 +1653,25 @@
     };
   }
 
+  /** v3.13.14：回放 mismatch 的展示排序 —— 首错优先，同组内 seq 升序。
+   *  为什么首错必须在前：余额校验是累加的，首错会把其后每一行都带偏；
+   *     M 条 mismatch 可能只是 1 处坏账，人工核对必须先看每个物料的第 1 条。
+   *  为什么 seq 必须数字比：字符串比会让 '#10' < '#9'，把 10 排到 9 前面。
+   *  纯函数：不改入参（slice 后排序），便于单测。
+   *  单一来源：index.html 的回放展示改调它，不再自带一份比较器副本
+   *  （此前副本与产品代码各写一份，产品改了排序而副本没改时测试仍会绿）。 */
+  function rankMismatches(list) {
+    var arr = Array.isArray(list) ? list.slice() : [];
+    arr.sort(function (x, y) {
+      var fx = (x && x.firstForMaterial) ? 0 : 1, fy = (y && y.firstForMaterial) ? 0 : 1;
+      if (fx !== fy) return fx - fy;
+      var nx = Number(x && x.seq), ny = Number(y && y.seq);
+      if (Number.isFinite(nx) && Number.isFinite(ny)) return nx - ny;
+      return String(x && x.seq).localeCompare(String(y && y.seq));
+    });
+    return arr;
+  }
+
   /* ================= 扫码历史（结构化，供 30S 定位回查） ================= */
 
   /**
@@ -2296,6 +2315,7 @@
     mergeXianyu: mergeXianyu,
     mergeRemote: mergeRemote,
     MERGE_TABLES: MERGE_TABLES,
-    round6: round6
+    round6: round6,
+    rankMismatches: rankMismatches,
   };
 });

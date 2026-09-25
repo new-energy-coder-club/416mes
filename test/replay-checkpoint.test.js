@@ -104,3 +104,60 @@ test('checkpoint【P7】快照里没有的物料仍按「自身期初」起算�
   assert.deepEqual(inc.mismatches, full.mismatches, 'N 的期初应由它自己的首条反推，结论必须一致');
   assert.equal(inc.ok, full.ok);
 });
+
+/* ================= v3.13.14：为「第三道前缀指纹 Σbalance」补测试锁 =================
+   背景：DSH 在大数据量排查中手工实测发现——CHECKPOINT.latestUsable 只校验
+   prefixCount + deltaSum，第三道 Σbalance 指纹实际在 mes-core.js:1590，
+   且实测确认它能拦住「只改 balance 不改 delta」的篡改。
+   但该行为此前**零测试覆盖**（grep balanceSum 在 checkpoint 用例中 0 命中），
+   一旦有人在 mes-core 重构时删掉那一段，没有任何测试会报警。 */
+
+test('v3.13.14：只改 balance（delta 不变）也必须否决 checkpoint 并退回全量', () => {
+  const clean = txns(2000);
+  const cps = CP.build(clean).checkpoints;
+  assert.ok(cps.length >= 1, '先造出 checkpoint（2000 条 → seq 1000/2000）');
+  const cp = cps[cps.length - 1];
+  // 篡改某条 balance，保持 delta 与条数都不变
+  const tampered = JSON.parse(JSON.stringify(clean));
+  tampered[500].balance = 12345;
+  // latestUsable 层：只按 prefixCount+deltaSum 判定，**仍会选中**（这是设计，不是缺陷）
+  const picked = CP.latestUsable(cps, tampered);
+  assert.equal(picked && picked.seq, cp.seq, 'latestUsable 层仍选中（两道指纹）');
+  // mes-core 层：第三道 Σbalance 指纹必须否决它，退回全量比对
+  const rep = Core.replayAudit({ transactions: tampered, materials: [] }, { fromCheckpoint: cp, assumeOrdered: true });
+  assert.equal(rep.fromCheckpoint, null, '必须否决被篡改前缀的 checkpoint');
+  assert.equal(rep.skipped, 0, '不得跳过任何前缀');
+  assert.equal(rep.compared, 2000, '必须全量比对');
+  assert.equal(rep.ok, false, '必须检出 mismatch');
+  assert.equal(rep.status, 'mismatch');
+});
+
+test('v3.13.14：干净数据下 checkpoint 正常生效（不被第三道指纹误伤）', () => {
+  const clean = txns(2000);
+  const cp = CP.build(clean).checkpoints.slice(-1)[0];
+  const rep = Core.replayAudit({ transactions: clean, materials: [] }, { fromCheckpoint: cp, assumeOrdered: true });
+  assert.equal(rep.ok, true, '干净数据必须通过');
+  assert.equal(rep.fromCheckpoint, cp.seq, '必须采用 checkpoint');
+  assert.equal(rep.skipped, 2000, '前缀必须被跳过（这才是 checkpoint 的性能意义）');
+  assert.equal(rep.compared, 0);
+});
+
+test('v3.13.14：改 delta 同样被否决（第三道指纹之外的另两道路径仍有效）', () => {
+  const clean = txns(2000);
+  const cp = CP.build(clean).checkpoints.slice(-1)[0];
+  const tampered = JSON.parse(JSON.stringify(clean));
+  tampered[500].delta = 99;
+  const picked = CP.latestUsable(CP.build(clean).checkpoints, tampered);
+  assert.equal(picked, null, '改 delta 会破坏 deltaSum → latestUsable 层就已拒绝');
+  const rep = Core.replayAudit({ transactions: tampered, materials: [] }, { fromCheckpoint: cp, assumeOrdered: true });
+  assert.equal(rep.fromCheckpoint, null);
+  assert.equal(rep.ok, false);
+});
+
+test('v3.13.14：mes-core 必须实际存在 Σbalance 校验代码（防重构误删）', () => {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'mes-core.js'), 'utf8');
+  assert.match(src, /cp\.balanceSum != null/, 'mes-core 必须校验 balanceSum（第三道指纹）');
+  assert.match(src, /prefix\[q2\]\.balance/, '必须逐条累加前缀 balance');
+  /* 注释里写明了这道指纹的由来（2.52.1 k3 审计 MAT-2），一并 assert 防止注释与代码被一起删掉 */
+  assert.match(src, /MAT-2/, '必须保留 MAT-2 案底注释');
+});
