@@ -46,8 +46,24 @@ test('A3 operator 绝不能进入 request 主体（否则破坏 opId 幂等重�
 });
 
 test('A4 声明身份有字符白名单（防 CR/LF 注入日志）', () => {
-  assert.match(OP, /\/\^\[\\x20-\\x7e\\u4e00-\\u9fa5\]\+\$\/\.test\(s\)/, '必须有可打印字符白名单校验');
+  assert.match(OP, /decodeURIComponent\(v\)/, '必须先 percent-decode 还原客户端传来的身份');
+  assert.match(OP, /replace\(\/\[\\r\\n\\t\]\/g, ''\)/, '必须剔除 CR/LF/TAB 控制字符');
   assert.match(OP, /OPERATOR_MAX = 80/, '必须有长度上限');
+});
+
+/* ⚠️ v3.12.0 实测抳出的真 bug（ego-browser 全量测试发现）：
+   HTTP header 只能是 ByteString（码点 ≤ 255），中文姓名直接写进 header 会让整个 fetch 抛
+     "String contains non ISO-8859-1 code point"
+   而该 header 是每条命令都带的 → **中文名操作人一步都走不下去**。
+   修法：客户端 encodeURIComponent 后再发，服务端 decodeURIComponent 还原。 */
+test('A7 中文操作人必须 percent-encode 后才进 header（否则 fetch 直接抛错）', () => {
+  assert.match(CLIENT, /encodeURIComponent\(safe\)/, '客户端必须对身份做 percent-encoding');
+  assert.ok(!/return safe;\s*\}/.test(CLIENT), '客户端不得把原始中文直接当 header 值返回');
+  /* 回归：中文经编码后必须能构造 header，且服务端能还原 */
+  const nm = '卢王淳';
+  const enc = encodeURIComponent(nm);
+  assert.doesNotThrow(() => new Headers({ 'X-416mes-Operator': enc }), 'percent-encoded 身份必须能构造 header');
+  assert.equal(decodeURIComponent(enc), nm, '服务端必须能还原回原文');
 });
 
 /* ============ 二、device attribution ============ */
