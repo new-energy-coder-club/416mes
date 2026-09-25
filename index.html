@@ -4467,7 +4467,11 @@ async function persistStateToIdb() {
     /* checkpoint 只在流水条数真的变了才重建。
        旧实现挂在每次 save 上，而 save 被日志、改名、切页签等各种操作触发 ——
        等于每次状态变更都在**主线程**做一次全量账本重放，几万条时会明显卡。
-       （另注：这批 checkpoint 目前只写不读，方案要求 replayAudit 消费它们，尚未接线。） */
+       ⚠️ 注（v3.13.11 运行时校正）：此前注释写「目前只写不读，尚未接线」——**已过期，请勿再捧应。
+       实际链路：replayAudit() → replayAuditAsync() → fsLoadUsableCheckpoint() →
+       CHECKPOINT.latestUsable() → MesCore.replayAudit({fromCheckpoint}) → mes-core.js:1576 消费，
+       并在回放结果里反馈「已用 #N 之后的快照起算，跳过前 M 条」。
+       生产 baselines 为 0 是因 CHECKPOINT_EVERY=1000 而当前流水远小于此，属正常。 */
     const txnCount = (snapshot.transactions || []).length;
     if (txnCount !== _cpBuiltFor) {
       const cp = CHECKPOINT.build(snapshot.transactions || []);
