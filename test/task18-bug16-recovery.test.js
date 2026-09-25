@@ -119,7 +119,8 @@ test('BUG-16：建档+退役全真链路走通，界面无裸露错误', async (
   d.getElementById('itmRetireReason').value = 'TASK18 验证退役';
   d.getElementById('itmRetire').click();
   await tick(15);
-  assert.match(d.getElementById('itmStatus').textContent, /退役申请已保存/, '退役入队反馈');
+  /* TASK-20（BUG-17）：退役提示从作业页 itmStatus 迁到注册页 itmRegisterResult（本页可见） */
+  assert.match(d.getElementById('itmRegisterResult').textContent, /退役申请已保存/, '退役入队反馈落在本页容器');
   assert.doesNotMatch(d.getElementById('itmStatus').textContent, /forEach|Cannot read/, '退役不得出现裸露 JS 错误');
   // 待处理区执行退役卡
   await s.page.pending();
