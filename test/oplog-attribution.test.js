@@ -148,3 +148,38 @@ test('P7 筛选维度齐全：类型 / 阶段 / 时间区间 / 关键词 / 操�
 test('P8 状态区计数已注册（不再出现空字符串）', () => {
   assert.match(HTML, /oplog: '操作记录 ' \+ \(\(state\.itemOperations \|\| \[\]\)\.length\)/, 'counts 必须有 oplog 键');
 });
+
+/* ================= 发现 Q（v3.13.12）：自由文本字段清洗 ================= */
+
+test('发现 Q：name/spec 等自由文本剔除控制符并限长 500（不拒绝、不清洗合法字符）', () => {
+  const U = require('../lib/unique-items.js');
+  const reg = name => U.plan({ locations: [], containers: [], items: [] },
+    { schemaVersion: 1, opId: 'q-' + Math.random().toString(36).slice(2, 8), kind: 'registerItem',
+      entity: { category: 'QT', code: 'WP-QT-' + Math.random().toString(36).slice(2, 6), name } },
+    { id: 't', roles: ['admin'] });
+
+  // 1) 控制符剔除
+  const dirty = reg('a\u0000b\u001fc').after.items[0].name;
+  assert.equal(dirty, 'abc', 'NUL/控制符必须被剔除');
+  assert.ok(!/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(dirty), '不得残留控制符');
+  // 2) 超长截断
+  const long = reg('A'.repeat(900)).after.items[0].name;
+  assert.equal(long.length, 500, '超过 500 必须截断');
+  // 3) 合法字符绝不被误伤
+  const keep = [['中文', '遥控器'], ['emoji', '😀😀😀'], ['引号+尖括号', 'a"b<c>'], ['换行', 'a\nb'], ['内部空格', 'a b c'], ['499 字符', 'A'.repeat(499)]];
+  for (const [label, name] of keep) {
+    assert.equal(reg(name).after.items[0].name, name, label + ' 必须原样保留');
+  }
+});
+
+test('发现 Q：受控与标识字段绝不被 text() 清洗（code/version/status 语义优先）', () => {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'lib', 'unique-items.js'), 'utf8');
+  assert.match(src, /const FREE_TEXT_FIELDS = \{/, '必须有自由文本清单');
+  // 清单里绝不能出现受控字段
+  const m = src.match(/const FREE_TEXT_FIELDS = \{[\s\S]*?\};/);
+  for (const bad of ["'code'", "'version'", "'status'", "'lastOpId'", "'container'", "'loc'"]) {
+    assert.ok(!m[0].includes(bad), 'FREE_TEXT_FIELDS 不得包含受控/标识字段 ' + bad);
+  }
+  // 且 code 仍然严格校验（160 + 无首尾空白），不被 text() 软化
+  assert.match(src, /value\.length > 160\) fail\('INVALID_CODE'\)/, 'code 的长度校验必须保持严格');
+});
