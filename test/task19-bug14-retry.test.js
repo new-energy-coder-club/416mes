@@ -228,3 +228,24 @@ test('发现 Z：wipExecSubmitBatch 同样只认 WIP_EXEC.code，需与详情单
   const seg = html.slice(html.indexOf('async function wipExecSubmitBatch()'), html.indexOf('async function wipExecSubmitBatch()') + 400);
   assert.match(seg, /state\.workorders\.find\(x => x\.code === WIP_EXEC\.code\)/, '批量提交按会话单取单（守卫在扫码入口已拦）');
 });
+
+/* ---------- 发现 AA（v3.13.17）：执行条渲染后焦点必须交给执行输入框 ---------- */
+
+test('发现 AA：scanWipItemized 渲染执行条后必须把焦点交给 wipExecItemInput', () => {
+  const html = fs.readFileSync('/srv/416mes/index.html', 'utf8');
+  assert.match(html, /v3\.13\.17（发现 AA）：执行条渲染完必须把焦点交给执行输入框/, '必须有焦点交接说明');
+  // 必须在 scanWipItemized 函数体内（而不是别处）
+  const fn = (html.match(/function scanWipItemized\(w, box\) \{[\s\S]*?\n\}/) || [''])[0];
+  assert.ok(fn.length > 100, '必须能取到 scanWipItemized');
+  assert.match(fn, /wipExecItemInput/, '函数体内必须引用执行输入框');
+  assert.match(fn, /inp\.focus\(\); inp\.select\(\);/, '必须 focus + select');
+  // 焦点交接必须在 renderStatusBar 之后（即渲染完成后），不能早于渲染
+  const posRender = fn.indexOf('renderStatusBar();');
+  const posFocus = fn.indexOf('focusExecInput');   // 量焦点交接 IIFE 的位置，不是模板串里第一次出现的 id
+  assert.ok(posRender > 0 && posFocus > posRender, '焦点交接必须晚于渲染完成（实测 render=' + posRender + ' focus=' + posFocus + ')');
+});
+
+test('发现 AA：点「去扫码执行」仍保留 WIP: 预填（不回归原有用意）', () => {
+  const html = fs.readFileSync('/srv/416mes/index.html', 'utf8');
+  assert.match(html, /si\.value = 'WIP:' \+ w\.code; si\.focus\(\); si\.select\(\);/, '扫码输入框预填 WIP: 的行为必须保留（带上工单上下文）');
+});
