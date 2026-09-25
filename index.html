@@ -3053,7 +3053,7 @@ body:has(#tab-item-work.on) .itm-batch-sticky.batch-on{display:flex}
       <!-- E1 建档改版（定稿§三.3）：物品建档主流程 = 选分类 → 名称必填 → 在线提交服务端发号（不带码）
            → APPLIED 展示物品码 + 8 位短码 + 二维码预览 + 「去入库」。手动码降级为高级选项（§三.2 P3：
            不规范形服务端拒收，且无短链二维码）。分类下拉与 MAT_CATS / lib/item-link.js CATS 顺序一致（P8 测试锁）。 -->
-      <details id="itmRegisterDetails" open><summary>建档 · 库位 / 容器 / 物品</summary><div class="itm-detail-body itm-form-grid"><label class="itm-control" for="itmRegisterType">建档类型<select class="field" id="itmRegisterType"><option value="registerItem">物品</option><option value="registerLocation">库位</option><option value="registerContainer">容器</option></select></label><label class="itm-control" id="itmRegisterCatWrap" for="itmRegisterCat">物品分类（必选，决定物品码前缀 WP-分类-序号）<select class="field" id="itmRegisterCat"><option value="">请选择分类…</option><option value="JG">JG 机构件</option><option value="DJ">DJ 电机驱动</option><option value="DZ">DZ 电子件</option><option value="GZ">GZ 贵重件</option><option value="TS">TS 调试设备</option><option value="GJ">GJ 工具</option><option value="HC">HC 耗材</option><option value="QT">QT 其他</option></select></label><label class="itm-control" for="itmRegisterName">名称（必填）/ 说明<input class="field" id="itmRegisterName" placeholder="名称/说明"></label><label class="itm-control" id="itmRegisterSpecWrap" for="itmRegisterSpec">规格型号（可选）<input class="field" id="itmRegisterSpec" placeholder="如 100MHz 示波器"></label><details class="itm-advanced" id="itmRegisterAdvanced"><summary>高级：手动指定编码（留空由服务端按分类发号；不规范码没有短链二维码）</summary><label class="itm-control" for="itmRegisterCode">编码（扫到的实物码可直接沿用；须规范形如 WP-TS-001）<input class="field" id="itmRegisterCode" placeholder="留空自动发号"></label></details><button class="btn itm-btn-primary" id="itmRegister">生成物品码并申请建档</button><div id="itmRegisterResult" class="itm-register-result" aria-live="polite"></div><p class="hint">在线提交由服务端按分类发号并生成短码与二维码；离线先存本机。</p></div></details>
+      <details id="itmRegisterDetails" open><summary>建档 · 库位 / 容器 / 物品</summary><div class="itm-detail-body itm-form-grid"><label class="itm-control" for="itmRegisterType">建档类型<select class="field" id="itmRegisterType"><option value="registerItem">物品</option><option value="registerLocation">库位</option><option value="registerContainer">容器</option></select></label><label class="itm-control" id="itmRegisterCatWrap" for="itmRegisterCat">物品分类（必选，决定物品码前缀 WP-分类-序号）<select class="field" id="itmRegisterCat"><option value="">请选择分类…</option><option value="JG">JG 机构件</option><option value="DJ">DJ 电机驱动</option><option value="DZ">DZ 电子件</option><option value="GZ">GZ 贵重件</option><option value="TS">TS 调试设备</option><option value="GJ">GJ 工具</option><option value="HC">HC 耗材</option><option value="QT">QT 其他</option></select></label><label class="itm-control" for="itmRegisterName">名称（必填）/ 说明<input class="field" id="itmRegisterName" placeholder="名称/说明"></label><label class="itm-control" id="itmRegisterSpecWrap" for="itmRegisterSpec">规格型号（可选）<input class="field" id="itmRegisterSpec" placeholder="如 100MHz 示波器"></label><label class="itm-control" for="itmRegisterMaterial">关联物料码（可选）<input class="field" id="itmRegisterMaterial" list="matList" placeholder="填则把该物品挂到物料台账下"></label><details class="itm-advanced" id="itmRegisterAdvanced"><summary>高级：手动指定编码（留空由服务端按分类发号；不规范码没有短链二维码）</summary><label class="itm-control" for="itmRegisterCode">编码（扫到的实物码可直接沿用；须规范形如 WP-TS-001）<input class="field" id="itmRegisterCode" placeholder="留空自动发号"></label></details><button class="btn itm-btn-primary" id="itmRegister">生成物品码并申请建档</button><div id="itmRegisterResult" class="itm-register-result" aria-live="polite"></div><p class="hint">在线提交由服务端按分类发号并生成短码与二维码；离线先存本机。</p></div></details>
       <details><summary>核实启用 · 旧库位 / 容器</summary><div class="itm-detail-body"><p class="hint">先核实实物及归属，仅生成待提交命令，不直接启用。</p><label class="itm-control" for="itmAdminLoc">库位码<input class="field" id="itmAdminLoc" placeholder="填写库位原始编码"></label><label class="itm-control" for="itmAdminContainer">容器码（启用容器时填写）<input class="field" id="itmAdminContainer" placeholder="填写容器原始编码"></label><div class="itm-toolbar"><button class="btn" id="itmActivateLoc">核实启用库位</button><button class="btn" id="itmActivateContainer">核实启用容器</button></div></div></details>
       <details><summary>退役 · 不再使用的物品</summary><div class="itm-detail-body"><p class="hint">仅待入库或已出库物品可申请；在库物品不可直接退役。暂不支持停用库位。</p><label class="itm-control" for="itmRetireCode">物品码<input class="field" id="itmRetireCode" placeholder="待退役物品码"></label><label class="itm-control" for="itmRetireReason">退役原因<input class="field" id="itmRetireReason" placeholder="说明退役原因"></label><button class="btn" id="itmRetire">申请退役</button></div></details>
       <details><summary>导入命令 · 只读复核</summary><div id="itmRecoveryReview" class="itm-detail-body" aria-live="polite"></div></details>
@@ -3540,7 +3540,7 @@ body:has(#tab-item-work.on) .itm-batch-sticky.batch-on{display:flex}
           <option value="RW">RW 任务</option><option value="LL">LL 领料记录（不改库存）</option><option value="CG">CG 采购</option>
           <option value="WX">WX 维修</option><option value="HD">HD 活动</option><option value="QT">QT 其他</option>
         </select>
-        负责人 <input type="text" id="necOwner" list="memberList" style="width:90px">
+        负责人 <select class="field field--sm" id="necOwner" aria-label="负责人（来自成员名录）" style="width:120px"></select>
         优先级 <select id="necPriority"><option>中</option><option>高</option><option>低</option></select>
         截止 <input type="date" id="necDue">
       </div>
@@ -5490,6 +5490,21 @@ function refreshMemberDatalist() {
   let dl = document.getElementById('memberList');
   if (!dl) { dl = document.createElement('datalist'); dl.id = 'memberList'; document.body.appendChild(dl); }
   dl.innerHTML = state.members.filter(m => m.name).map(m => '<option value="' + esc(m.name) + '">' + esc(m.dept) + ' ' + esc(m.role) + '</option>').join('');
+  /* v3.12.0：NEC 负责人从自由文本改为**从成员名录选**（用户拍板「NEC 任务保留关联」）。
+     原实现是 <input list="memberList">，用户可随便打字——存进 owner 的是任意字符串，
+     与成员名录无法对齐（成员改名/删除后就对不上了）。
+     改成下拉后 owner 恒为成员名录里的姓名；值仍存「姓名」而非成员码，
+     与既有 NEC 数据（owner 存姓名）保持兼容，不做数据迁移。 */
+  const sel = document.getElementById('necOwner');
+  if (sel) {
+    const cur = sel.value;
+    const names = state.members.filter(m => m.name).map(m => m.name);
+    sel.innerHTML = '<option value="">未指派</option>' +
+      names.map(n => '<option value="' + esc(n) + '">' + esc(n) + '</option>').join('') +
+      /* 既有单的 owner 若已不在成员名录（成员被删/改名），保留一个选项以免编辑时丢值 */
+      (cur && !names.includes(cur) ? '<option value="' + esc(cur) + '">' + esc(cur) + '（已不在成员名录）</option>' : '');
+    sel.value = cur;
+  }
 }
 function renderMembers() {
   const tb = document.querySelector('#memberTable tbody');
