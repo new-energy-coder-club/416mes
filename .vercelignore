@@ -5,8 +5,6 @@ backups/
 *.config.json
 416MES_台账_*.xlsx
 nec-wip-export.json
-package.json
-package-lock.json
 *.ps1
 *.md
 *.pptx
@@ -16,3 +14,20 @@ nec-wip-import.json
 *-feishu.json
 .npmrc
 .npm-cache
+
+# ---- v3.13.5 部署体积治理 ----
+# typesetting/fonts/ 36.9MB，占 git 工作区 86%。只被排版工具的 @font-face 引用，
+# 而该工具所有字体选项都带 system-ui/-apple-system/Arial 回退链
+# （Auto-Typesetting tools1.5.html 的 enFontFamily option value 实测），
+# 缺失时仅回退系统字体、排版功能不受影响。此前每次部署都要传这 36MB，
+# 38.9MB 产物上传到一半 fetch failed（Vercel Actions 2026-09-25 失败根因）。
+typesetting/fonts/
+
+# 开发过程产物：git 未跟踪（Vercel 本就拿不到），显式排除以防万一
+.dev-lines/
+.ui-research/
+
+# 本地测试与文档：站点运行不需要
+test/
+test-logs/
+dev-docs/
