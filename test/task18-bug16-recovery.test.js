@@ -166,3 +166,28 @@ test('BUG-13：各作业类型的提交方向文案', async () => {
     if (s.page.scan.snapshot().rows.length === 0) s.page.scan.add('receive');
   }
 });
+
+/* ---------- 发现 W（v3.13.15）：SUBMIT_HINTS 必须覆盖全部作业类型 ----------
+   BUG-13 修复时把兜底从「出库」改成中性「提交」—— 兜底不再误导，但意味着
+   「新增 kind 却忘加映射」时会静默退化成无方向的「提交」。
+   现在 sequences 与 SUBMIT_HINTS 完全对齐，加这条锁防止未来新增 kind 时漏配。 */
+
+test('发现 W：SUBMIT_HINTS 必须覆盖 item-scan 里全部作业类型', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const ROOT = path.resolve(__dirname, '..');
+  const scan = require(path.join(ROOT, 'lib/item-scan.js'));
+  const src = fs.readFileSync(path.join(ROOT, 'lib/item-ui.js'), 'utf8');
+  const m = src.match(/const SUBMIT_HINTS=\{([^}]*)\}/);
+  assert.ok(m, '必须能取到 SUBMIT_HINTS 定义');
+  const hints = m[1].split(',').map(x => x.split(':')[0].trim()).filter(Boolean);
+  const kinds = Object.keys(scan.sequences);
+  assert.ok(kinds.length >= 6, '作业类型至少 6 种，实测 ' + kinds.length);
+  // 每个 kind 都必须有映射（含 receive/issue 这两个方向词最关键的）
+  const missing = kinds.filter(k => !hints.includes(k));
+  assert.deepEqual(missing, [], '以下作业类型没有方向文案，用户会看到中性的「提交」：' + missing.join(','));
+  // 兜底不得再退回「出库」（BUG-13 的病根：未知 kind 猜方向）
+  const fn = src.match(/function submitHint\(kind\)\{[^}]*\}/);
+  assert.ok(fn, '必须能取到 submitHint');
+  assert.doesNotMatch(fn[0], /\|\|'\u51fa\u5e93'/, '兜底不得是「出库」（未知 kind 猜方向会误导）');
+  assert.match(fn[0], /\|\|'\u63d0\u4ea4'/, '兜底必须是中性的「提交」');
+});

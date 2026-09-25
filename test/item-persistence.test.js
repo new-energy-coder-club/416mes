@@ -237,39 +237,42 @@ test('发现 E：device 只允许出现在 header，不进 request 也不进回�
 /* ================= 发现 F（TASK-21）：REPAIR_REQUIRED 附「受影响件清单」 ================= */
 
 test('发现 F：部分写入时按 before/after 精确算出受影响行，不误报未变行', () => {
-  // 复刻 item-operation.js 的 partialWriteDetail 逻辑做行为自证
   const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'lib', 'item-operation.js'), 'utf8');
-  assert.match(src, /function partialWriteDetail\(before, after\)/, '必须有 partialWriteDetail');
-  assert.match(src, /function withPartialDetail\(/, '必须有 withPartialDetail 包装器');
   // 三处 REPAIR_REQUIRED 出口都要带明细
   const sites = src.match(/withPartialDetail\(\{[^]*?phase: 'REPAIR_REQUIRED'/g) || [];
   assert.ok(sites.length >= 2, '至少 sweep 与 trial 回读两条 REPAIR_REQUIRED 路径要带明细，实测 ' + sites.length);
 
-  const canonical = v => JSON.stringify(v);
-  const ENTITY_LABEL = { items: '物品', containers: '容器', locations: '库位', materials: '物料' };
-  const keyOf = (t, r) => String((r && (r.code || r.itemCode || r.matCode || r.entityCode)) || '');
-  const detail = (before, after) => {
-    const out = [];
-    ['items', 'containers', 'locations', 'materials'].forEach(function (table) {
-      const b = (before && before[table]) || [], a = (after && after[table]) || [];
-      const bk = new Set(b.map(r => keyOf(table, r))), ak = new Set(a.map(r => keyOf(table, r)));
-      a.forEach(r => { const k = keyOf(table, r);
-        if (!bk.has(k)) out.push('新增 ' + (ENTITY_LABEL[table] || table) + ' ' + k);
-        else { const p = b.find(x => keyOf(table, x) === k); if (p && canonical(p) !== canonical(r)) out.push('变更 ' + (ENTITY_LABEL[table] || table) + ' ' + k); } });
-      b.forEach(r => { const k = keyOf(table, r); if (!ak.has(k)) out.push('移除 ' + (ENTITY_LABEL[table] || table) + ' ' + k); });
-    });
-    return out;
-  };
+  /* v3.13.15：直接调用产品代码的真函数，不再复刻一份逻辑"自证"——
+     此前测试里复制了同样的比较逻辑，产品改了算法而副本没改时测试依然绿。 */
+  const O = require('../lib/item-operation.js');
+  const svc = O.create({ repository: {}, coordinator: {}, enabled: false, mode: 'feishu-trial' });
+  assert.equal(typeof svc.partialWriteDetail, 'function', 'create() 必须暴露 partialWriteDetail');
+  assert.equal(typeof svc.withPartialDetail, 'function', 'create() 必须暴露 withPartialDetail');
+  const detail = svc.partialWriteDetail;
+
   // 批量第 2 件失败：只有第 1 件真的变了
-  const d = detail(
+  assert.deepEqual(detail(
     { items: [{ code: 'I-1', container: 'C-1', status: 'in_stock', version: 1 }, { code: 'I-2', container: 'C-1', status: 'in_stock', version: 1 }] },
-    { items: [{ code: 'I-1', container: '', status: 'out', version: 2 }, { code: 'I-2', container: 'C-1', status: 'in_stock', version: 1 }] });
-  assert.deepEqual(d, ['变更 物品 I-1'], '只报真正变化的那一件，不得把未变的 I-2 也列进去');
+    { items: [{ code: 'I-1', container: '', status: 'out', version: 2 }, { code: 'I-2', container: 'C-1', status: 'in_stock', version: 1 }] }),
+    ['变更 物品 I-1'], '只报真正变化的那一件，不得把未变的 I-2 也列进去');
   // 容器库位变化也要报
   assert.deepEqual(detail({ containers: [{ code: 'C-1', loc: 'L-1', status: 'active' }] },
                           { containers: [{ code: 'C-1', loc: 'L-2', status: 'active' }] }), ['变更 容器 C-1']);
   // 完全一致时不报（此时本就不该是 REPAIR_REQUIRED）
   assert.deepEqual(detail({ items: [{ code: 'I-1', status: 'out' }] }, { items: [{ code: 'I-1', status: 'out' }] }), []);
+  // 新增 / 移除也要报
+  assert.deepEqual(detail({ items: [] }, { items: [{ code: 'I-N', status: 'pending' }] }), ['新增 物品 I-N']);
+  assert.deepEqual(detail({ items: [{ code: 'I-O', status: 'out' }] }, { items: [] }), ['移除 物品 I-O']);
+  // 空入参不得抛错
+  assert.deepEqual(detail(null, null), []);
+  assert.deepEqual(detail(undefined, undefined), []);
+  // 包装后：错误文案必须接上明细，且不改变原 verdict 对象
+  const verdict = { phase: 'REPAIR_REQUIRED', error: '检出部分写入，需人工核对' };
+  const wrapped = svc.withPartialDetail(verdict,
+    { items: [{ code: 'I-1', status: 'in_stock' }] }, { items: [{ code: 'I-1', status: 'out' }] });
+  assert.match(wrapped.error, /受影响：变更 物品 I-1/, '错误文案必须接上受影响明细');
+  assert.equal(wrapped.phase, 'REPAIR_REQUIRED', '不得改变 phase');
+  assert.notEqual(wrapped, verdict, '必须返回新对象（不能改入参）');
 });
 
 /* ================= 发现 O（v3.13.11）：recover() 缺 store 前置校验 ================= */
