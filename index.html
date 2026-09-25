@@ -544,6 +544,8 @@ table.grid input:focus{background:#fff8e6;}   /* 阶段3：移除 outline:none�
 .num-delta{font-weight:700;font-variant-numeric:tabular-nums}
 .num-delta--negative{color:var(--danger-fg)}
 .num-delta--positive{color:var(--done-fg)}
+/* v3.12.0 物料数量账归档标记：中性灰，不用告警色（该字段不再更新，报警会误导） */
+.mat-warn--archived{background:var(--surface-2);color:var(--text-muted);border:1px solid var(--line);font-weight:500;}
 /* v3.12.0 操作记录页：按物品追位置变化链 */
 .oplog-chain{margin:6px 0 0;padding-left:22px;display:flex;flex-direction:column;gap:8px;}
 .oplog-chain li{font-size:13px;line-height:1.6;}
@@ -3061,7 +3063,7 @@ body:has(#tab-item-work.on) .itm-batch-sticky.batch-on{display:flex}
     </div>
   </section>
   <section class="tab" id="tab-ledger">
-    <p class="page-purpose"><span>历史台账 · 只读归档</span><span class="impact impact--none">数量账已停用</span></p>
+    <p class="page-purpose"><span>物料台账：<b>历史归档</b>（数量账已停用，不再更新）</span><span class="impact impact--none">本页只读</span><span class="hint">G3 起库存数量由流水决定，「手工调整 / 工单执行」等写入口已下线；新业务请走「物品作业」+「操作记录」。此处保留存量数据与审计能力（回放校验、导出）</span></p>
     <div class="notice notice--warn" id="ledgerArchiveBanner" role="status" style="font-size:14px;padding:10px 14px">
       📁 <b>历史台账 · 只读</b> —— 数量账已停用，新物品请到『物品』页建档
     </div>
@@ -3127,7 +3129,7 @@ body:has(#tab-item-work.on) .itm-batch-sticky.batch-on{display:flex}
        第 51 条起网页端完全不可达；也没有任何筛选。流水是唯一「只增不改」的审计凭据，
        自带回放/修数/导出三个工具，与物料主数据维护是两种作业 → 独立成页。 -->
   <section class="tab" id="tab-txn">
-    <p class="page-purpose"><span>库存流水台账：只增不改的审计凭据，回放可逐条重算</span><span class="impact impact--none">本页只读</span><span class="hint">流水由库存变动自动产生；手工不可增删改，异常请用页面上的「🔄 回放校验」定位</span></p>
+    <p class="page-purpose"><span>库存流水台账：只增不改的审计凭据，回放可逐条重算</span><span class="impact impact--none">本页只读</span><span class="hint">流水由<b>物料数量账</b>的变动自动产生（同样处于归档态）；物品的逐件出入库请看「<a class="link-inline" href="javascript:void 0" onclick="document.querySelector('nav.tabs button[data-tab=oplog]').click()">操作记录</a>」页</span></p>
     <div class="panel">
       <div class="toolbar">
         <input type="search" id="txnSearch" class="field field--sm" placeholder="🔍 筛选：物料码 / 类型 / 操作人 / 关联单 / 原因" style="min-width:240px">
@@ -5406,15 +5408,19 @@ function renderLedger() {
   const rows = state.materials.map(m => ({ m }))
     .filter(({ m }) => !kw || [m.code, m.name, m.spec, m.loc, m.container, m.zone].some(v => String(v || '').toLowerCase().includes(kw)))
     .map(({ m }) => {
-      const lvl = matStockLevel(m);
-      const rowCls = lvl === 'neg' ? 'row-neg' : (lvl === 'low' ? 'row-low' : '');
+      /* v3.12.0：不再按 matStockLevel 给行加红/黄底 —— 该判定基于已归档、不再更新的 qty，
+         给行染成「负库存/低库存」色只会误导（东西实际在不在库，看「操作记录」）。
+         matStockLevel 本身保留（另有可能的消费方与历史语义），此处只是不再用它渲染。 */
+      const rowCls = '';
+      /* v3.12.0（方向A：标注身份）：数量账已归档，这一列**永不再更新**。
+         原实现在 qty 为 0/低于安全库存时照常弹「无库存/低于安全库存」告警 ——
+         对一个不再被写入的字段报预警只会误导现场（东西好端端在，这里却喊缺货）。
+         现在：只显示数值 + 一个中性的「归档」标记，不再用告警色。
+         真正的库存状态看「物品作业 / 操作记录」。 */
       const qtyCell = (label, k, unit) => {
         let html = esc(m[k]);
-        if (k === 'qty' && lvl !== 'none' && lvl !== 'ok') {
-          html += ' <span class="mat-warn mat-warn--' + lvl + '" title="' +
-            (lvl === 'neg' ? '库存为负：账面与流水对不上，请用「回放校验」定位' :
-             lvl === 'low' ? '低于安全库存 ' + esc(m.minQty) + '，请补货' : '已无库存') + '">' +
-            (lvl === 'neg' ? '⚠ 负库存' : lvl === 'low' ? '⚠ 低于安全库存' : '○ 无库存') + '</span>';
+        if (k === 'qty') {
+          html += ' <span class="mat-warn mat-warn--archived" title="物料数量账已归档（G3 封存）：本列不再随业务更新，仅保留存量数值；实际库存请看「操作记录」页">归档</span>';
         }
         return '<td data-th="' + label + '"' + (unit ? ' class="num"' : '') + '>' + html + '</td>';
       };
@@ -5430,12 +5436,10 @@ function renderLedger() {
   tb.innerHTML = rows.join('') || '<tr><td colspan="' + MAT_COLS.length + '" class="empty-row">（没有符合条件的物料）</td></tr>';
   const sum = document.getElementById('matSummary');
   if (sum) {
-    const low = state.materials.filter(m => matStockLevel(m) === 'low').length;
-    const neg = state.materials.filter(m => matStockLevel(m) === 'neg').length;
-    const zero = state.materials.filter(m => matStockLevel(m) === 'zero').length;
+    /* v3.12.0：不再汇总「低于安全库存 / 负库存 / 无库存」——
+       这些告警对一个已归档、不再更新的字段没有意义，只会制造假警报。 */
     sum.textContent = '共 ' + state.materials.length + ' 条' + (kw ? ' · 筛选出 ' + rows.length + ' 条' : '') +
-      (low || neg || zero ? ' · ⚠ 低于安全库存 ' + low + ' 条 · 负库存 ' + neg + ' 条 · 无库存 ' + zero + ' 条' : ' · 库存充足') +
-      '（本页只读：数量由流水决定，预警仅提示，不在此改数）';
+      '（历史归档：数量账自 G3 起停用，本页保留存量数据与审计能力，不做写操作；实际库存请走「操作记录」）';
   }
   if (typeof refreshMatDatalist === 'function') refreshMatDatalist();
   const zl = document.getElementById('zoneList');

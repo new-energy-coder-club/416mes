@@ -68,20 +68,30 @@ test('G3-1 台账页无编辑控件：无新增/删除/自动编号入口，表�
    原断言把预警底色一并禁掉，导致需求书 §3.1「低于阈值黄底提示」无法实现。
    现在改为：仍然禁止任何写入口（input/select/change/applyStockChange/fsPush*），
    但允许（且要求）有预警着色与徽标。 */
-test('G3-1 renderLedger 只读：无任何写入口，但有低库存/负库存预警', () => {
+test('G3-1 renderLedger 只读：无任何写入口', () => {
   const s = fnSrc('renderLedger');
   assert.ok(!/<input/.test(s), 'renderLedger 不得再渲染 input 单元格');
   assert.ok(!/<select/.test(s), 'renderLedger 不得再渲染 select 单元格');
   assert.ok(!/addEventListener\('change'/.test(s), '不得再挂单元格 change 写处理器');
   assert.ok(!/cell-qty-risk/.test(s), '库存数量高风险写入口样式必须移除');
   assert.ok(!/applyManualAdjust|applyStockChange|fsPushStock|fsPushRecord/.test(s), '渲染函数里不得有写调用');
-  // 阶段B：预警必须存在（需求书 §3.1），但只改呈现
-  assert.match(s, /row-neg/, '负库存要红底（需求书 §3.1）');
-  assert.match(s, /row-low/, '低于安全库存要黄底（需求书 §3.1）');
-  assert.match(s, /mat-warn/, '要有预警徽标说明原因');
-  assert.match(s, /matStockLevel/, '预警判定要集中在一个纯函数里，便于单测');
   // 存量数据照常渲染：物料字段逐列输出
   assert.ok(/MAT_COLS\.map/.test(s), '仍按 MAT_COLS 列渲染存量物料数据');
+});
+
+/* v3.12.0（方向A「标注身份」）**有意变更**上一版 G3-1 的「必须有低库存/负库存预警」断言：
+   该预警基于 `m.qty` —— 而数量账自 G3 起已归档、**永不再更新**（线上实测 qty 全为 0，
+   流水停在 13 天前）。对一个不再被写入的字段弹「无库存 / 低于安全库存」并给整行染红黄底，
+   只会误导现场（东西好端端在，页面却喊缺货）。
+   用户拍板「方向A」——保留数据与审计能力，但把身份讲清楚。
+   故现在的契约是：**数值照显 + 中性「归档」徽标 + 不再撒告警**。 */
+test('v3.12.0 台账 qty 列标注归档态，不再对已停用字段撒告警', () => {
+  const s = fnSrc('renderLedger');
+  assert.match(s, /mat-warn--archived/, 'qty 列必须有「归档」中性徽标');
+  assert.ok(!/row-neg/.test(s), '不得再按 qty 给行染负库存红底（该字段已归档）');
+  assert.ok(!/row-low/.test(s), '不得再按 qty 给行染低库存黄底');
+  assert.ok(!/⚠ 负库存|⚠ 低于安全库存|○ 无库存/.test(s), '不得再对归档字段报库存告警');
+  assert.match(s, /历史归档/, '汇总行必须说明本页处于历史归档态');
 });
 
 test('G3-1 台账编辑/新增/删除处理器全部移除，flashQty 一并删除', () => {
