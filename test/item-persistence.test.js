@@ -271,3 +271,57 @@ test('发现 F：部分写入时按 before/after 精确算出受影响行，不�
   // 完全一致时不报（此时本就不该是 REPAIR_REQUIRED）
   assert.deepEqual(detail({ items: [{ code: 'I-1', status: 'out' }] }, { items: [{ code: 'I-1', status: 'out' }] }), []);
 });
+
+/* ================= 发现 O（v3.13.11）：recover() 缺 store 前置校验 ================= */
+
+test('发现 O：recover() 在 store 缺失/非 indexeddb 时必须报 ITM_REQUIRES_INDEXEDDB（与 enqueue 同款）', async () => {
+  const P = require('../lib/item-persistence.js');
+  const state = { items: [], containers: [], locations: [] };
+  const mk = store => P.create({ store, getState: () => state, publish() {}, canWrite: () => true });
+
+  // store = null
+  await assert.rejects(mk(null).recover(), /ITM_REQUIRES_INDEXEDDB/, 'store 为 null 必须报可读错误');
+  // store 不是 indexeddb（隐私模式降级 / 内存存储）
+  await assert.rejects(mk({ kind: 'memory' }).recover(), /ITM_REQUIRES_INDEXEDDB/, '非 indexeddb 同样必须报');
+  // 同时验证 enqueue 的行为一致（两侧口径统一）
+  await assert.rejects(mk(null).enqueue({ schemaVersion: 1, opId: 'p-1', kind: 'retire', itemCode: 'I-1', expected: { itemVersion: 1 } }),
+    /ITM_REQUIRES_INDEXEDDB/, 'enqueue 早已有此闸，确认未回退');
+});
+
+test('发现 O：store 不可用时，所有持久化方法都必须报 ITM_REQUIRES_INDEXEDDB（行为断言，非源码匹配）', async () => {
+  const P = require('../lib/item-persistence.js');
+  const state = { items: [], containers: [], locations: [] };
+  const seq = [];
+  const mk = store => P.create({ store, getState: () => state, publish() {}, canWrite: () => true });
+  const cases = [
+    ['saveDraft',    p => p.saveDraft('itmDraft:s1', { sessionId: 's1' })],
+    ['enqueue',      p => p.enqueue({ schemaVersion: 1, opId: 'x-1', kind: 'retire', itemCode: 'I-1', expected: { itemVersion: 1 } })],
+    ['acknowledge',  p => p.acknowledge({ code: 'x-1', phase: 'APPLIED', request: {} })],
+    ['markUnknown',  p => p.markUnknown('x-1', '结果待确认')],
+    ['recover',      p => p.recover()],
+    ['clearDrafts',  p => p.clearDrafts()],
+    ['abandonCommand', p => p.abandonCommand('x-1')],
+  ];
+  for (const [name, call] of cases) {
+    let msg = '(未抛错)';
+    try { await call(mk(null)); } catch (e) { msg = String(e.message || e); }
+    seq.push({ name, msg });
+    assert.match(msg, /ITM_REQUIRES_INDEXEDDB/, name + ' 在 store 缺失时必须报 ITM_REQUIRES_INDEXEDDB，实测：' + msg);
+  }
+  // 7 个方法全覆盖（防止新增方法悄悄漏掉这道闸）
+  assert.equal(seq.length, 7, '必须覆盖全部 7 个持久化方法');
+});
+
+test('发现 O：正常 indexeddb store 下 recover() 行为不变（不放宽也不收紧）', async () => {
+  const P = require('../lib/item-persistence.js');
+  const state = { items: [], containers: [], locations: [] };
+  const store = { kind: 'indexeddb',
+    async getAll(name) {
+      if (name === 'outbox') return [{ id: 'o-1', op: 'itemOperation', status: 'pending', request: { opId: 'o-1' } }];
+      if (name === 'syncMeta') return [{ key: 'itmDraft:s1', value: { sessionId: 's1' } }, { key: 'other', value: 1 }];
+      return [];
+    } };
+  const r = await P.create({ store, getState: () => state, publish() {}, canWrite: () => true }).recover();
+  assert.equal(r.commands.length, 1, '取回 1 条 ITM 命令');
+  assert.equal(r.drafts.length, 1, '只取 itmDraft: 前缀的草稿');
+});
