@@ -1016,7 +1016,7 @@
     if (isCancelled(order)) return { ok: false, error: '工单 ' + order.code + ' 已是「已取消」状态' };
     var prog = orderProgress(order);
     if (prog.anyExecuted) {
-      return { ok: false, error: '工单已执行 ' + prog.executedTotal + ' 件，不能直接取消；冲销入口已下线（历史单只读），请用「导出 Excel」核对或联系管理员修数' };
+      return { ok: false, error: '工单已执行 ' + prog.executedTotal + ' 件，不能直接取消；请用「冲销」退回后再取消/删除' };
     }
     var now = opts.now ? new Date(opts.now) : new Date();
     order.status = STATUS.CANCELLED;

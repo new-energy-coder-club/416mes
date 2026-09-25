@@ -94,6 +94,9 @@ test('S3 详情：物品化单逐件 ✓/✗ + 有「去扫码执行」；旧 MA
   assert.ok(document.querySelector('#wipDetail #btnWipDelete'), '旧 MAT 单保留「删除」');
 
   context.showWipDetail('LL20260902001');
-  assert.equal(document.querySelector('#wipDetail #btnWipReverse'), null, '部分执行过的旧 MAT 单也隐藏「冲销」');
+  /* TASK-10（阻塞项修复）：部分执行的旧 MAT 单从此前的「四道门全关死」改为**可冲销**——
+     库层 CORE.reverseOrder 一盤可用（内部走 applyStockChange，库存与流水成对），
+     之前只缺 UI 入口（wipReverseEligible 第一行就把非 itemized 拒了）。 */
+  assert.ok(document.querySelector('#wipDetail #btnWipReverse'), '部分执行的旧 MAT 单必须有「冲销」入口（阻塞项修复）');
   assert.ok(document.querySelector('#wipDetail #btnWipDelete'), '仍保留「删除」入口（点击时走原有守卫）');
 });
