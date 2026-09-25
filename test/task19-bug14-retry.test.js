@@ -203,3 +203,28 @@ test('发现 R：待处理卡动作按钮在飞行中禁用，结束后恢复', 
   // 恢复后还要刷新待处理区（否则卡面状态不更新）
   assert.ok(src.includes("if(typeof pending==='function'){try{await pending();}catch(_){ }"), '恢复后必须刷新待处理区');
 });
+
+/* ---------- 发现 Z（v3.13.16）：扫码执行不得发到上一张工单上 ---------- */
+
+test('发现 Z：wipItemExecScan 必须与当前详情单一致，不一致时切回而非发到旧单', () => {
+  const html = fs.readFileSync('/srv/416mes/index.html', 'utf8');
+  // 必须有上下文一致性守卫
+  assert.match(html, /if \(wipDetailCode && wipDetailCode !== cur\.code\) \{/,
+    '必须比对 wipDetailCode 与执行会话的单号');
+  // 不一致时：清场 + 切回 + 重新渲染 + 告知，且 return（绝不静默发到旧单）
+  assert.match(html, /WIP_EXEC\.code = wipDetailCode;/, '必须就地切回当前单');
+  assert.match(html, /WIP_EXEC\.target = null; WIP_EXEC\.batch = \[\]; WIP_EXEC\.hint = null;/, '切回前必须清场（旧单的批次/锚点快照不能带过来）');
+  assert.match(html, /if \(w2\) scanWipItemized\(w2, document\.getElementById\('scanResult'\)\);/, '必须重渲染执行条');
+  assert.match(html, /log\('执行会话纠正：' \+ cur\.code \+ ' → ' \+ wipDetailCode\);/, '必须留日志');
+  // w 的来源必须是 cur（会话单），且守卫在其后
+  const seg = html.slice(html.indexOf('async function wipItemExecScan(raw)'), html.indexOf('async function wipItemExecScan(raw)') + 1400);
+  assert.match(seg, /const w = cur;/, '守卫后必须用 cur 作为工单');
+  assert.ok(seg.indexOf('wipDetailCode !== cur.code') < seg.indexOf('const w = cur;'),
+    '一致性守卫必须早于取工单');
+});
+
+test('发现 Z：wipExecSubmitBatch 同样只认 WIP_EXEC.code，需与详情单一致', () => {
+  const html = fs.readFileSync('/srv/416mes/index.html', 'utf8');
+  const seg = html.slice(html.indexOf('async function wipExecSubmitBatch()'), html.indexOf('async function wipExecSubmitBatch()') + 400);
+  assert.match(seg, /state\.workorders\.find\(x => x\.code === WIP_EXEC\.code\)/, '批量提交按会话单取单（守卫在扫码入口已拦）');
+});
