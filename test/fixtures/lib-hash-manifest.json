@@ -1,10 +1,10 @@
 {
   "APP_VERSION": "3.13.0",
-  "generatedAt": "2026-09-25T08:17:12.301Z",
+  "generatedAt": "2026-09-25T09:18:37.863Z",
   "hashes": {
     "nec-gallery.js?v=3.13.0": "efbb620e319efe9cc7d5107715ae77722ad97b27f7a141ec6c2204e0555ed23b",
     "jsqr.min.js?v=3.13.0": "bc40c8a15196236b2314db0856f72ca0b49980cd5413b8c852a7349f5fee0859",
-    "mes-core.js?v=3.13.0": "dc9eed5917b2854b51241b6b534b6f632e45006d46c47c33a2308373037e37a9",
+    "mes-core.js?v=3.13.0": "56f9c809543b77721bf30544687533e584e34959307d8d5c9ec4e3a2b3044afe",
     "lib/outbox.js?v=3.13.0": "d477d6bdb77acd4c4858e3feb0874c8a82dfcb997e773106724332b0a8738ba9",
     "lib/store.js?v=3.13.0": "f82cfc1803809ae732b6579ed668861675bc9f74024336e6ea0e54a24c7966d7",
     "lib/unique-items.js?v=3.13.0": "ef7e5abba5f96117a2020900dddbdc06d90208758fa3750e0512ddb874a7587d",
@@ -17,7 +17,7 @@
     "lib/item-link.js?v=3.13.0": "c615e83753d38e5a26ae8bff3fb2d33621ba9bb50826f3519f3d22cba3b36430",
     "lib/item-scan.js?v=3.13.0": "2f5cb7a6fec4b38fcf159583cb1e7b26bc0d576661eaf5110b875e722ccde441",
     "lib/item-client.js?v=3.13.0": "560c658dfc3926ee5d900b28437427d6e7ce92df38ae9677a7e1b9ecf6651fcf",
-    "lib/item-ui.js?v=3.13.0": "6128ac7a316d9ce966d96fe2608d6a09bb3d67e42ecd05e1e7ae1a7726ac3113",
+    "lib/item-ui.js?v=3.13.0": "805e786ffff5f7318a0176511bf320df9505a146a8d6a14c13beff47d50fb0bd",
     "lib/replay-checkpoint.js?v=3.13.0": "9b7eb8fd1b0baf43cc8e4ccb8eda3a7c7157ac1f5d5ea62096d98dc3355f97ed",
     "lib/incremental.js?v=3.13.0": "815ae52f14bbc0a15e02f733d4e29c1b6ed6a71806af73628a71f682cb345df6",
     "lib/census-status.js?v=3.13.0": "67e571bc7f2c39bfe2e302017aac240d0dd70caed5f7fe8859a62dc6d44cf9bb",

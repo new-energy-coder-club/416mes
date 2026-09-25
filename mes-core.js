@@ -921,17 +921,29 @@
    *   LL/JH 执行是 issue（出库）→ 冲销 receive 回原位（target = 留痕位置）；
    *   BH/TL 执行是 receive（入库）→ 冲销 issue 从留痕位置取出（source = 留痕位置）。
    * 只生成计划，不改任何状态；回执由调用方按物品操作协议收回后交 applyItemReverseResult。
+   *
+   * TASK-17（BUG-9）：以物品**当前状态**为准生成反向命令，历史留痕只做参照——
+   * 物品执行后被移动过时，按历史位置生成的命令必然被 VERSION_CONFLICT 拒绝。
+   *   - 物品档案已消失 → 计入 errors（硬错误），跳过该件；
+   *   - 物品已处于「退回后」状态（入库单冲销时已 out / 出库单冲销时已回库）→
+   *     计入 skipped（软跳过，不算错误），不产生注定被拒的命令；
+   *   - 位置与留痕不一致但可确定现状（入库单、物品仍在库且换过容器）→
+     *   按当前实际位置生成（冲销语义是「把东西弄回去」，依据现状而非历史）；
+   *   - 无法确定现状（物品不在任何有效容器）→ 计入 skipped 并给出人话原因。
+   * 所有命令都带 expected:{itemVersion, containerVersion} 版本前置条件，
+   * 与 lib/item-ui.js / lib/item-scan.js 的其它物品命令构造点同一数据安全不变量。
+   * 返回值新增 skipped:[{itemCode, reason}]，由 UI 如实告知用户跳过了哪几件、为什么。
    */
   function buildItemReverseCommands(state, order, opts) {
     opts = opts || {};
-    if (!order) return { ok: false, errors: ['工单不存在'], commands: [] };
-    if (!isItemizedOrder(order)) return { ok: false, errors: ['工单 ' + (order.code || '') + ' 不是物品化工单'], commands: [] };
-    if (isCancelled(order)) return { ok: false, errors: ['工单 ' + order.code + ' 已取消，无需冲销'], commands: [] };
+    if (!order) return { ok: false, errors: ['工单不存在'], commands: [], skipped: [] };
+    if (!isItemizedOrder(order)) return { ok: false, errors: ['工单 ' + (order.code || '') + ' 不是物品化工单'], commands: [], skipped: [] };
+    if (isCancelled(order)) return { ok: false, errors: ['工单 ' + order.code + ' 已取消，无需冲销'], commands: [], skipped: [] };
     var prog = orderProgress(order);
-    if (!prog.anyExecuted) return { ok: false, errors: ['工单尚未执行任何物品，无需冲销；可直接「取消」'], commands: [] };
+    if (!prog.anyExecuted) return { ok: false, errors: ['工单尚未执行任何物品，无需冲销；可直接「取消」'], commands: [], skipped: [] };
 
     var outbound = isOutbound(order.type);
-    var commands = [], errors = [];
+    var commands = [], errors = [], skipped = [];
     ((order.execBatches) || []).forEach(function (b) {
       ((b && b.ops) || []).forEach(function (o) {
         if (!o || !o.itemCode) return;
@@ -940,17 +952,51 @@
           errors.push('物品 ' + o.itemCode + ' 缺少执行时的位置留痕，无法生成反向命令');
           return;
         }
+        var it = (state.items || []).find(function (x) { return x && x.code === o.itemCode; });
+        if (!it) {
+          errors.push('物品 ' + o.itemCode + ' 已不在档案中，无法生成反向命令');
+          return;
+        }
         var opId = typeof opts.opIdFor === 'function'
           ? opts.opIdFor(o.itemCode, o.opId)
           : ('REV-' + (o.opId || (String(order.code || 'ITEM') + '-' + o.itemCode)));
         if (outbound) {
-          commands.push({ opId: opId, kind: 'receive', itemCode: o.itemCode, target: { loc: loc, container: container }, reverseOf: o.opId || '' });
+          /* 出库单冲销 = receive 回留痕位置；退回成功后物品会在留痕容器里。
+             物品现已回库（无论是否原位）都说明已退过/已被别的单收走 → 跳过。 */
+          if (it.status === 'in_stock') {
+            skipped.push({ itemCode: o.itemCode, reason: '物品当前已在容器 ' + (it.container || '？') + ' 内（已回库），无需冲销' });
+            return;
+          }
+          if (it.status !== 'out') {
+            skipped.push({ itemCode: o.itemCode, reason: '物品当前状态为「' + (it.status || '未知') + '」，不是「已出库」，无需或无法冲销' });
+            return;
+          }
+          var tgtCtn = (state.containers || []).find(function (x) { return x && x.code === container; });
+          if (!tgtCtn) {
+            errors.push('物品 ' + o.itemCode + ' 的退回容器 ' + container + ' 已不存在，无法生成反向命令');
+            return;
+          }
+          commands.push({ opId: opId, kind: 'receive', itemCode: o.itemCode, target: { loc: loc, container: container }, reverseOf: o.opId || '',
+            expected: { itemVersion: Number(it.version) || 0, containerVersion: Number(tgtCtn.version) || 0 } });
         } else {
-          commands.push({ opId: opId, kind: 'issue', itemCode: o.itemCode, source: { loc: loc, container: container }, reverseOf: o.opId || '' });
+          /* 入库单冲销 = issue 从留痕位置（= receive 的目标）取出。
+             物品已 out 说明已经取出过 → 跳过；仍在库但换过容器 → 按当前位置取出。 */
+          if (it.status === 'out') {
+            skipped.push({ itemCode: o.itemCode, reason: '物品当前已出库（不在任何容器），无需也无法冲销' });
+            return;
+          }
+          var ctnCode = it.container || '';
+          var srcCtn = ctnCode ? (state.containers || []).find(function (x) { return x && x.code === ctnCode; }) : null;
+          if (!ctnCode || !srcCtn) {
+            skipped.push({ itemCode: o.itemCode, reason: '物品当前不在任何有效容器内（' + (ctnCode ? '容器 ' + ctnCode + ' 已不存在' : 'container 为空') + '），无法确定取出位置' });
+            return;
+          }
+          commands.push({ opId: opId, kind: 'issue', itemCode: o.itemCode, source: { loc: srcCtn.loc || '', container: srcCtn.code }, reverseOf: o.opId || '',
+            expected: { itemVersion: Number(it.version) || 0, containerVersion: Number(srcCtn.version) || 0 } });
         }
       });
     });
-    return { ok: errors.length === 0, errors: errors, commands: commands };
+    return { ok: errors.length === 0, errors: errors, commands: commands, skipped: skipped };
   }
 
   /**
@@ -977,12 +1023,19 @@
          reverseOf 把它对回执行时的原始 opId，两种键都索引上 */
       if (r.reverseOf != null && r.reverseOf !== '') byOp[String(r.reverseOf)] = r;
     });
-    var done = [], pending = [];
+    /* TASK-17（BUG-9）：buildItemReverseCommands 会把「已处于退回后状态」的件计入
+       skipped（不生成命令、永远没有回执）。调用方通过 exemptOpIds 声明这些原 opId，
+       使其豁免而非堵死关单；未声明时行为与旧版完全一致。豁免件如实记入
+       reverseInfo.skipped，避免「关了单但留痕里看不出这几件没发命令」。 */
+    var exempt = Object.create(null);
+    ((opts.exemptOpIds) || []).forEach(function (id) { if (id != null) exempt[String(id)] = true; });
+    var done = [], pending = [], exempted = [];
     ((order.execBatches) || []).forEach(function (b) {
       ((b && b.ops) || []).forEach(function (o) {
         if (!o || !o.itemCode) return;
         var r = byOp[String(o.opId || '')] || byOp['REV-' + String(o.opId || '')];
         if (r && r.phase === 'APPLIED') done.push(o.itemCode);
+        else if (exempt[String(o.opId || '')]) exempted.push({ itemCode: o.itemCode, opId: o.opId || '' });
         else pending.push({ opId: o.opId || '', itemCode: o.itemCode, error: r ? (r.error || ('未应用：' + (r.phase || '无阶段'))) : '缺少回执' });
       });
     });
@@ -998,6 +1051,7 @@
       reason: opts.reason || ('冲销 ' + order.code),
       itemCodes: done.slice()
     };
+    if (exempted.length) order.reverseInfo.skipped = exempted;
     order.reversedAt = at;
     order.status = STATUS.CANCELLED;
     return { ok: true, order: order, applied: done, reverseInfo: order.reverseInfo };

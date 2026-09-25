@@ -8607,7 +8607,7 @@ function wipReversePreview(w) {
   /* TASK-10：旧 MAT 单（非 itemized）走 CORE.reverseOrder 路径 */
   if (!CORE.isItemizedOrder(w)) { wipReverseLegacyPreview(w); return; }
   const plan = CORE.buildItemReverseCommands(state, w);
-  if (!plan || !plan.commands.length) {
+  if (!plan || (!plan.commands.length && !(plan.skipped || []).length)) {
     alert('无法生成冲销计划：' + ((plan && plan.errors && plan.errors[0]) || '该工单没有可反向的执行批次'));
     return;
   }
@@ -8615,15 +8615,24 @@ function wipReversePreview(w) {
     alert('冲销计划不完整，已停止：\n' + plan.errors.join('\n'));
     return;
   }
+  /* TASK-17（BUG-9）：计划按物品现状生成，已退过/无法确定位置的件会被跳过。
+     全部跳过时如实说明并不入队任何注定被拒的命令卡。 */
+  if (!plan.commands.length) {
+    alert('没有可冲销的物品：\n' + (plan.skipped || []).map(s => '· ' + s.itemCode + '：' + s.reason).join('\n') +
+      '\n\n未生成任何反向命令，工单保持原状态。');
+    return;
+  }
   const rows = plan.commands.map(c => {
     const it = (state.items || []).find(x => x.code === c.itemCode);
     return '· ' + c.itemCode + ' ' + (it ? (it.name || '') : '（本机无此物品档案）') +
       (c.kind === 'receive' ? ' → 退回 ' : ' → 取出 ') + (c.target || c.source).loc + ' / ' + (c.target || c.source).container;
   }).join('\n');
+  const skipRows = (plan.skipped || []).map(s => '· ' + s.itemCode + '：' + s.reason).join('\n');
   const reason = (document.getElementById('wipReason') || {}).value || '';
   const ok = confirm(
     '冲销工单 ' + w.code + '？\n\n' +
     '将逐件执行反向物品操作（' + plan.commands.length + ' 件）：\n' + rows + '\n\n' +
+    (skipRows ? '跳过 ' + plan.skipped.length + ' 件（不生成命令）：\n' + skipRows + '\n\n' : '') +
     '这些命令会进入「待处理区」，需要在那里提交并等全部 APPLIED 后工单才置为已取消。\n' +
     (reason ? '原因：' + reason + '\n' : '') +
     '确认生成反向命令？');
@@ -8646,6 +8655,9 @@ async function wipReverseRun(w, plan, reason) {
       };
       if (c.kind === 'receive') request.target = c.target;
       else request.source = c.source;
+      /* TASK-17（BUG-9）：反向命令与其它物品命令一样携带版本前置条件，
+         物品/容器在生成后被并发改动时服务端拒绝而不是按旧位置硬写。 */
+      if (c.expected) request.expected = c.expected;
       await itmPersistence.enqueue(request);
       seq++;
     }
