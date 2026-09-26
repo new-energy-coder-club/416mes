@@ -9247,11 +9247,16 @@ function handleScan(raw) {
     return;
   }
   /* G1 执行上下文：物品化执行卡激活时，物品码喂给工单执行卡而不是 scanItem 的只读查询；
-     入库方向扫 LOC:/CTN: 直接填进批次目标（不用离开执行卡）。 */
+     入库方向扫 LOC:/CTN: 直接填进批次目标（不用离开执行卡）。
+
+     v3.13.20（实测发现 BG）：ITM: 分支原先**不做归属校验**，工单执行中扫任意物品码
+     （哪怕不属于这张工单）都被塞进执行卡，操作员想查那个物品的位置反而拿到工单卡。
+     现在与下面的裸码分支同一口径：只有本工单计划内的物品码才进执行卡，
+     其余的继续往下走到 scanItem() 做只读查询。 */
   if (WIP_EXEC.code) {
     const wAct = state.workorders.find(x => x.code === WIP_EXEC.code);
     if (wAct && CORE.isItemizedOrder(wAct) && CORE.isOrderOpen(wAct)) {
-      if (prefix === 'ITM:') { wipItemExecScan(code); return; }
+      if (prefix === 'ITM:' && wipItemPlannedCodes(wAct).indexOf(code) >= 0) { wipItemExecScan(code); return; }
       if ((prefix === 'LOC:' || prefix === 'CTN:') && wipItemExecTarget(prefix, code)) return;
       if (!m && wipItemPlannedCodes(wAct).indexOf(code) >= 0) { wipItemExecScan(code); return; }
     } else {
