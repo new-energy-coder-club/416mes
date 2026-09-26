@@ -102,3 +102,18 @@ test('发现 BE：扫码页提示必须说「七类」且含 ITM（与 summary�
     else assert.equal(cls, '六', '不含 ITM 才说六类：' + h);
   });
 });
+
+/* ---------- 发现 BF（v3.13.19）：fsFullResync 日志谎报「探测连续失败」 ---------- */
+
+test('发现 BF：全量拉取日志必须按真实探测状态说话（探测正常时不得宣称连续失败）', () => {
+  const html = fs.readFileSync('/srv/416mes/index.html', 'utf8');
+  const fn = (html.match(/async function fsFullResync\(why\) \{[\s\S]{0,400}/) || [''])[0];
+  assert.ok(fn.length > 0, '必须能取到 fsFullResync');
+  // 不得再无条件打印失败
+  assert.ok(!/变更探测连续失败（' \+ why \+ '），改为完整全量拉取一次/.test(fn),
+    '不得无条件宣称「变更探测连续失败」（探测正常时是谎报）');
+  // 必须是条件拼接近
+  assert.ok(fn.includes("完整全量拉取（' + why + '）'"), '日志必须先说清动作本身');
+  assert.match(fn, /p\.n > 0 \? '：变更探测已连续失败 ' \+ p\.n \+ ' 轮' : ''/,
+    '失败信息必须按 p.n 条件追加（探测正常时不说失败）');
+});
