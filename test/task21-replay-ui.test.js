@@ -80,3 +80,25 @@ test('发现 L：无跳过时不得渲染该提示（不制造噪音）', () => 
   assert.equal(block({ reverseInfo: { skipped: [{ itemCode: 'I-1', reason: '已出库' }] } }), 'SHOW', '有跳过件才显示');
   assert.equal(block({}), 'HIDE', '未冲销的单不显示');
 });
+
+/* ---------- 发现 BE（v3.13.18）：扫码页文案自相矛盾 ---------- */
+
+test('发现 BE：扫码页提示必须说「七类」且含 ITM（与 summary、实际功能一致）', () => {
+  const html = fs.readFileSync('/srv/416mes/index.html', 'utf8');
+  const tab = (html.match(/<section class="tab" id="tab-scan">[\s\S]{0,3000}/) || [''])[0];
+  assert.ok(tab.length > 0, '必须能取到 tab-scan');
+  // 不能再出现「六类」
+  assert.ok(!/六类机读串/.test(tab), '扫码页不得再说「六类」（ITM 实际可用，summary 也列了 7 种）');
+  // 必须说七类并含 ITM
+  assert.match(tab, /七类机读串/, '必须说「七类」');
+  assert.match(tab, /MAT \/ LOC \/ CTN \/ WIP \/ NEC \/ ITM \/ MAN/, '必须列出全部 7 种');
+  // summary 与 hint 行必须一致
+  const hints = tab.match(/(MAT \/ LOC \/ CTN \/ WIP \/ NEC(?: \/ ITM)? \/ MAN)\s*(六类|七类)机读串/g) || [];
+  assert.ok(hints.length >= 1, '至少一处说明');
+  hints.forEach(h => {
+    const hasItm = /\/ ITM \//.test(h);
+    const cls = /六类/.test(h) ? '六' : '七';
+    if (hasItm) assert.equal(cls, '七', '含 ITM 就必须说七类：' + h);
+    else assert.equal(cls, '六', '不含 ITM 才说六类：' + h);
+  });
+});
