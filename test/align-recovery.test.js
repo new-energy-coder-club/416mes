@@ -855,3 +855,35 @@ test('BUG-2：#tab-oplog 必须有且只有一个 h2 页标题', () => {
   assert.equal(h2s.length, 1, '#tab-oplog 内 h2 数量应为 1');
   assert.match(sec[0], /<h2>操作记录（谁、何时、对哪个物品、做了什么）<\/h2>/);
 });
+
+/* 阶段B-补：建档页 hidden 失效回归（用户实测截图：选「容器」仍显示物品分类下拉）。
+   根因是 CSS 特异性：#itmRegisterDetails .itm-detail-body.itm-form-grid .itm-control
+   的 display:flex 特异性 (1,2,0) 压过浏览器默认 [hidden]{display:none} 的 (0,1,0)，
+   于是 lib/item-ui.js 的 syncRegisterType 里 catWrap.hidden=true 完全不生效。
+   linkedom 不算 CSS，所以这里锁 CSS 契约 + 锁 JS 行为两侧。 */
+test('建档页：[hidden] 必须能压过 .itm-control 的 display:flex', () => {
+  const rules = HTML.match(/#itmRegisterDetails[^{]*\[[^\]]*hidden[^\]]*\]\s*\{[^}]*\}/g) || [];
+  const forced = rules.some(r => /display\s*:\s*none/.test(r) && /!important/.test(r));
+  assert.ok(forced, '必须有一条 #itmRegisterDetails 作用域内、带 !important 的 [hidden]{display:none}，否则分类/规格框选容器时仍可见');
+});
+
+test('建档页：syncRegisterType 必须按类型切换分类与规格框', () => {
+  /* syncRegisterType 在 lib/item-ui.js（建档表单由 ItemUI.mount 驱动），不在 index.html */
+  const ui = fs.readFileSync(path.join(__dirname, '..', 'lib', 'item-ui.js'), 'utf8');
+  const raw = ui.slice(ui.indexOf('function syncRegisterType('));
+  const body = raw.slice(0, raw.indexOf('\n  }') + 4);
+  assert.match(body, /catWrap\.hidden\s*=\s*!isItem/, '分类框必须随「是否物品」切换');
+  assert.match(body, /specWrap\.hidden\s*=\s*!isItem/, '规格框必须随「是否物品」切换');
+  /* 容器/库位没有发号流程，高级编码框要直接摊开（否则用户找不到编码入口） */
+  assert.match(body, /adv\.open\s*=\s*true/, '非物品类型要摊开高级编码框');
+});
+
+test('建档页：容器/库位提交的是现场编码 + 规格/说明，不要求分类', () => {
+  const ui = fs.readFileSync(path.join(__dirname, '..', 'lib', 'item-ui.js'), 'utf8');
+  const s = ui.slice(ui.indexOf("el('itmRegister').addEventListener"), ui.indexOf("el('itmRetire').addEventListener"));
+  assert.match(s, /请填写.*编码（现场实际编号）/, '库位/容器建档必须要求现场编码');
+  assert.match(s, /kind\s*===\s*'registerLocation'\s*\?\s*\{\s*desc\s*:\s*name\s*\}\s*:\s*\{\s*spec\s*:\s*name\s*\}/, '库位走 desc、容器走 spec（名称输入框按类型复用）');
+  /* 非物品分支只应读 manualCode 与 name，不该再读 itmRegisterCat */
+  const nonItem = s.slice(0, s.indexOf("if(kind!=='registerItem')") + 200);
+  assert.ok(!/itmRegisterCat/.test(nonItem), '非物品分支不得读物品分类');
+});
