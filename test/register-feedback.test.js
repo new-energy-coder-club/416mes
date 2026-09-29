@@ -9,11 +9,12 @@ function setup(opts={}){
   const {document}=parseHTML(html);
   let n=0,enq=null;
   const state={locations:[],containers:[],items:[],itemOperations:[]};
-  const persistence=opts.persistence||{async enqueue(r){enq=r;opts.enqueued&&opts.enqueued(r);},async saveDraft(){},async recover(){return{drafts:[],commands:[]}}};
+  const queue=opts.queue||[];   // 多命令队列（自动提交/建档后自动启用需要按 opId 取回命令）
+  const persistence=opts.persistence||{async enqueue(r){enq=r;queue.push(r);opts.enqueued&&opts.enqueued(r);},async saveDraft(){},async recover(){return{drafts:[],commands:[]}}};
   const page=UI.mount({document,getState:()=>state,getPersistence:()=>persistence,
-    getCommands:async()=>opts.commands||(enq?[{id:enq.opId,request:enq}]:[]),id:()=>'fb-'+(++n),
+    getCommands:async()=>opts.commands||(queue.length?queue.map(r=>({id:r.opId,request:r})):(enq?[{id:enq.opId,request:enq}]:[])),id:()=>'fb-'+(++n),
     getClient:opts.client?()=>opts.client:undefined,isOnline:()=>opts.online!==false});
-  return {document,state,page};
+  return {document,state,page,queue};
 }
 const tick=async(n=8)=>{for(let i=0;i<n;i++)await new Promise(r=>setImmediate(r));};
 function pick(d,id,val){const sel=d.getElementById(id);for(const o of sel.options){if(o.value===val)o.setAttribute('selected','');else o.removeAttribute('selected');}sel.dispatchEvent(new d.defaultView.Event('change'));}
@@ -63,6 +64,90 @@ test('建档成功 → 结果框含物品码且完成语不覆盖二维码预览
   assert.match(box.textContent,/WP-TS-009/);
   assert.match(box.textContent,/建档完成/,'完成语追加在预览之后');
   assert.ok(box.querySelector('button'),'预览与「去入库」按钮仍在（完成语不得覆盖预览）');
+});
+
+
+/* 阶段B-补：容器建档 + 填了库位 → 建档成功后自动启用，不再掉进「核实启用」两步。
+   用户原话：「这啥啊，咋还要核实，不要核实，直接启用啊」。 */
+test('容器建档填了库位 → 建档成功后自动启用，只点一次就可用', async () => {
+  const submitted = [];
+  const { document: d, state } = setup({
+    client: {
+      async submit(cmd) {
+        const req = cmd.request;
+        submitted.push({ kind: req.kind, code: req.entity ? req.entity.code : req.containerCode, entity: req.entity, target: req.target });
+        /* 真链路由 item-persistence 依据 frozen.after 落库；mock 这里直接模拟落库效果，
+           否则后续 activateContainer 读不到刚建的容器（真实环境同样依赖这一步）。 */
+        if (req.kind === 'registerContainer') {
+          state.containers.push({ code: req.entity.code, type: req.entity.type, spec: req.entity.spec || '', loc: '', status: 'unknown', version: 1, lastOpId: 'x' });
+        }
+        if (req.kind === 'activateContainer') {
+          const c = state.containers.find(x => x.code === req.containerCode);
+          if (c) { c.status = 'active'; c.loc = req.target.loc; c.version++; }
+        }
+        return { phase: 'APPLIED', request: req };
+      }
+    },
+    online: true,
+  });
+  // 容器要能启用，本地得有一条 active 的目标库位
+  state.locations.push({ code: 'B-01-01-01', status: 'active', kind: '货架库位', desc: 'B区1层1位' });
+  pick(d, 'itmRegisterType', 'registerContainer');
+  pick(d, 'itmRegisterCtnType', '开放式收纳格');
+  d.getElementById('itmRegisterSpec').value = '32×25×6cm';
+  d.getElementById('itmRegisterCode').value = 'KF-777';
+  d.getElementById('itmRegisterCtnLoc').value = 'B-01-01-01';
+  d.getElementById('itmRegister').click(); await tick(14);
+
+  const kinds = submitted.map(s => s.kind);
+  assert.ok(kinds.includes('registerContainer'), '必须先建档');
+  assert.ok(kinds.includes('activateContainer'), '建档成功后必须自动启用（用户不该再手动点核实）');
+  const act = submitted.find(s => s.kind === 'activateContainer');
+  assert.equal(act.code, 'KF-777', '启用对象就是刚建档的容器');
+  assert.equal(act.target.loc, 'B-01-01-01', '启用目标库位取用户填的容器位置');
+  assert.match(d.getElementById('itmRegisterResult').textContent, /已建档并启用/, '结果要明说「已建档并启用」');
+  assert.match(d.getElementById('itmRegisterResult').textContent, /B-01-01-01/, '结果要带出库位');
+  assert.doesNotMatch(d.getElementById('itmRegisterResult').textContent, /未核实|去核实启用/, '不该再把用户推去手动核实');
+});
+
+test('容器建档没填库位 → 保持待核实，并说清补库位就能用', async () => {
+  const submitted = [];
+  const { document: d } = setup({
+    client: {
+      async submit(cmd) { submitted.push(cmd.request.kind); return { phase: 'APPLIED', request: cmd.request }; }
+    },
+    online: true,
+  });
+  pick(d, 'itmRegisterType', 'registerContainer');
+  pick(d, 'itmRegisterCtnType', '斜口零件盒');
+  d.getElementById('itmRegisterCode').value = 'XK-888';
+  d.getElementById('itmRegisterCtnLoc').value = '';
+  d.getElementById('itmRegister').click(); await tick(14);
+  assert.deepEqual(submitted, ['registerContainer'], '没填库位就不该自动激活（activateContainer 强制要求目标库位）');
+  assert.match(d.getElementById('itmRegisterResult').textContent, /待核实/);
+  assert.match(d.getElementById('itmRegisterResult').textContent, /核实启用/, '仍要给出手动启用的入口');
+});
+
+test('容器自动启用失败 → 建档结果保留，并给「去核实启用」重试入口', async () => {
+  const { document: d, state } = setup({
+    client: {
+      async submit(cmd) {
+        if (cmd.request.kind === 'activateContainer') throw new Error('NOT_FOUND');
+        return { phase: 'APPLIED', request: cmd.request };
+      }
+    },
+    online: true,
+  });
+  state.locations.push({ code: 'B-01-01-01', status: 'active', kind: '货架库位', desc: 'x' });
+  pick(d, 'itmRegisterType', 'registerContainer');
+  pick(d, 'itmRegisterCtnType', '6040周转箱');
+  d.getElementById('itmRegisterCode').value = 'ZZX-001';
+  d.getElementById('itmRegisterCtnLoc').value = 'B-01-01-01';
+  d.getElementById('itmRegister').click(); await tick(14);
+  const txt = d.getElementById('itmRegisterResult').textContent;
+  assert.match(txt, /已建档/, '建档成功的事实必须保留（不能因启用失败就否定建档）');
+  assert.match(txt, /自动启用没成功/, '必须说清启用这步失败了');
+  assert.ok([...d.getElementById('itmRegisterResult').querySelectorAll('button')].some(b => /去核实启用/.test(b.textContent)), '要给人手动重试的入口');
 });
 
 

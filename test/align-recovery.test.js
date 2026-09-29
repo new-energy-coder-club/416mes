@@ -875,6 +875,7 @@ test('建档页：syncRegisterType 必须按类型切换分类/容器类型/规�
   assert.match(body, /catWrap\.hidden\s*=\s*!isItem/, '物品分类框只对物品显示');
   assert.match(body, /ctnTypeWrap\.hidden\s*=\s*!isCtn/, '容器类型框只对容器显示');
   assert.match(body, /nameWrap\.hidden\s*=\s*isCtn/, '容器时隐藏名称框（类型走下拉、规格走规格框，名称框无对应字段）');
+  assert.match(body, /ctnLocWrap\.hidden\s*=\s*!isCtn/, '容器位置框只对容器显示');
   /* 规格框：物品与容器都要（两者都有 spec 字段），库位才隐藏（locations 只有 kind/desc） */
   assert.match(body, /specWrap\.hidden\s*=\s*kind\s*===\s*'registerLocation'/, '规格框只对库位隐藏');
   assert.match(body, /isCtn/, '必须区分容器以切换规格标签文案');
