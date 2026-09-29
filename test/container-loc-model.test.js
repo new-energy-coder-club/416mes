@@ -9,9 +9,9 @@
  *   4. 页面只读展示（index.html 内联 opSnapshotPos / scanItem，按源码抽取 + vm 执行）
  *   5. P0 契约：TABLE_DEFS.locations 新列映射 + ordinaryFields 白名单
  *      （role 进普通路径；parentContainer 是 P2 系统落笔字段，普通路径不可写）
- *   6. P1 边界锁（P2 将放开）：命令层对 it.loc 物品的真实行为——
- *      写路径仍要求容器归属（不误报已放开），并锁定「遗留 loc 存活并劫持定位」的已知风险
- *      （dev-docs/容器库位模型重构研究.md §六-1），为 P2 互斥校验提供回归锚点。
+ *   6. P1 边界锁（P2 已放开/翻转）：命令层对 it.loc 物品的真实行为——
+ *      CLM-6.1–6.5 锁定旧形状拒绝不回归；CLM-6.6 翻转为正向锚点：
+ *      容器入库显式清遗留 loc，定位不再被劫持（dev-docs/容器库位模型重构研究.md §六-1）。
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -127,22 +127,31 @@ test('CLM-2.4 非在库的 it.loc 物品 → 状态门先于 loc 校验拦截', 
   assert.throws(() => s.accept('ITM:I-SUB-OUT'), /物品当前不在库，不能出库/);
 });
 
-test('CLM-2.5 P1 命令契约不动：it.loc 物品 accept 可过，但 request() 确认仍被拦（P2 扩展 source 后放开）', () => {
+test('CLM-2.5 P2 扩展 source 后放开：子位直存物品 request() 产出 sub=true 出库请求', () => {
   const s = mkScan(baseState());
   s.add('issue');
   assert.deepEqual(s.accept('ITM:I-SUB'), { complete: true });
-  /* 行为边界正确：写路径不放行无容器物品。消息对 in_stock 直存件有误导（已知 P1 记录），锁定现状。 */
-  assert.throws(() => s.request(), /物品当前不在库，不能出库/);
+  /* P2（C3）：item-scan request() 的 issue 子位分支——子位无容器版本可派，
+     source={loc,container:'',sub:true}（鉴别器仅显式 sub===true），expected 只带 itemVersion。 */
+  const { opId, ...rest } = s.request();
+  assert.equal(typeof opId, 'string');
+  assert.ok(opId.length > 0, 'opId 应已派生');
+  assert.deepEqual(rest, {
+    schemaVersion: 1, kind: 'issue', itemCode: 'I-SUB',
+    source: { loc: 'SUB-1', container: '', sub: true },
+    expected: { itemVersion: 4 }
+  });
 });
 
 /* ── 3. 批量出库锚点派生（acceptBatchCode issue 分支）── */
 
-test('CLM-3.1 it.loc 首件 → 锚点直读 it.loc：{loc:SUB-1, ctn:null}', () => {
+test('CLM-3.1 it.loc 首件 → 锚点直读 it.loc：{loc:SUB-1, ctn:null, sub:true}', () => {
   const s = mkScan(baseState());
   s.startBatch('issue');
   const r = s.acceptBatchCode({ type: 'ITM', code: 'I-SUB' });
   assert.equal(r.stage, 'anchor');
-  assert.deepEqual(s.batchState().anchor, { loc: 'SUB-1', ctn: null });
+  /* P3：首件派生锚点带 sub 展示标记（item-scan acceptBatchCode issue 分支） */
+  assert.deepEqual(s.batchState().anchor, { loc: 'SUB-1', ctn: null, sub: true });
   assert.match(r.text, /首件库位 SUB-1/);
 });
 
@@ -152,12 +161,13 @@ test('CLM-3.2 it.loc 空 + 容器未定位 → 「尚未定位」人话报错', 
   assert.throws(() => s.acceptBatchCode({ type: 'ITM', code: 'I-CTN-NX' }), /物品所在容器 C-NX 尚未定位/);
 });
 
-test('CLM-3.3 it.loc 空 + 容器已定位 → 旧锚点 {loc:容器.库位, ctn:null}（回归）', () => {
+test('CLM-3.3 it.loc 空 + 容器已定位 → 旧锚点 {loc:容器.库位, ctn:null, sub:false}（回归）', () => {
   const s = mkScan(baseState());
   s.startBatch('issue');
   const r = s.acceptBatchCode({ type: 'ITM', code: 'I-CTN' });
   assert.equal(r.stage, 'anchor');
-  assert.deepEqual(s.batchState().anchor, { loc: 'L-A', ctn: null });
+  /* P3：容器链首件锚点同样带 sub:false（容器路径，形状统一） */
+  assert.deepEqual(s.batchState().anchor, { loc: 'L-A', ctn: null, sub: false });
 });
 
 test('CLM-3.4 it.loc 指向不存在库位 → 批量同样 NOT_FOUND', () => {
@@ -374,7 +384,7 @@ test('CLM-6.5 receive@域层：目标仍是容器↔库位 pair，容器不在�
   }, actor), /CONTAINER_LOCATION_MISMATCH/);
 });
 
-test('CLM-6.6 P1 已知风险锁（§六-1）：带遗留 loc 的 pending 件容器入库后，loc 存活并劫持定位（P2 互斥校验将放开/收敛）', () => {
+test('CLM-6.6 P2 正向锚点：容器入库显式清遗留 loc，双写劫持收敛（原 P1 已知风险锁放开）', () => {
   /* 按 item-repository.apply 的真实合并语义（只写 CONTROLLED 中 after 行携带的字段）落库 */
   function applyAfter(state, plan) {
     for (const [table, rows] of Object.entries(plan.after || {})) {
@@ -391,11 +401,11 @@ test('CLM-6.6 P1 已知风险锁（§六-1）：带遗留 loc 的 pending 件容
     target: { loc: 'L-A', container: 'C-A' }, expected: { itemVersion: 0, containerVersion: 2 }
   }, actor);
   assert.equal(plan.after.items[0].container, 'C-A', '容器入库本身照常通过');
-  assert.equal(Object.hasOwn(plan.after.items[0], 'loc'), false, 'after 只写受控字段，不触碰 loc');
-  assert.equal(Object.hasOwn(plan.before.items[0], 'loc'), false, 'pending（非 unknown）连 before 审计都不带 loc');
+  assert.equal(plan.after.items[0].loc, '', 'P2（A4 容器分支）：显式清空遗留 loc，双写互斥');
+  assert.equal(plan.before.items[0].loc, 'L-OLD', 'before 审计携带遗留 loc（受控快照自动携带，CLM-6.6 断言翻转）');
   applyAfter(state, plan);
-  assert.equal(state.items.find(r => r.code === 'I-STALE').loc, 'L-OLD', '遗留 loc 原样存活（无任何写入方清除）');
+  assert.equal(state.items.find(r => r.code === 'I-STALE').loc, '', '遗留 loc 被显式清除，不再存活');
   const pos = U.currentPosition(state, 'I-STALE');
-  assert.equal(pos.location.code, 'L-OLD', '陈旧直存库位劫持定位：显示旧库位而非容器链 L-A');
-  assert.equal(pos.container, null);
+  assert.equal(pos.location.code, 'L-A', '定位走容器链：显示容器所在库位，不再被 L-OLD 劫持');
+  assert.equal(pos.container.code, 'C-A', '容器链正常带出');
 });

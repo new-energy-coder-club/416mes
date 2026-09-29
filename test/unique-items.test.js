@@ -22,7 +22,7 @@ test('ITM migration is unknown, never stock; MAT and ledger untouched', () => {
 test('ITM receive plan is immutable intent, qty absent, no MAT accounting', () => {
   const st = fixture(), before = structuredClone(st), req = receive();
   const p = U.plan(st, req, actor);
-  assert.deepEqual(p.after.items[0], { code: 'I-P', container: 'C-A', status: 'in_stock', version: 1, lastOpId: 'op-1' });
+  assert.deepEqual(p.after.items[0], { code: 'I-P', container: 'C-A', loc: '', status: 'in_stock', version: 1, lastOpId: 'op-1' });
   assert.deepEqual(st, before); req.target.loc = 'changed'; assert.equal(p.request.target.loc, 'L-A');
   assert.throws(() => U.plan(st, { ...receive(), qty: 1 }, actor), { code: 'ITM_HAS_NO_QTY' });
 });
@@ -116,8 +116,8 @@ test('activateLocation on already-active location is an idempotent re-confirmati
   // expected 允许与本地陈旧视图一致（unknown）——现场核实以实物为准
   const p = U.plan(st, { schemaVersion: 1, opId: 're-confirm', kind: 'activateLocation', locationCode: 'L-A', expected: { locationStatus: 'unknown' } }, admin);
   assert.equal(p.phase, 'PREPARED');
-  assert.deepEqual(p.after.locations, [{ code: 'L-A', status: 'active' }], '实体值不变（幂等）');
-  assert.deepEqual(p.before.locations, [{ code: 'L-A', status: 'active' }]);
+  assert.deepEqual(p.after.locations, [{ code: 'L-A', status: 'active', role: '', parentContainer: '' }], '实体值不变（幂等，P2 手动行携带 role/parentContainer 空缺省）');
+  assert.deepEqual(p.before.locations, [{ code: 'L-A', status: 'active', role: '', parentContainer: '' }]);
 });
 test('activateLocation still rejects retired/disabled locations', () => {
   for (const status of ['retired', 'disabled']) {
@@ -135,7 +135,7 @@ test('C2 unknown→active proceeds with expected 缺省/空/猜错——不再 S
     U.migrate(st);
     const p = U.plan(st, { schemaVersion: 1, opId: 'c2-' + JSON.stringify(expected), kind: 'activateLocation', locationCode: 'L-U', expected }, admin);
     assert.equal(p.phase, 'PREPARED');
-    assert.deepEqual(p.after.locations, [{ code: 'L-U', status: 'active' }]);
+    assert.deepEqual(p.after.locations, [{ code: 'L-U', status: 'active', role: '', parentContainer: '' }]);
   }
 });
 

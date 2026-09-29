@@ -867,13 +867,17 @@ test('建档页：[hidden] 必须能压过 .itm-control 的 display:flex', () =>
   assert.ok(forced, '必须有一条 #itmRegisterDetails 作用域内、带 !important 的 [hidden]{display:none}，否则分类/规格框选容器时仍可见');
 });
 
-test('建档页：syncRegisterType 必须按类型切换分类与规格框', () => {
+test('建档页：syncRegisterType 必须按类型切换分类/容器类型/规格框', () => {
   /* syncRegisterType 在 lib/item-ui.js（建档表单由 ItemUI.mount 驱动），不在 index.html */
   const ui = fs.readFileSync(path.join(__dirname, '..', 'lib', 'item-ui.js'), 'utf8');
   const raw = ui.slice(ui.indexOf('function syncRegisterType('));
   const body = raw.slice(0, raw.indexOf('\n  }') + 4);
-  assert.match(body, /catWrap\.hidden\s*=\s*!isItem/, '分类框必须随「是否物品」切换');
-  assert.match(body, /specWrap\.hidden\s*=\s*!isItem/, '规格框必须随「是否物品」切换');
+  assert.match(body, /catWrap\.hidden\s*=\s*!isItem/, '物品分类框只对物品显示');
+  assert.match(body, /ctnTypeWrap\.hidden\s*=\s*!isCtn/, '容器类型框只对容器显示');
+  assert.match(body, /nameWrap\.hidden\s*=\s*isCtn/, '容器时隐藏名称框（类型走下拉、规格走规格框，名称框无对应字段）');
+  /* 规格框：物品与容器都要（两者都有 spec 字段），库位才隐藏（locations 只有 kind/desc） */
+  assert.match(body, /specWrap\.hidden\s*=\s*kind\s*===\s*'registerLocation'/, '规格框只对库位隐藏');
+  assert.match(body, /isCtn/, '必须区分容器以切换规格标签文案');
   /* 容器/库位没有发号流程，高级编码框要直接摊开（否则用户找不到编码入口） */
   assert.match(body, /adv\.open\s*=\s*true/, '非物品类型要摊开高级编码框');
 });
@@ -882,8 +886,27 @@ test('建档页：容器/库位提交的是现场编码 + 规格/说明，不要
   const ui = fs.readFileSync(path.join(__dirname, '..', 'lib', 'item-ui.js'), 'utf8');
   const s = ui.slice(ui.indexOf("el('itmRegister').addEventListener"), ui.indexOf("el('itmRetire').addEventListener"));
   assert.match(s, /请填写.*编码（现场实际编号）/, '库位/容器建档必须要求现场编码');
-  assert.match(s, /kind\s*===\s*'registerLocation'\s*\?\s*\{\s*desc\s*:\s*name\s*\}\s*:\s*\{\s*spec\s*:\s*name\s*\}/, '库位走 desc、容器走 spec（名称输入框按类型复用）');
-  /* 非物品分支只应读 manualCode 与 name，不该再读 itmRegisterCat */
-  const nonItem = s.slice(0, s.indexOf("if(kind!=='registerItem')") + 200);
+  /* 阶段B-补：容器必须是 type（飞书单选列，强校验）+ spec（自由填空）两个独立字段。
+     自由文本会被飞书拒收（单选列不接受新选项），所以类型做下拉并强校验非空；
+     规格（尺寸/颜色等）才是自由填空。 */
+  assert.match(s, /kind\s*===\s*'registerContainer'\s*&&\s*!ctnType/, '容器建档必须强校验类型已选');
+  assert.match(s, /type\s*:\s*ctnType\s*,\s*spec\s*\}/, '容器 entity 必须是 type + spec 两个字段');
+  assert.match(s, /registerLocation'\s*\?\s*\{\s*desc\s*:\s*name\s*\}/, '库位走 desc');
+  /* 非物品分支只应读 manualCode / ctnType / spec，不该再读 itmRegisterCat */
+  const nonItem = s.slice(0, s.indexOf("if(kind!=='registerItem')") + 260);
   assert.ok(!/itmRegisterCat/.test(nonItem), '非物品分支不得读物品分类');
+});
+
+/* 阶段B-补：容器类型的两处入口（建档页单选下拉 / 建档页容器码批量生成）必须用同一套值。
+   飞书「容器」表的 type 是 SELECT 单选列，只能接受固定选项；两处一旦漂移，
+   批量生成的能入库、手工会建档的会被飞书拒收，用户完全看不出原因。 */
+test('建档页：容器类型下拉与批量生成必须是同一套 6 个值', () => {
+  const opts = ['A4四抽收纳盒', '三连格文件盒', '斜口零件盒', '6040周转箱', '四层四格牛皮纸收纳盒', '开放式收纳格'];
+  opts.forEach(v => assert.ok(HTML.includes('value="' + v + '"'), '建档页容器类型下拉缺少「' + v + '」'));
+  const genBlock = HTML.slice(HTML.indexOf('id="gCtnType"'), HTML.indexOf('id="gCtnFrom"'));
+  opts.forEach(v => assert.ok(genBlock.includes(v), '容器码批量生成的类型表缺少「' + v + '」—— 两处会漂移'));
+  /* 下拉必须是单选且没有空值选项以外的东西：新增类型要同步改两处 + 飞书列选项 */
+  const ctnSel = HTML.slice(HTML.indexOf('id="itmRegisterCtnType"'), HTML.indexOf('id="itmRegisterName"'));
+  const optCount = (ctnSel.match(/<option/g) || []).length;
+  assert.equal(optCount, opts.length + 1, '容器类型下拉 = 6 个类型 + 1 个「请选择」占位，现在是 ' + optCount);
 });

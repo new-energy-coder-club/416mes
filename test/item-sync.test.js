@@ -1,9 +1,9 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const S = require('../lib/item-sync');
-const base = () => ({ items: [{ code: 'I-A', name: 'local', status: 'in_stock', container: 'C-A', version: 3, lastOpId: 'prior' }], itemOperations: [], materials: [{ code: 'M', qty: 7 }] });
+const base = () => ({ items: [{ code: 'I-A', name: 'local', status: 'in_stock', container: 'C-A', loc: '', version: 3, lastOpId: 'prior' }], itemOperations: [], materials: [{ code: 'M', qty: 7 }] });
 function remote() {
-  const row = { code: 'I-A', name: 'remote', container: '', status: 'out', version: 4, lastOpId: 'issue-1' };
+  const row = { code: 'I-A', name: 'remote', container: '', loc: '', status: 'out', version: 4, lastOpId: 'issue-1' };
   return { items: [row], itemOperations: [{ code: 'issue-1', phase: 'APPLIED', request: { kind: 'issue' }, requestHash: 'fake', operator: 'fake-user', before: {}, after: { items: [row] } }] };
 }
 test('full/incremental controlled groups preserve explicit clear and MAT', () => {
@@ -46,7 +46,7 @@ test('unversioned LOC historical matching proof cannot silently disable active l
     { code: 'a', kind: 'activateLocation', phase: 'APPLIED', after: { locations: [{ code: 'L-A', status: 'active' }] } },
     { code: 'd', phase: 'APPLIED', after: { locations: [{ code: 'L-A', status: 'disabled' }] } }
   ] };
-  const result = S.merge(st, { locations: [{ code: 'L-A', status: 'disabled' }] });
+  const result = S.merge(st, { locations: [{ code: 'L-A', status: 'disabled', role: '', parentContainer: '' }] });
   assert.equal(st.locations[0].status, 'active'); assert.ok(result.conflicts.length);
 });
 test('missing LOC status cannot erase confirmed active and late log resolves association on retry', () => {
