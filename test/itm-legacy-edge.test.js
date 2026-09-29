@@ -81,16 +81,10 @@ test('A7 receive: 完全未建档裸码 WP-999 → NOT_FOUND 原始英文错误'
   const r = outcome(() => s.accept('WP-999'));
   assert.equal(r.ok, false); assert.equal(r.error, 'items: WP-999');
 });
-test('A8 placeContainer 反转：unknown 容器直接可定位；已绑定拒绝并引导移库', () => {
+test('A8（A-4 3.13.31）placeContainer 扫码入口已删：scanOf 抛「不支持的扫码动作」；定位语义由向导 activateContainer+activateLocation 承接（plan 层冻结体见 B10/B11）', () => {
   const st = state();
-  const s0 = scanOf(st, 'placeContainer');
-  /* 新序列：先扫容器（看现状），再扫目标库位 */
-  assert.equal(outcome(() => s0.accept('CTN:C-NEW')).ok, true, 'unknown 容器放行（定位即启用）');
-  const s2 = scanOf(st, 'placeContainer');
-  const r2 = outcome(() => s2.accept('CTN:C-A'));
-  assert.equal(r2.ok, false);
-  assert.match(r2.error, /已绑定库位/);
-  assert.match(r2.error, /容器移库/);
+  assert.throws(() => scanOf(st, 'placeContainer'), /不支持的扫码动作：placeContainer/, 'A-4：扫码序列已删 placeContainer');
+  assert.throws(() => scanOf(st, 'moveContainer'), /不支持的扫码动作：moveContainer/, 'A-4：扫码序列已删 moveContainer');
 });
 
 /* ---------- B. 领域层（lib/unique-items.js plan）---------- */
@@ -127,16 +121,18 @@ test('B6 plan receive WP-001(unknown) → 直接入库且 before 留旧 loc；is
   assert.equal(p.before.items[0].loc, 'W01-G01', '旧 loc 线索留 before 供审计');
   assert.equal(outcome(() => U.plan(st, baseReq('issue', { itemCode: 'WP-001', source: { loc: 'W01-G01', container: 'C-A' }, expected: { itemVersion: 0, containerVersion: 1 } }), OPERATOR)).error, 'INVALID_TRANSITION');
 });
-test('B7 plan activateContainer C-OLD(旧loc=W02-G01) 目标W01-G01 → LEGACY_LOCATION_CONFLICT；目标=旧loc才放行', () => {
+test('B7 plan activateContainer C-OLD(旧loc=W02-G01) → 纯激活放行、目标被忽略、旧 loc 显式清空（A-2）', () => {
   const st = state();
-  assert.equal(outcome(() => U.plan(st, baseReq('activateContainer', { containerCode: 'C-OLD', target: { loc: 'W01-G01' }, expected: { containerVersion: 0 } }), ADMIN)).error, 'LEGACY_LOCATION_CONFLICT');
-  const p = U.plan(st, baseReq('activateContainer', { containerCode: 'C-OLD', target: { loc: 'W02-G01' }, expected: { containerVersion: 0 } }), ADMIN);
+  const p = U.plan(st, baseReq('activateContainer', { containerCode: 'C-OLD', target: { loc: 'W01-G01' }, expected: { containerVersion: 0 } }), ADMIN);
   assert.equal(p.after.containers[0].status, 'active');
+  assert.equal(p.after.containers[0].loc, '', 'A-2 纯激活：目标不解析、旧 loc 绝不保留');
+  assert.equal(p.before.containers[0].loc, 'W02-G01', '旧 loc 线索留 before 供审计');
 });
-test('B8 plan activateContainer C-NEW(无旧loc) → 允许', () => {
+test('B8 plan activateContainer C-NEW(无旧loc) → 允许（A-2：不落 loc，定位唯一落点是 placeContainer）', () => {
   const st = state();
   const p = U.plan(st, baseReq('activateContainer', { containerCode: 'C-NEW', target: { loc: 'W01-G01' }, expected: { containerVersion: 0 } }), ADMIN);
-  assert.equal(p.after.containers[0].loc, 'W01-G01');
+  assert.equal(p.after.containers[0].status, 'active');
+  assert.equal(p.after.containers[0].loc, '');
 });
 test('B9 修复后：verifyLegacy 冲突可用 confirmLegacyLocOverride 放行，unknown 也可 retire（有出口）', () => {
   const st = state();
@@ -195,8 +191,13 @@ test('C3 修复后：建档可沿用扫到的实物码 WP-999', async () => {
   assert.equal(queued.entity.code, 'WP-999', '修复后应沿用扫到的实物码');
 });
 
-/* ================= 2.57.0 Phase4：plan 层 placeContainer 反转 ================= */
-test('B10 plan placeContainer: unknown+空loc 原子启用定位；豁免自身冲突标记', () => {
+/* ================= 2.57.0 Phase4：plan 层 placeContainer 反转 =================
+   v3.13.32（A-7 冻结体迁移期兼容锁）：placeContainer/moveContainer 命令体在
+   lib/unique-items.js 带 ⚠ 冻结注释（Phase D 删 kind 时一并删除本测试）。
+   这里只保留**错误码级/计划行为级**断言；已移除的操作员界面文案（「移库」「定位」
+   等旧 UX 提示）不再作为断言对象——UI 侧 errZh.ALREADY_PLACED 自 3.13.31 起为
+   「容器已绑定库位，不能重复绑定」。 */
+test('B10 冻结体兼容锁 plan placeContainer: unknown+空loc 原子启用并落 loc；豁免自身冲突标记（Phase D 删 kind 时一并删除本测试）', () => {
   const st = { locations: [{ code: 'L-A', status: 'active' }], containers: [{ code: 'C-U', status: 'unknown', version: 0, lastOpId: '' }], items: [] };
   U.migrate(st);
   st.__itmConflicts = { 'containers:C-U': { reason: 'server-snapshot-unverified' } };
@@ -207,7 +208,9 @@ test('B10 plan placeContainer: unknown+空loc 原子启用定位；豁免自身�
   assert.equal(p.after.containers[0].version, 1);
   assert.equal(st.__itmConflicts['containers:C-U'].reason, 'server-snapshot-unverified', 'plan 纯净：标记不被改写');
 });
-test('B11 plan placeContainer: 已绑定容器拒绝并提示移库', () => {
+test('B11 冻结体兼容锁 plan placeContainer: 已绑定容器拒绝（ALREADY_PLACED）（Phase D 删 kind 时一并删除本测试）', () => {
+  /* 迁移期兼容锁：只断言拒绝码 ALREADY_PLACED（冻结体行为），不引用任何已移除的
+     操作员文案（3.13.31 起 errZh 为「容器已绑定库位，不能重复绑定」）。 */
   const st = { locations: [{ code: 'L-A', status: 'active' }, { code: 'L-B', status: 'active' }], containers: [{ code: 'C-B', loc: 'L-A', status: 'active', version: 1, lastOpId: '' }], items: [] };
   U.migrate(st);
   assert.throws(

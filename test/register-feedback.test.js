@@ -67,30 +67,33 @@ test('建档成功 → 结果框含物品码且完成语不覆盖二维码预览
 });
 
 
-/* 阶段B-补：容器建档 + 填了库位 → 建档成功后自动启用，不再掉进「核实启用」两步。
-   用户原话：「这啥啊，咋还要核实，不要核实，直接启用啊」。 */
-test('容器建档填了库位 → 建档成功后自动启用，只点一次就可用', async () => {
+/* v3.13.31 A-5+A-6：容器建档 + 填了库位 → 建档成功后自动打开「容器落位向导」，
+   向导先确保容器「已启用」（activateContainer 纯启用，不带 target），再把该格
+   标注为「容器子位」（activateLocation{role,parentContainer}）。用户确认一次即可用。 */
+test('容器建档填了库位 → 向导先启用容器再标注子位（命令链 activateContainer→activateLocation）', async () => {
   const submitted = [];
   const { document: d, state } = setup({
     client: {
       async submit(cmd) {
         const req = cmd.request;
-        submitted.push({ kind: req.kind, code: req.entity ? req.entity.code : req.containerCode, entity: req.entity, target: req.target });
-        /* 真链路由 item-persistence 依据 frozen.after 落库；mock 这里直接模拟落库效果，
-           否则后续 activateContainer 读不到刚建的容器（真实环境同样依赖这一步）。 */
+        submitted.push(structuredClone(req));
+        /* mock 直接模拟落库效果（真实链路由 item-persistence 依据 frozen.after 落库） */
         if (req.kind === 'registerContainer') {
           state.containers.push({ code: req.entity.code, type: req.entity.type, spec: req.entity.spec || '', loc: '', status: 'unknown', version: 1, lastOpId: 'x' });
         }
         if (req.kind === 'activateContainer') {
           const c = state.containers.find(x => x.code === req.containerCode);
-          if (c) { c.status = 'active'; c.loc = req.target.loc; c.version++; }
+          if (c) { c.status = 'active'; c.version++; }
+        }
+        if (req.kind === 'activateLocation') {
+          const l = state.locations.find(x => x.code === req.locationCode);
+          if (l) { l.role = '容器子位'; l.parentContainer = req.parentContainer; }
         }
         return { phase: 'APPLIED', request: req };
       }
     },
     online: true,
   });
-  // 容器要能启用，本地得有一条 active 的目标库位
   state.locations.push({ code: 'B-01-01-01', status: 'active', kind: '货架库位', desc: 'B区1层1位' });
   pick(d, 'itmRegisterType', 'registerContainer');
   pick(d, 'itmRegisterCtnType', '开放式收纳格');
@@ -99,18 +102,31 @@ test('容器建档填了库位 → 建档成功后自动启用，只点一次就
   d.getElementById('itmRegisterCtnLoc').value = 'B-01-01-01';
   d.getElementById('itmRegister').click(); await tick(14);
 
+  /* 建档成功只建档；启用与落位都由向导承接，用户点「标注此格」才入队 */
+  assert.deepEqual(submitted.map(s => s.kind), ['registerContainer'], '建档本身不再顺手启用/定位');
+  const box = d.getElementById('itmRegisterResult');
+  assert.match(box.textContent, /已建档：KF-777/, '建档事实要先说清');
+  assert.ok([...box.querySelectorAll('button')].some(b => b.textContent === '标注此格'), '向导要给出「标注此格」动作');
+  const slotInput = [...box.querySelectorAll('input')].find(i => i.value === 'B-01-01-01');
+  assert.ok(slotInput, '第一格按用户填的「容器位置」预填');
+
+  [...box.querySelectorAll('button')].find(b => b.textContent === '标注此格').click();
+  await tick(14);
+
   const kinds = submitted.map(s => s.kind);
-  assert.ok(kinds.includes('registerContainer'), '必须先建档');
-  assert.ok(kinds.includes('activateContainer'), '建档成功后必须自动启用（用户不该再手动点核实）');
+  assert.deepEqual(kinds, ['registerContainer', 'activateContainer', 'activateLocation'], '命令链固定：先启用容器，再标注子位');
   const act = submitted.find(s => s.kind === 'activateContainer');
-  assert.equal(act.code, 'KF-777', '启用对象就是刚建档的容器');
-  assert.equal(act.target.loc, 'B-01-01-01', '启用目标库位取用户填的容器位置');
-  assert.match(d.getElementById('itmRegisterResult').textContent, /已建档并启用/, '结果要明说「已建档并启用」');
-  assert.match(d.getElementById('itmRegisterResult').textContent, /B-01-01-01/, '结果要带出库位');
-  assert.doesNotMatch(d.getElementById('itmRegisterResult').textContent, /未核实|去核实启用/, '不该再把用户推去手动核实');
+  assert.equal(act.containerCode, 'KF-777', '启用对象就是刚建档的容器');
+  assert.equal(act.target, undefined, 'A-5 纯启用：activateContainer 不再携带 target');
+  const mark = submitted.find(s => s.kind === 'activateLocation');
+  assert.equal(mark.locationCode, 'B-01-01-01');
+  assert.equal(mark.role, '容器子位', '向导标注走「容器子位」角色');
+  assert.equal(mark.parentContainer, 'KF-777', '从属容器=刚建档的容器');
+  assert.match(box.textContent, /已标注为本容器的「容器子位」/, '结果要明说该格已标注');
+  assert.doesNotMatch(box.textContent, /已启用并定位/, 'A-5 后不再承诺「启用并定位」一句话结果');
 });
 
-test('容器建档没填库位 → 保持待核实，并说清补库位就能用', async () => {
+test('容器建档没填库位 → 保持待核实，并给「容器落位向导」入口', async () => {
   const submitted = [];
   const { document: d } = setup({
     client: {
@@ -123,17 +139,24 @@ test('容器建档没填库位 → 保持待核实，并说清补库位就能用
   d.getElementById('itmRegisterCode').value = 'XK-888';
   d.getElementById('itmRegisterCtnLoc').value = '';
   d.getElementById('itmRegister').click(); await tick(14);
-  assert.deepEqual(submitted, ['registerContainer'], '没填库位就不该自动激活（activateContainer 强制要求目标库位）');
+  assert.deepEqual(submitted, ['registerContainer'], '没填库位就不入任何激活/标注命令（由向导承接，用户确认后入队）');
   assert.match(d.getElementById('itmRegisterResult').textContent, /待核实/);
-  assert.match(d.getElementById('itmRegisterResult').textContent, /核实启用/, '仍要给出手动启用的入口');
+  assert.match(d.getElementById('itmRegisterResult').textContent, /落位向导/, '给出「容器落位向导」入口');
+  assert.ok([...d.getElementById('itmRegisterResult').querySelectorAll('button')].some(b => /容器落位向导/.test(b.textContent)), '要给可点的向导入口按钮');
 });
 
-test('容器自动启用失败 → 建档结果保留，并给「去核实启用」重试入口', async () => {
+test('容器落位向导：容器启用失败 → 说清失败并保留重试入口，不误报已标注', async () => {
+  const submitted = [];
   const { document: d, state } = setup({
     client: {
       async submit(cmd) {
-        if (cmd.request.kind === 'activateContainer') throw new Error('NOT_FOUND');
-        return { phase: 'APPLIED', request: cmd.request };
+        const req = cmd.request; submitted.push(req.kind);
+        if (req.kind === 'registerContainer') {
+          state.containers.push({ code: req.entity.code, type: req.entity.type, spec: '', loc: '', status: 'unknown', version: 1, lastOpId: 'x' });
+          return { phase: 'APPLIED', request: req };
+        }
+        if (req.kind === 'activateContainer') throw new Error('SERVER_DOWN');
+        return { phase: 'APPLIED', request: req };
       }
     },
     online: true,
@@ -144,10 +167,14 @@ test('容器自动启用失败 → 建档结果保留，并给「去核实启用
   d.getElementById('itmRegisterCode').value = 'ZZX-001';
   d.getElementById('itmRegisterCtnLoc').value = 'B-01-01-01';
   d.getElementById('itmRegister').click(); await tick(14);
-  const txt = d.getElementById('itmRegisterResult').textContent;
-  assert.match(txt, /已建档/, '建档成功的事实必须保留（不能因启用失败就否定建档）');
-  assert.match(txt, /自动启用没成功/, '必须说清启用这步失败了');
-  assert.ok([...d.getElementById('itmRegisterResult').querySelectorAll('button')].some(b => /去核实启用/.test(b.textContent)), '要给人手动重试的入口');
+  const box = d.getElementById('itmRegisterResult');
+  assert.match(box.textContent, /已建档/, '建档成功的事实必须保留（不能因启用失败就否定建档）');
+  [...box.querySelectorAll('button')].find(b => b.textContent === '标注此格').click();
+  await tick(14);
+  assert.match(box.textContent, /启用.*未完成|启用被拒/, '必须说清容器启用这步没成功');
+  assert.doesNotMatch(box.textContent, /已标注为本容器的「容器子位」/, '未生效不得谎报已标注');
+  assert.ok([...box.querySelectorAll('button')].some(b => b.textContent === '标注此格'), '重扫重试入口保留（处理后重扫此格）');
+  assert.deepEqual(submitted.filter(k => k === 'activateLocation'), [], '容器启用没成功就不该标注子位');
 });
 
 

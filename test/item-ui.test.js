@@ -15,7 +15,8 @@ test('query scan cannot fill operation row; row table resolves APPLIED by opId',
 test('query camera error stays in visible query status and does not overwrite work status',async()=>{const {document:d}=setup();const work=d.getElementById('itmStatus').textContent;d.getElementById('itmSearchCamera').click();await new Promise(r=>setImmediate(r));assert.match(d.getElementById('itmSearchStatus').textContent,/查询失败|不可用/);assert.equal(d.getElementById('itmStatus').textContent,work);});
 test('work UI translates kind, renders dynamic steps and mobile table labels',async()=>{const {document:d,page}=setup();assert.match(d.getElementById('itmStep').textContent,/入库.*目标库位/s);await page.accept('LOC:L-A');assert.match(d.getElementById('itmStep').textContent,/✓ 1 目标库位：L-A.*目标容器/s);const cells=[...d.getElementById('itmRowTable').querySelectorAll('td')];assert.deepEqual(cells.map(x=>x.getAttribute('data-th')),['行','库位','容器','物品','操作','状态']);assert.match(d.getElementById('itmRowTable').textContent,/入库/);assert.doesNotMatch(d.getElementById('itmStep').textContent,/行 \d+；/);});
 test('search results are Chinese cards with translated state and separate status',()=>{const {document:d}=setup();d.getElementById('itmSearch').value='part';d.getElementById('itmSearchBtn').click();assert.equal(d.getElementById('itmResults').querySelectorAll('.itm-result-card').length,1);assert.match(d.getElementById('itmResults').textContent,/物品.*待入库/s);assert.match(d.getElementById('itmSearchStatus').textContent,/找到 1 条/);});
-test('six operation types keep original sequences with distinct Chinese step guides',()=>{const {document:d,page}=setup();for(const [kind,count,label] of [['receive',3,'入库物品'],['issue',1,'出库物品（自动带出当前库位/容器）'],['transfer',3,'目标容器'],['moveContainer',2,'目标库位'],['placeContainer',2,'待定位容器'],['verifyLegacy',3,'旧物品']]){page.scan.add(kind);page.render();assert.equal(d.getElementById('itmStep').querySelectorAll('li').length,count);assert.match(d.getElementById('itmStep').textContent,new RegExp(label));assert.equal(d.getElementById('itmConfirm').disabled,true);}});
+test('four operation types keep original sequences with distinct Chinese step guides (A-4：move/place 已删)',()=>{const {document:d,page}=setup();for(const [kind,count,label] of [['receive',3,'入库物品'],['issue',1,'出库物品（自动带出当前库位/容器）'],['transfer',3,'目标容器'],['verifyLegacy',3,'旧物品']]){page.scan.add(kind);page.render();assert.equal(d.getElementById('itmStep').querySelectorAll('li').length,count);assert.match(d.getElementById('itmStep').textContent,new RegExp(label));assert.equal(d.getElementById('itmConfirm').disabled,true);}});
+test('A-4：moveContainer/placeContainer 已从扫码序列删除，未知类型一律抛错（请重新选择作业类型）',()=>{const {page}=setup();const stepsBefore=page.scan.row&&page.scan.row().steps?JSON.parse(JSON.stringify(page.scan.row().steps)):null;for(const kind of ['moveContainer','placeContainer','unknownKind']){assert.throws(()=>page.scan.add(kind),/不支持的扫码动作：.*/,'已删/未知类型必须抛错引导重选');}if(stepsBefore)assert.deepEqual(JSON.parse(JSON.stringify(page.scan.row().steps)),stepsBefore,'抛错后步骤序列不被污染');});
 test('pending cards never auto-submit and preserve original command for explicit actions',async()=>{const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);const command={id:'uuid-long-original-command',status:'pending',request:{kind:'receive',itemCode:'I-P',target:{loc:'L-A',container:'C-A'}}};let submitted=0,queried=0;const page=UI.mount({document:d,getState:()=>({}),id:()=> 'id',getPersistence:()=>null,getCommands:async()=>[command],getClient:()=>({submit:async c=>{assert.equal(c,command);submitted++;return {phase:'APPLIED'};},query:async c=>{assert.equal(c,command);queried++;return {phase:'PREPARED'};}})});await page.pending();assert.equal(submitted,0);assert.equal(queried,0);const card=d.getElementById('itmPending').querySelector('article');assert.match(card.textContent,/入库 · 待提交/);assert.match(card.querySelector('.itm-meta').textContent,/uuid-long-original-command/);card.querySelector('button').click();await new Promise(r=>setImmediate(r));assert.equal(submitted,1);assert.equal(queried,0);d.getElementById('itmPending').querySelectorAll('button')[1].click();await new Promise(r=>setImmediate(r));assert.equal(queried,1);assert.match(d.getElementById('itmStatus').textContent,/已准备，待确认/);});
 test('query missing codes and detail errors stay local without mutating state or drafts',()=>{const {document:d,page,state}=setup();const before=JSON.stringify(state),draft=page.scan.snapshot(),work=d.getElementById('itmStatus').textContent;page.queryScan('ITM:missing');assert.match(d.getElementById('itmSearchStatus').textContent,/未找到编码/);page.detail('items','missing');assert.match(d.getElementById('itmSearchStatus').textContent,/查询失败/);assert.equal(d.getElementById('itmStatus').textContent,work);assert.equal(JSON.stringify(state),before);assert.deepEqual(page.scan.snapshot(),draft);});
 test('DOM location drilldown to container then item works via actual clicks',()=>{const {document:d,state}=setup();state.items[1]={...state.items[1],status:'in_stock',container:'C-A'};d.getElementById('itmSearch').value='LOC:L-A';d.getElementById('itmSearchBtn').click();d.getElementById('itmResults').querySelector('button').click();const buttons=[...d.getElementById('itmResults').querySelectorAll('button')];buttons.find(b=>b.textContent.includes('I-P')).click();assert.match(d.getElementById('itmResults').textContent,/C-A → L-A/);});
@@ -67,12 +68,12 @@ test('guided activate: genuinely missing archive still reports missing with reco
  assert.match(d.getElementById('itmStatus').textContent,/未识别|未启用|未找到/,'不存在的编码不得伪装成成功');
  assert.equal(s.submitted,0,'不得产生任何激活命令');
 });
-test('guided activate: unknown container auto-activates using current row LOC as target and resumes',async()=>{
+test('guided activate: unknown container auto-activates (A-5 纯启用，不带 target) and resumes',async()=>{
  const s=setupGuided();const d=s.document,page=s.page;
  await page.accept('LOC:L-A');
  d.getElementById('itmCode').value='CTN:C-OLD';d.getElementById('itmScanBtn').click();await tickN(12);
  assert.match(d.getElementById('itmStatus').textContent,/自动核实启用|已启用|已填写草稿/,'容器未启用也自动启用');
- assert.equal(s.queued&&s.queued.kind,'activateContainer');assert.equal(s.queued&&s.queued.target.loc,'L-A');assert.equal(s.submitted,1);
+ assert.equal(s.queued&&s.queued.kind,'activateContainer');assert.equal(s.queued&&s.queued.target,undefined,'A-5：activateContainer 纯启用，不再携带 target——容器与库位的从属由落位向导的子位标注承接');assert.equal(s.submitted,1);
  assert.deepEqual(page.scan.row().values.map(v=>v.code),['L-A','C-OLD']);
 });
 test('guided verify 并入入库：unknown 物品直接入库成功（旧物品核实入口已移除）',async()=>{
@@ -298,22 +299,29 @@ test('retired entity shows plain notice without activate button',async()=>{
  const text=d.getElementById('itmStatus').textContent;
  assert.match(text,/已退役/);assert.equal(d.getElementById('itmStatus').querySelector('button'),null,'退役不得提供启用按钮');
 });
-test('guided activate REJECTED legacy mismatch offers override resubmit',async()=>{
+test('guided activate REJECTED legacy mismatch abandons card and offers plain retry (A-5：LEGACY 现场出口已删)',async()=>{
  const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
- let n=0,queued=null;
+ let n=0,queued=null,ctnSub=0;
  const state={locations:[{code:'L-A',status:'active'}],containers:[{code:'C-OLD',loc:'W-ELSEWHERE',status:'unknown',version:0}],items:[]};
- const persistence={async enqueue(r){queued=r;},async saveDraft(){},async recover(){return{drafts:[],commands:[]}}};
- const client={async submit(){return {phase:'REJECTED',error:'LEGACY_LOCATION_CONFLICT'};}};
+ const persistence={async enqueue(r){queued=r;},async saveDraft(){},async recover(){return{drafts:[],commands:[]}},async abandonCommand(){}};
+ /* 扫描未启用容器会在扫码时直接跑 guidedActivate（lib :536），无中间启用按钮；
+    只对第一个 activateContainer 提交给 LEGACY 拒绝，重试（换新 opId）后放行 */
+ const client={async submit(cmd){if(cmd&&cmd.request&&cmd.request.kind==='activateContainer'){ctnSub++;return ctnSub===1?{phase:'REJECTED',error:'LEGACY_LOCATION_CONFLICT'}:{phase:'APPLIED'};}return {phase:'APPLIED'};}};
  const page=UI.mount({document:d,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>queued?[{id:queued.opId,op:'itemOperation',request:queued}]:[],getClient:()=>client,id:()=>'g2-'+(++n)});
  await page.accept('LOC:L-A');
- d.getElementById('itmCode').value='CTN:C-OLD';d.getElementById('itmScanBtn').click();await tickN();
- const action=d.getElementById('itmStatus').querySelector('button');
- assert.ok(action,'容器未启用有启用按钮');action.click();await tickN(12);
- const override=[...d.getElementById('itmStatus').querySelectorAll('button')].find(b=>b.textContent.includes('以现场扫描为准'));
- assert.ok(override,'REJECTED(LEGACY_LOCATION_CONFLICT) 应提供现场扫描为准重发');
- override.click();await tickN(12);
- assert.equal(queued.confirmLegacyLocOverride,true,'重发命令带现场确认覆盖标记');
- assert.doesNotMatch(d.getElementById('itmStatus').textContent,/请查询原命令/,'拒绝后不再指向已删除的卡');
+ d.getElementById('itmCode').value='CTN:C-OLD';d.getElementById('itmScanBtn').click();await tickN(12);
+ const text=d.getElementById('itmStatus').textContent;
+ assert.equal(ctnSub,1,'扫码即自动提交启用命令（无中间启用按钮）');
+ assert.match(text,/启用被拒绝/,'REJECTED 后如实说明拒绝');
+ assert.match(text,/LEGACY_LOCATION_CONFLICT/,'拒绝原因保留原始码便于排查');
+ assert.ok(![...d.getElementById('itmStatus').querySelectorAll('button')].some(b=>b.textContent.includes('以现场扫描为准')),'A-5：LEGACY 现场出口已删，不再提供覆盖重发');
+ assert.equal(queued.confirmLegacyLocOverride,undefined,'不再带现场确认覆盖标记');
+ assert.doesNotMatch(text,/请查询原命令/,'拒绝后不再指向已删除的卡');
+ const retry=d.getElementById('itmStatus').querySelector('button');
+ assert.ok(retry&&retry.textContent==='重试启用','失败就地给「重试启用」（换新 opId 重新走 guidedActivate）');
+ retry.click();await tickN(12);
+ assert.equal(ctnSub,2,'重试重新提交激活命令');
+ assert.match(d.getElementById('itmStatus').textContent,/已启用 C-OLD/,'重试成功后回到正常启用流程');
 });
 test('pending card surfaces lastError and offers needs_attention retry (v3.5.0：同 opId 重放键已删)',async()=>{
  const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
@@ -523,7 +531,7 @@ test('P1a 批量锚点已扫：未启用容器自动启用，以批量锚点库�
  d.getElementById('itmCode').value='CTN:C-OLD';d.getElementById('itmScanBtn').click();await tickN(12);
  assert.doesNotMatch(d.getElementById('itmStatus').textContent,/请先扫描该容器所在的库位码/,'批量锚点已定，不得再要求扫库位');
  assert.equal(s.queued&&s.queued.kind,'activateContainer');
- assert.equal(s.queued&&s.queued.target.loc,'L-A','目标库位=批量锚点（旧实现在当前行 values 找不到 LOC 直接抛错）');
+ assert.equal(s.queued&&s.queued.target,undefined,'A-5：activateContainer 纯启用，不带 target（定位由容器落位向导负责）');
  assert.deepEqual(page.scan.batchState()&&page.scan.batchState().anchor,{loc:'L-A',ctn:'C-OLD',ctnVersion:0},'APPLIED后自动重试锚点容器成功');
 });
 
@@ -840,12 +848,13 @@ test('v3.4.0 R1：核实启用（库位）在线即时提交并就地显示「�
  assert.equal(s.submitted[0].kind,'activateLocation');
  assert.match(s.d.getElementById('itmRegisterResult').textContent,/已启用 L-X/,'结果镜像到建档管理页（itmStatus 在物品作业页，建档页用户看不见）');
 });
-test('v3.4.0 R1：核实启用（容器）用面板目标库位即时提交',async()=>{
+test('v3.4.0 R1（A-5 3.13.31）：核实启用（容器）纯启用——不再要求/携带目标库位',async()=>{
  const s=setupActivateUI();
  s.d.getElementById('itmAdminLoc').value='L-X';s.d.getElementById('itmAdminContainer').value='C-X';
  s.d.getElementById('itmActivateContainer').click();await tickN(8);
  assert.equal(s.submitted.length,1,'容器启用同样即时提交');
- assert.deepEqual(s.submitted[0].target,{loc:'L-X'},'目标库位=面板填写的 itmAdminLoc（guidedActivate 的 opts.targetLoc 覆盖）');
+ assert.equal(s.submitted[0].target,undefined,'A-5 纯启用：activateContainer 请求不再携带 target（定位由落位向导的子位标注承接）');
+ assert.equal(s.submitted[0].containerCode,'C-X');
 });
 test('v3.4.0 R1：核实启用离线时仅入队并如实提示',async()=>{
  const s=setupActivateUI({online:false});

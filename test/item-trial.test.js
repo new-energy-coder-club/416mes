@@ -136,26 +136,27 @@ test('S3: 过期僵尸检出部分写入 → REPAIR_REQUIRED（仅该命令，�
 });
 
 /* ================= S2（v3.3.0）：启用容器幂等化 ================= */
-test('S2: 已启用容器同库位重确认——本地版本陈旧也 APPLIED（不再 VERSION_CONFLICT 死循环）', async () => {
+test('S2: 已启用容器重确认——本地版本陈旧也 APPLIED（不再 VERSION_CONFLICT 死循环）；纯激活后 loc 显式清空（A-2）', async () => {
   const { repository } = trialFixture();
   const service = require('../lib/item-operation').create({ repository, coordinator: require('../lib/item-trial-coordinator').create(repository), enabled: true, mode: 'feishu-trial' });
-  /* 云端容器已是 active@L（比如上一次启用实际已生效但本机 ACK 未落），
+  /* 云端容器已是 active（比如上一次启用实际已生效但本机 ACK 未落），
      本机镜像陈旧带旧版本 + 未核验冲突——重发启用命令必须幂等成功 */
   repository.state.containers[0].status = 'active';
   const r = await service.post({ roles: ['admin'] }, { schemaVersion: 1, opId: 're-act', kind: 'activateContainer', containerCode: 'C', target: { loc: 'L' }, expected: { containerVersion: 99 } });
   assert.equal(r.phase, 'APPLIED', r.error);
   const c = repository.state.containers[0];
-  assert.equal(c.status, 'active');assert.equal(c.loc, 'L');
+  assert.equal(c.status, 'active');
+  assert.equal(c.loc, '', 'A-2 纯激活：target 不再解析、旧 loc 绝不保留（容器从属唯一落点是 placeContainer/moveContainer）');
   assert.equal(c.lastOpId, 're-act', '重确认生成新凭据（同步合并要求）');
 });
-test('S2: 真实变更仍守版本与旧位——错版本拒 VERSION、旧位不确认拒 LEGACY、确认后成功', async () => {
+test('S2: 真实变更仍守版本——错版本拒 VERSION_CONFLICT；正确版本激活成功且旧 loc 显式清空（A-2）', async () => {
   const { repository } = trialFixture();
   const service = require('../lib/item-operation').create({ repository, coordinator: require('../lib/item-trial-coordinator').create(repository), enabled: true, mode: 'feishu-trial' });
-  repository.state.containers[0].loc = 'L2';   // 旧位与目标 L 不同
+  repository.state.containers[0].status = 'unknown';   // 真实变更（unknown → active）：版本前置保留
+  repository.state.containers[0].loc = 'L2';           // 旧位残留——激活绝不改写/保留它（A-2 删除 LEGACY 确认路径）
   const r1 = await service.post({ roles: ['admin'] }, { schemaVersion: 1, opId: 'move-stale', kind: 'activateContainer', containerCode: 'C', target: { loc: 'L' }, expected: { containerVersion: 99 } });
-  assert.equal(r1.phase, 'REJECTED');assert.match(r1.error, /VERSION_CONFLICT/, '真实变更版本前置保留（换位不是幂等重确认）');
-  const r2 = await service.post({ roles: ['admin'] }, { schemaVersion: 1, opId: 'move-noconfirm', kind: 'activateContainer', containerCode: 'C', target: { loc: 'L' }, expected: { containerVersion: 2 } });
-  assert.equal(r2.phase, 'REJECTED');assert.match(r2.error, /LEGACY_LOCATION_CONFLICT/, '换位是真实变更：旧位确认不可跳过');
-  const r3 = await service.post({ roles: ['admin'] }, { schemaVersion: 1, opId: 'move-ok', kind: 'activateContainer', containerCode: 'C', target: { loc: 'L' }, expected: { containerVersion: 2 }, confirmLegacyLocOverride: true });
-  assert.equal(r3.phase, 'APPLIED', r3.error);
+  assert.equal(r1.phase, 'REJECTED');assert.match(r1.error, /VERSION_CONFLICT/, '真实变更版本前置保留');
+  const r2 = await service.post({ roles: ['admin'] }, { schemaVersion: 1, opId: 'act-ok', kind: 'activateContainer', containerCode: 'C', target: { loc: 'L' }, expected: { containerVersion: 2 } });
+  assert.equal(r2.phase, 'APPLIED', r2.error);
+  assert.equal(repository.state.containers[0].loc, '', 'A-2 纯激活：after 显式清空旧 loc（绝不保留旧值）');
 });

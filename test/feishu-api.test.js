@@ -347,11 +347,13 @@ test('ITM real repository HTTP prepare/apply/readAfter/finish preserves clear an
     assert.equal(registered.phase, 'APPLIED', registered.error);
   }
   const bootstrap = require('../lib/item-operation').create({ repository, coordinator: require('./fixtures/item-protocol').coordinatorFixture(), enabled: true, authenticate: async () => ({ id: 'admin', roles: ['admin'] }) });
+  /* A-2 纯激活：activateContainer 不再落 loc，容器定位由 placeContainer 完成 */
   const chain = [
     { kind: 'activateLocation', locationCode: 'L-NEW', expected: { locationStatus: 'unknown' } },
-    { kind: 'activateContainer', containerCode: 'C-NEW', target: { loc: 'L-NEW' }, expected: { containerVersion: 1 } },
-    { kind: 'receive', itemCode: 'WP-NEW', target: { loc: 'L-NEW', container: 'C-NEW' }, expected: { itemVersion: 1, containerVersion: 2 } },
-    { kind: 'issue', itemCode: 'WP-NEW', source: { loc: 'L-NEW', container: 'C-NEW' }, expected: { itemVersion: 2, containerVersion: 2 } }
+    { kind: 'activateContainer', containerCode: 'C-NEW', expected: { containerVersion: 1 } },
+    { kind: 'placeContainer', containerCode: 'C-NEW', target: { loc: 'L-NEW' }, expected: { containerVersion: 2 } },
+    { kind: 'receive', itemCode: 'WP-NEW', target: { loc: 'L-NEW', container: 'C-NEW' }, expected: { itemVersion: 1, containerVersion: 3 } },
+    { kind: 'issue', itemCode: 'WP-NEW', source: { loc: 'L-NEW', container: 'C-NEW' }, expected: { itemVersion: 2, containerVersion: 3 } }
   ];
   for (const [index, step] of chain.entries()) { const result = await bootstrap.post({}, { schemaVersion: 1, opId: 'bootstrap-' + index, ...step }); assert.equal(result.phase, 'APPLIED', result.error); }
   const finalClient = { items: [], containers: [], locations: [], itemOperations: [] };
@@ -423,7 +425,8 @@ async function bootstrapTrialLocationContainer(f) {
     { kind: 'registerLocation', entity: { code: 'L-001' } },
     { kind: 'registerContainer', entity: { code: 'C-001' } },
     { kind: 'activateLocation', locationCode: 'L-001', expected: { locationStatus: 'unknown' } },
-    { kind: 'activateContainer', containerCode: 'C-001', target: { loc: 'L-001' }, expected: { containerVersion: 1 } }
+    { kind: 'activateContainer', containerCode: 'C-001', expected: { containerVersion: 1 } },
+    { kind: 'placeContainer', containerCode: 'C-001', target: { loc: 'L-001' }, expected: { containerVersion: 2 } }
   ]) await trialApplied(f, { schemaVersion: 1, opId: 'trial-' + step.kind, ...step });
 }
 
@@ -439,12 +442,12 @@ for (const legacy of [false, true]) {
     assert.equal(f.tables.trialC.rows[0]['状态'], 'active');
     assert.equal(f.tables.trialC.rows[0]['当前库位码'], 'L-001');
     if (!legacy) await trialApplied(f, { schemaVersion: 1, opId: 'trial-registerItem', kind: 'registerItem', entity: { code: '001' } });
-    const incoming = { schemaVersion: 1, opId: 'trial-incoming', kind: legacy ? 'verifyLegacy' : 'receive', itemCode: '001', target: { loc: 'L-001', container: 'C-001' }, expected: { itemVersion: legacy ? 0 : 1, containerVersion: 2 } };
+    const incoming = { schemaVersion: 1, opId: 'trial-incoming', kind: legacy ? 'verifyLegacy' : 'receive', itemCode: '001', target: { loc: 'L-001', container: 'C-001' }, expected: { itemVersion: legacy ? 0 : 1, containerVersion: 3 } };
     const received = await trialApplied(f, incoming);
     assert.equal(received.before.items[0].status, legacy ? 'unknown' : 'pending');
     assert.equal(f.tables.trialI.rows[0]['状态'], 'in_stock');
     assert.equal(f.tables.trialI.rows[0]['容器码'], 'C-001');
-    const outgoing = { schemaVersion: 1, opId: 'trial-outgoing', kind: 'issue', itemCode: '001', source: incoming.target, expected: { itemVersion: legacy ? 1 : 2, containerVersion: 2 } };
+    const outgoing = { schemaVersion: 1, opId: 'trial-outgoing', kind: 'issue', itemCode: '001', source: incoming.target, expected: { itemVersion: legacy ? 1 : 2, containerVersion: 3 } };
     const issued = await trialApplied(f, outgoing);
     assert.equal(f.tables.trialI.rows[0]['物品码'], '001');
     assert.equal(f.tables.trialI.rows[0]['状态'], 'out');
@@ -503,10 +506,10 @@ test('ITM feishu-trial HTTP: 服务端发号建档（不带码）→ receive →
   const L = require('../lib/item-link');
   assert.equal(L.toItemCode(L.decode(L.fromItemCode('WP-TS-005'))), 'WP-TS-005');
   // 发号物品走 receive → issue 全链
-  const incoming = { schemaVersion: 1, opId: 'auto-receive', kind: 'receive', itemCode: 'WP-TS-005', target: { loc: 'L-001', container: 'C-001' }, expected: { itemVersion: 1, containerVersion: 2 } };
+  const incoming = { schemaVersion: 1, opId: 'auto-receive', kind: 'receive', itemCode: 'WP-TS-005', target: { loc: 'L-001', container: 'C-001' }, expected: { itemVersion: 1, containerVersion: 3 } };
   await trialApplied(f, incoming);
   assert.equal(f.tables.trialI.rows.find(r => r['物品码'] === 'WP-TS-005')['状态'], 'in_stock');
-  const outgoing = { schemaVersion: 1, opId: 'auto-issue', kind: 'issue', itemCode: 'WP-TS-005', source: incoming.target, expected: { itemVersion: 2, containerVersion: 2 } };
+  const outgoing = { schemaVersion: 1, opId: 'auto-issue', kind: 'issue', itemCode: 'WP-TS-005', source: incoming.target, expected: { itemVersion: 2, containerVersion: 3 } };
   await trialApplied(f, outgoing);
   assert.equal(f.tables.trialI.rows.find(r => r['物品码'] === 'WP-TS-005')['状态'], 'out');
   // 非法分类 / 非规范手动码在 HTTP 层的错误码
@@ -527,7 +530,7 @@ test('ITM feishu-trial HTTP: apply 异常同请求内回读定性（C3），失�
   });
   await bootstrapTrialLocationContainer(f);
   await trialApplied(f, { schemaVersion: 1, opId: 'repair-register', kind: 'registerItem', entity: { code: '001' } });
-  const command = { schemaVersion: 1, opId: 'repair-receive', kind: 'receive', itemCode: '001', target: { loc: 'L-001', container: 'C-001' }, expected: { itemVersion: 1, containerVersion: 2 } };
+  const command = { schemaVersion: 1, opId: 'repair-receive', kind: 'receive', itemCode: '001', target: { loc: 'L-001', container: 'C-001' }, expected: { itemVersion: 1, containerVersion: 3 } };
   const entityAttempts = f.entityWrites().length;
   rejectItemUpdate = true;
   const failed = await f.post(command);
@@ -563,22 +566,22 @@ test('ITM feishu-trial HTTP: apply 异常同请求内回读定性（C3），失�
 });
 
 /* ================= v3.3.1 端到端：上次遗留未决命令的死锁闭环（用户实测故事） =================
-   故事：上次会话把「启用容器」命令提交后进程中断（回执没送到）→ 云端留 PREPARED 僵尸 →
+   故事：上次会话把「容器定位入库（placeContainer）」命令提交后进程中断（回执没送到）→ 云端留 PREPARED 僵尸 →
    本次会话该命令查询永远非终态（卡「结果待确认」）→ 用户作废/放弃跟踪，重新扫容器启用。
    验证整条链：查询非终态如实呈现 → 新命令不被僵尸阻塞（幂等 APPLIED）→ claim 顺带收口僵尸 →
    人工收口通道（UI 收口按钮走的 settle API）→ 同 opId 幂等重放。 */
-test('ITM feishu-trial HTTP 端到端：遗留未决启用命令 → 不阻塞新命令 → 自动/人工收口/幂等闭环', async t => {
+test('ITM feishu-trial HTTP 端到端：遗留未决定位命令 → 不阻塞新命令 → 自动/人工收口/幂等闭环', async t => {
   const f = await startItemTrialHttp(t);
-  await bootstrapTrialLocationContainer(f);   /* L-001 active；C-001 active@L-001，version 2，lastOpId=trial-activateContainer */
-  const reality = { code: 'C-001', loc: 'L-001', status: 'active', version: 2, lastOpId: 'trial-activateContainer' };
-  const beforeReality = { code: 'C-001', loc: 'L-001', status: 'unknown', version: 1, lastOpId: 'trial-registerContainer' };
-  /* 上次会话的僵尸行：目标快照===现实（实际已生效但 finish 没落），受理时间拨回 11 分钟前 */
+  await bootstrapTrialLocationContainer(f);   /* L-001 active；A-2 纯激活+placeContainer 定位：C-001 active@L-001，version 3，lastOpId=trial-placeContainer */
+  const reality = { code: 'C-001', loc: 'L-001', status: 'active', version: 3, lastOpId: 'trial-placeContainer' };
+  const activated = { code: 'C-001', loc: '', status: 'active', version: 2, lastOpId: 'trial-activateContainer' };
+  /* 上次会话的僵尸行（A-2 拆分后卡在定位步）：目标快照===现实（实际已生效但 finish 没落），受理时间拨回 11 分钟前 */
   f.tables.trialO.rows.push({
-    '操作ID': 'op-old', '操作类型': 'activateContainer',
-    '请求内容': JSON.stringify({ schemaVersion: 1, opId: 'op-old', kind: 'activateContainer', containerCode: 'C-001', target: { loc: 'L-001' }, expected: { containerVersion: 1 } }),
+    '操作ID': 'op-old', '操作类型': 'placeContainer',
+    '请求内容': JSON.stringify({ schemaVersion: 1, opId: 'op-old', kind: 'placeContainer', containerCode: 'C-001', target: { loc: 'L-001' }, expected: { containerVersion: 2 } }),
     '请求摘要': 'hash-old',
     '处理阶段': 'PREPARED',
-    '操作前快照': JSON.stringify({ containers: [beforeReality] }),
+    '操作前快照': JSON.stringify({ containers: [activated] }),
     '目标快照': JSON.stringify({ containers: [reality] }),
     '受理时间': new Date(Date.now() - 11 * 60 * 1000).toISOString()
   });
@@ -589,21 +592,21 @@ test('ITM feishu-trial HTTP 端到端：遗留未决启用命令 → 不阻塞�
   assert.equal(stuck.body.operation.phase, 'REPAIR_REQUIRED');
   assert.match(stuck.body.operation.error, /未决/);
   /* ② 用户放弃跟踪后重新扫容器启用（新 opId）：绝不被僵尸行阻塞；
-        容器已是 active@L-001 → S2 幂等化直接 APPLIED（不查版本、不比 opId） */
-  const freshRequest = { schemaVersion: 1, opId: 'op-new', kind: 'activateContainer', containerCode: 'C-001', target: { loc: 'L-001' }, expected: { containerVersion: 2 } };
+        容器已是 active（A-2 纯激活幂等，loc 归 placeContainer 管）→ 直接 APPLIED（不查版本、不比 opId） */
+  const freshRequest = { schemaVersion: 1, opId: 'op-new', kind: 'activateContainer', containerCode: 'C-001', expected: { containerVersion: 3 } };
   const applied = await trialApplied(f, freshRequest);
   assert.equal(applied.code, 'op-new');
   /* ③ 新命令 claim 时顺带自动收口僵尸：目标快照与实体实际状态一致 → 判「已生效」 */
   assert.equal(f.tables.trialO.rows.find(r => r['操作ID'] === 'op-old')['处理阶段'], 'APPLIED', '遗留僵尸被顺带收口为 APPLIED（实际已生效）');
   /* ④ 人工收口通道（UI「收口此命令」按钮走 settle API）：另一条未决行立即三态判定。
-        其目标快照与 op-new 幂等落定后的现实一致（同样要 active@L-001）→ 回读一致 → APPLIED */
+        其目标快照与 op-new 幂等落定后的现实一致（A-2 激活即 active 且 loc 置空）→ 回读一致 → APPLIED */
   f.tables.trialO.rows.push({
     '操作ID': 'op-fresh', '操作类型': 'activateContainer',
-    '请求内容': JSON.stringify({ schemaVersion: 1, opId: 'op-fresh', kind: 'activateContainer', containerCode: 'C-001', target: { loc: 'L-001' }, expected: { containerVersion: 2 } }),
+    '请求内容': JSON.stringify({ schemaVersion: 1, opId: 'op-fresh', kind: 'activateContainer', containerCode: 'C-001', expected: { containerVersion: 3 } }),
     '请求摘要': 'hash-fresh',
     '处理阶段': 'PREPARED',
     '操作前快照': JSON.stringify({ containers: [reality] }),
-    '目标快照': JSON.stringify({ containers: [{ code: 'C-001', loc: 'L-001', status: 'active', version: 3, lastOpId: 'op-new' }] }),
+    '目标快照': JSON.stringify({ containers: [{ code: 'C-001', loc: '', status: 'active', version: 4, lastOpId: 'op-new' }] }),
     '受理时间': new Date().toISOString()
   });
   const settleResponse = await f.post({ action: 'settle', opId: 'op-fresh' });

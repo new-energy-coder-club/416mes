@@ -125,18 +125,25 @@ test('SCL-7.1 A2 正向：FREE 库位显式标记为容器子位；同父重标�
   assert.deepEqual(recon.after.locations, [{ code: 'SUB-A1', status: 'active', role: '容器子位', parentContainer: 'C-A' }]);
 });
 
-test('SCL-7.2 A2 负向：空父容器/旧模型占位/改绑/未知父/停用父/孤儿子位 → 全部拒绝', () => {
+test('SCL-7.2 A2 负向：空父容器/他者占位/改绑/未知父/停用父/孤儿子位 → 全部拒绝；自身占位放行（A-3 增量A）', () => {
   const st = seed();
   st.locations.push(U.normalize('locations', { code: 'L-B', status: 'unknown' }));
+  st.locations.push(U.normalize('locations', { code: 'L-C', status: 'active' }));
   st.containers.push(U.normalize('containers', { code: 'C-DIS', loc: '', status: 'disabled', version: 1, lastOpId: 'x-1' }));
+  st.containers.push(U.normalize('containers', { code: 'C-OTH', loc: 'L-C', status: 'active', version: 1, lastOpId: 'x-2' }));
   const mark = (opId, locationCode, parentContainer) =>
     planOf(st, { schemaVersion: 1, kind: 'activateLocation', opId, locationCode, role: '容器子位', parentContainer }, admin);
   assert.throws(() => mark('a2-2a', 'L-B', ''), e => e.code === 'MISSING_RELATION', '空父容器串 = 未声明关系');
-  assert.throws(() => mark('a2-2b', 'L-A', 'C-A'), e => e.code === 'LOC_ALREADY_BOUND', 'L-A 已被 C-A 旧模型绑定');
+  /* A-3 增量A：他者占用仍拒绝——L-C 被 C-OTH 旧模型绑定，声明的父却是 C-A */
+  assert.throws(() => mark('a2-2b', 'L-C', 'C-A'), e => e.code === 'LOC_ALREADY_BOUND', 'L-C 已被容器 C-OTH 绑定，声明的父却是 C-A');
   assert.throws(() => mark('a2-2c', 'SUB-A1', 'C-NX'), e => e.code === 'LOC_ALREADY_BOUND', 'SUB-A1 已从属 C-A，改绑拒绝');
   assert.throws(() => mark('a2-2d', 'L-B', 'C-MISS'), e => e.code === 'NOT_FOUND', '父容器不存在');
   assert.throws(() => mark('a2-2e', 'L-B', 'C-DIS'), e => e.code === 'INACTIVE_ENTITY', '父容器非活跃');
   assert.throws(() => mark('a2-2f', 'C-03-02-01', 'C-03-02'), e => e.code === 'NOT_FOUND', '孤儿子位行重标记同样要求父容器真实存在');
+  /* A-3 增量A：L-A 的旧模型占用者恰是声明的父容器 C-A（自身占用）→ 放行，且同一计划清 C-A.loc */
+  const self = mark('a2-2g', 'L-A', 'C-A');
+  assert.deepEqual(self.after.locations, [{ code: 'L-A', status: 'active', role: '容器子位', parentContainer: 'C-A' }]);
+  assert.deepEqual(self.after.containers, [{ code: 'C-A', loc: '', status: 'active', version: 3, lastOpId: 'a2-2g' }], '同计划显式清除旧模型绑定（loc 置空，版本 +1）');
 });
 
 test('SCL-7.3 A2 解绑形态拒绝 + FREE 行显式 role 被忽略：activate 只启用，不静默改角色', () => {
@@ -151,9 +158,11 @@ test('SCL-7.3 A2 解绑形态拒绝 + FREE 行显式 role 被忽略：activate �
   assert.deepEqual(p.after.locations, [{ code: 'L-B', status: 'active', role: '', parentContainer: '' }]);
 });
 
-test('SCL-7.4 A3 容器命令指向子位：activate/place/move 全部 LOC_ROLE_MISMATCH（在版本检查之前）', () => {
+test('SCL-7.4 A3 容器命令指向子位：activate 纯激活不再看目标（放行），place/move 仍 LOC_ROLE_MISMATCH（在版本检查之前）', () => {
   const st = seed();
-  assert.throws(() => planOf(st, { schemaVersion: 1, kind: 'activateContainer', opId: 'a3-1', containerCode: 'C-NX', target: { loc: 'SUB-A1' } }, admin), e => e.code === 'LOC_ROLE_MISMATCH');
+  /* A-2：activateContainer 纯激活不再解析 target——指向子位也只做幂等重确认，loc 显式清空 */
+  const p = planOf(st, { schemaVersion: 1, kind: 'activateContainer', opId: 'a3-1', containerCode: 'C-NX', target: { loc: 'SUB-A1' } }, admin);
+  assert.deepEqual(p.after.containers, [{ code: 'C-NX', loc: '', status: 'active', version: 2, lastOpId: 'a3-1' }]);
   assert.throws(() => planOf(st, { schemaVersion: 1, kind: 'placeContainer', opId: 'a3-2', containerCode: 'C-NX', target: { loc: 'SUB-A1' }, expected: { containerVersion: 1 } }, oper), e => e.code === 'LOC_ROLE_MISMATCH');
   assert.throws(() => planOf(st, { schemaVersion: 1, kind: 'moveContainer', opId: 'a3-3', containerCode: 'C-A', source: { loc: 'L-A' }, target: { loc: 'SUB-A1' }, expected: { containerVersion: 2 } }, oper), e => e.code === 'LOC_ROLE_MISMATCH');
 });

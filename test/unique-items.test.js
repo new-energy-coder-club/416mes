@@ -43,7 +43,10 @@ test('ITM issue explicitly clears container; wrong source denied', () => {
   req.source = { loc: 'L-B', container: 'C-B' }; req.expected.containerVersion = 5;
   assert.throws(() => U.plan(fixture(), req, actor), { code: 'SOURCE_MISMATCH' });
 });
-test('ITM transfer and container move preserve unique identities and derived location', () => {
+/* v3.13.32（A-7 冻结体迁移期兼容锁）：moveContainer/transfer 计划层级为冻结体
+   （lib/unique-items.js 带 ⚠ 冻结注释）——Phase D 删 moveContainer kind 时一并删除
+   本测试。只保留计划行为与派生定位断言，不引用已移除的操作员界面文案。 */
+test('ITM 冻结体兼容锁：transfer 与容器移动计划保留唯一身份与派生定位（Phase D 删 kind 时一并删除本测试）', () => {
   const st = fixture();
   const move = U.plan(st, { schemaVersion: 1, opId: 'move-1', kind: 'moveContainer', containerCode: 'C-A', source: { loc: 'L-A' }, target: { loc: 'L-B' }, expected: { containerVersion: 2 } }, actor);
   Object.assign(st.containers[0], move.after.containers[0]);
@@ -88,9 +91,13 @@ test('admin can bootstrap legacy LOC then CTN then ITM through auditable plans',
   const locReq = { schemaVersion: 1, opId: 'activate-loc', kind: 'activateLocation', locationCode: 'L-A', expected: { locationStatus: 'unknown' } };
   assert.throws(() => U.plan(st, locReq, actor), { code: 'FORBIDDEN' });
   Object.assign(st.locations[0], U.plan(st, locReq, admin).after.locations[0]);
+  /* A-2：activateContainer 纯激活不再落 loc —— 容器与库位的从属唯一落点是 placeContainer */
   const cp = U.plan(st, { schemaVersion: 1, opId: 'activate-ctn', kind: 'activateContainer', containerCode: 'C-A', target: { loc: 'L-A' }, expected: { containerVersion: 0 } }, admin);
+  assert.equal(cp.after.containers[0].loc, '');
   Object.assign(st.containers[0], cp.after.containers[0]);
-  const p = U.plan(st, { ...receive(), kind: 'verifyLegacy', itemCode: 'I-U', expected: { itemVersion: 0, containerVersion: 1 } }, admin);
+  const pp = U.plan(st, { schemaVersion: 1, opId: 'place-ctn', kind: 'placeContainer', containerCode: 'C-A', target: { loc: 'L-A' }, expected: { containerVersion: 1 } }, admin);
+  Object.assign(st.containers[0], pp.after.containers[0]);
+  const p = U.plan(st, { ...receive(), kind: 'verifyLegacy', itemCode: 'I-U', expected: { itemVersion: 0, containerVersion: 2 } }, admin);
   assert.equal(p.after.items[0].status, 'in_stock');
 });
 function schemaFixture() {

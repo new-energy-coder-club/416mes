@@ -64,7 +64,11 @@ test('CLM-1.1 在库 + it.loc 非空 → 直读库位，container=null，histori
   assert.equal(pos.item.code, 'I-SUB');
 });
 
-test('CLM-1.2 在库 + it.loc 空 + 有容器 → 旧容器链行为不变（回归）', () => {
+test('CLM-1.2 迁移期兼容锁：在库 + it.loc 空 + 容器行仍带旧 loc → currentPosition 从 containers.loc 派生链可读（Phase D 删容器行 loc 时改写）', () => {
+  /* v3.13.32（A-7）原「旧容器链行为不变（回归）」锁翻转为迁移期兼容锁：
+     冻结体迁移期，存量物品（it.loc 空、container 指向的容器行仍带旧 containers.loc）
+     的只读定位继续从 containers.loc 派生（unique-items.js currentPosition 容器链），
+     保证存量数据在 Phase D 移除容器行 loc 之前不丢位置信息。 */
   const pos = U.currentPosition(baseState(), 'I-CTN');
   assert.equal(pos.location.code, 'L-A');
   assert.equal(pos.container.code, 'C-A');
@@ -161,7 +165,10 @@ test('CLM-3.2 it.loc 空 + 容器未定位 → 「尚未定位」人话报错', 
   assert.throws(() => s.acceptBatchCode({ type: 'ITM', code: 'I-CTN-NX' }), /物品所在容器 C-NX 尚未定位/);
 });
 
-test('CLM-3.3 it.loc 空 + 容器已定位 → 旧锚点 {loc:容器.库位, ctn:null, sub:false}（回归）', () => {
+test('CLM-3.3 迁移期兼容锁：it.loc 空 + 容器行仍带旧 loc → 批量锚点 {loc:容器.库位, ctn:null, sub:false} 派生可读（Phase D 删容器行 loc 时改写）', () => {
+  /* v3.13.32（A-7）原回归锁翻转为迁移期兼容锁：冻结体迁移期，批量出库锚点对
+     存量物品继续从容器行的旧 containers.loc 派生（item-scan acceptBatchCode issue
+     分支），Phase D 移除容器行 loc 前存量批量作业不得失去锚点。 */
   const s = mkScan(baseState());
   s.startBatch('issue');
   const r = s.acceptBatchCode({ type: 'ITM', code: 'I-CTN' });

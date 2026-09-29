@@ -153,8 +153,8 @@ test('BUG-13：各作业类型的提交方向文案', async () => {
   const cases = [
     ['issue', ['ITM:I-IN'], /才真正出库/],
     ['transfer', ['ITM:I-IN', 'LOC:L-A', 'CTN:C-B'], /才真正换箱/],
-    ['moveContainer', ['CTN:C-A', 'LOC:L-B'], /才真正移库/],
-    ['placeContainer', ['CTN:C-F', 'LOC:L-B'], /才真正定位/],
+    /* A-4（v3.13.31）：moveContainer/placeContainer 已删除，scan.add 不再接受这两种
+       类型（会抛「不支持的扫码动作」），对应方向文案用例一并移除。 */
     ['verifyLegacy', ['LOC:L-A', 'CTN:C-A', 'ITM:I-OLD'], /才真正核实/]
   ];
   for (const [kind, fills, re] of cases) {
@@ -181,7 +181,11 @@ test('发现 W：SUBMIT_HINTS 必须覆盖 item-scan 里全部作业类型', () 
   assert.ok(m, '必须能取到 SUBMIT_HINTS 定义');
   const hints = m[1].split(',').map(x => x.split(':')[0].trim()).filter(Boolean);
   const kinds = Object.keys(scan.sequences);
-  assert.ok(kinds.length >= 6, '作业类型至少 6 种，实测 ' + kinds.length);
+  /* A-4（v3.13.31）：moveContainer/placeContainer 已从 scan 序列移除（白名单收敛为
+     receive/issue/transfer/verifyLegacy），「至少 6 种」的下限随之失效；改为精确锁
+     4 种白名单，防止被删类型悄悄回流。SUBMIT_HINTS 全覆盖的意图不变。 */
+  assert.deepEqual([...kinds].sort(), ['issue','receive','transfer','verifyLegacy'],
+    'A-4 后 sequences 必须恰为 4 种白名单作业类型，实测 ' + kinds.join(','));
   // 每个 kind 都必须有映射（含 receive/issue 这两个方向词最关键的）
   const missing = kinds.filter(k => !hints.includes(k));
   assert.deepEqual(missing, [], '以下作业类型没有方向文案，用户会看到中性的「提交」：' + missing.join(','));
