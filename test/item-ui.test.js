@@ -996,3 +996,55 @@ test('BUG-8③：批量模式中切类型 → 不改行，提示先结束批量'
  assert.equal(page.scan.batchState().kind,'receive','批量模式类型不被下拉改变');
  assert.match(d.getElementById('itmStatus').textContent,/批量模式中/);
 });
+
+/* ================= H0（v3.13.29，dev-docs《容器库位模型重构-综合裁决与实施清单》§3.2）：APPLIED 镜像断言守卫 =================
+   根因：APPLIED 只代表命令已被云端接受，本机镜像可能尚未翻转；原 APPLIED 分支无条件 await retry()
+   → 再生成新命令、再收 APPLIED → 无限重试风暴（用户被卡死）。守卫：retry 前断言本机镜像确已翻转
+   ——未翻转不自动重试，给人工出口「重新填入并继续」（点击才 retry）；已翻转与原行为完全一致。 */
+test('H0①：APPLIED 但本机镜像未翻转（LOC）→ 恰好 1 次提交不风暴，给人工出口；点击才再试 1 次',async()=>{
+ const s=setupGuided();const d=s.document;
+ s.clientSubmit=async()=>({phase:'APPLIED',code:'x',kind:'activateLocation',request:{}});
+ d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN(12);
+ assert.equal(s.submitted,1,'镜像未翻转：恰好 1 次提交，绝不自动重试');
+ assert.equal(s.state.locations[0].status,'unknown','守卫路径不得改动本地镜像');
+ const btn=d.getElementById('itmStatus').querySelector('button');
+ assert.ok(btn,'镜像未翻转必须给人工出口按钮');
+ assert.equal(btn.textContent,'重新填入并继续');
+ btn.click();await tickN(12);
+ assert.equal(s.submitted,2,'点击人工出口后恰好再提交 1 次（一次点击一次提交，环已断开）');
+ assert.ok(d.getElementById('itmStatus').querySelector('button'),'镜像仍未翻转：再次收敛到人工出口而非风暴');
+});
+test('H0②：APPLIED 但本机镜像未翻转（CTN）→ 同样恰好 1 次提交，人工出口可再试',async()=>{
+ const s=setupGuided();const d=s.document,page=s.page;
+ await page.accept('LOC:L-A');
+ s.clientSubmit=async()=>({phase:'APPLIED',code:'x',kind:'activateContainer',request:{}});
+ d.getElementById('itmCode').value='CTN:C-OLD';d.getElementById('itmScanBtn').click();await tickN(12);
+ assert.equal(s.submitted,1,'容器分支同样不自动重试');
+ assert.equal(s.state.containers[0].status,'unknown');
+ const btn=d.getElementById('itmStatus').querySelector('button');
+ assert.ok(btn,'容器镜像未翻转也必须给人工出口按钮');
+ assert.equal(btn.textContent,'重新填入并继续');
+ btn.click();await tickN(12);
+ assert.equal(s.submitted,2,'点击后恰好再提交 1 次');
+});
+test('H0③：健康路径（clientSubmit 翻转镜像后返回 APPLIED）→ 自动继续填入，零人工按钮',async()=>{
+ const s=setupGuided();const d=s.document,page=s.page;
+ s.clientSubmit=async c=>{if(c.request.kind==='activateLocation')s.state.locations[0].status='active';return {phase:'APPLIED',code:c.id};};
+ d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN(12);
+ assert.equal(s.submitted,1);
+ assert.deepEqual(page.scan.row().values.map(v=>v.code),['L-OLD'],'镜像已翻转：与原行为一致自动填入');
+ assert.equal(d.getElementById('itmStatus').querySelector('button'),null,'健康路径全程零人工按钮');
+});
+test('H0④：镜像迟到翻转（点击人工出口后镜像才翻转）→ 一次点击后自动痊愈填齐',async()=>{
+ const s=setupGuided();const d=s.document,page=s.page;
+ let calls=0;
+ s.clientSubmit=async c=>{if(++calls===2&&c.request.kind==='activateLocation')s.state.locations[0].status='active';return {phase:'APPLIED',code:c.id};};
+ d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN(12);
+ assert.equal(s.submitted,1,'第一次提交时镜像未翻转：不出自动风暴');
+ const btn=d.getElementById('itmStatus').querySelector('button');
+ assert.ok(btn&&btn.textContent==='重新填入并继续','镜像未翻转先给人工出口');
+ btn.click();await tickN(12);
+ assert.equal(s.submitted,2,'一次点击一次提交');
+ assert.deepEqual(page.scan.row().values.map(v=>v.code),['L-OLD'],'点击后镜像已翻转：自动继续填入');
+ assert.equal(d.getElementById('itmStatus').querySelector('button'),null,'痊愈后不再有按钮');
+});
