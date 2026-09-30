@@ -147,39 +147,46 @@ test('CLM-2.5 P2 扩展 source 后放开：子位直存物品 request() 产出 s
   });
 });
 
-/* ── 3. 批量出库锚点派生（acceptBatchCode issue 分支）── */
+/* ── 3. 批量出库（acceptBatchCode issue 分支，v3.13.36 去锚点：首件即开行，无锚点派生）── */
 
-test('CLM-3.1 it.loc 首件 → 锚点直读 it.loc：{loc:SUB-1, ctn:null, sub:true}', () => {
+test('CLM-3.1 it.loc 首件 → 首件即开行、现状直读 it.loc 展示（无 batch.anchor）', () => {
   const s = mkScan(baseState());
   s.startBatch('issue');
+  s.setBatchQty(3);
   const r = s.acceptBatchCode({ type: 'ITM', code: 'I-SUB' });
-  assert.equal(r.stage, 'anchor');
-  /* P3：首件派生锚点带 sub 展示标记（item-scan acceptBatchCode issue 分支） */
-  assert.deepEqual(s.batchState().anchor, { loc: 'SUB-1', ctn: null, sub: true });
-  assert.match(r.text, /首件库位 SUB-1/);
+  assert.equal(r.stage, 'item', '首件即入批（不再有 anchor 阶段）');
+  const rows = s.snapshot().rows.filter(x => x.values.some(v => v.type === 'ITM'));
+  assert.equal(rows.length, 1, '首件即开行');
+  assert.deepEqual(rows[0].values.map(v => v.type + v.code), ['ITMI-SUB']);
+  assert.match(r.text, /物品现状 @ SUB-1/, '展示口径：子位直存件直读 it.loc');
+  assert.match(r.text, /出库不限库位/);
+  assert.equal(s.batchState().anchor, undefined, 'batch 不再有 anchor 字段');
 });
 
 test('CLM-3.2 it.loc 空 + 容器未定位 → 「尚未定位」人话报错', () => {
   const s = mkScan(baseState());
   s.startBatch('issue');
+  s.setBatchQty(3);
   assert.throws(() => s.acceptBatchCode({ type: 'ITM', code: 'I-CTN-NX' }), /物品所在容器 C-NX 尚未定位/);
 });
 
-test('CLM-3.3 迁移期兼容锁：it.loc 空 + 容器行仍带旧 loc → 批量锚点 {loc:容器.库位, ctn:null, sub:false} 派生可读（Phase D 删容器行 loc 时改写）', () => {
-  /* v3.13.32（A-7）原回归锁翻转为迁移期兼容锁：冻结体迁移期，批量出库锚点对
-     存量物品继续从容器行的旧 containers.loc 派生（item-scan acceptBatchCode issue
-     分支），Phase D 移除容器行 loc 前存量批量作业不得失去锚点。 */
+test('CLM-3.3 迁移期兼容锁：it.loc 空 + 容器行仍带旧 loc → 现状从容器行旧 containers.loc 派生可读（Phase D 删容器行 loc 时改写）', () => {
+  /* v3.13.36 去锚点后等价断言：批量出库对存量物品继续从容器行的旧 containers.loc
+     派生现状展示（item-scan acceptBatchCode issue 分支），Phase D 移除容器行 loc 前
+     存量批量作业不得失去位置信息。 */
   const s = mkScan(baseState());
   s.startBatch('issue');
+  s.setBatchQty(3);
   const r = s.acceptBatchCode({ type: 'ITM', code: 'I-CTN' });
-  assert.equal(r.stage, 'anchor');
-  /* P3：容器链首件锚点同样带 sub:false（容器路径，形状统一） */
-  assert.deepEqual(s.batchState().anchor, { loc: 'L-A', ctn: null, sub: false });
+  assert.equal(r.stage, 'item');
+  assert.match(r.text, /物品现状 @ L-A/, '容器链现状展示（迁移期兼容）');
+  assert.equal(s.batchState().anchor, undefined, '不再派生展示锚点');
 });
 
 test('CLM-3.4 it.loc 指向不存在库位 → 批量同样 NOT_FOUND', () => {
   const s = mkScan(baseState());
   s.startBatch('issue');
+  s.setBatchQty(3);
   assert.throws(() => s.acceptBatchCode({ type: 'ITM', code: 'I-GHOST' }), e => {
     assert.equal(e.code, 'NOT_FOUND');
     assert.match(e.message, /locations: SUB-404/);
@@ -190,6 +197,7 @@ test('CLM-3.4 it.loc 指向不存在库位 → 批量同样 NOT_FOUND', () => {
 test('CLM-3.5 无 it.loc 且无容器 → 批量同样报缺少容器归属', () => {
   const s = mkScan(baseState());
   s.startBatch('issue');
+  s.setBatchQty(3);
   assert.throws(() => s.acceptBatchCode({ type: 'ITM', code: 'I-NONE' }), /物品档案缺少容器归属/);
 });
 

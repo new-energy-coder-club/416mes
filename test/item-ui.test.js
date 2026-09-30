@@ -434,26 +434,25 @@ test('manual item code is canonicalized before enqueue (wp-ts-999 → WP-TS-999,
    BUG-D：批量命令入队后批量模式不退出，旧面板/sticky 遮挡单行作业。 */
 function setupBatchCD(){const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document}=parseHTML(html);let n=0;const state={locations:[{code:'L-A',status:'active'}],containers:[{code:'C-A',loc:'L-A',status:'active',version:2}],items:[{code:'I-P',name:'part',status:'pending',version:0}]};let enqueued=null;const persistence={async enqueue(r){enqueued=r;},async saveDraft(){},async recover(){return{drafts:[],commands:[]}}};const page=UI.mount({document,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>[],id:()=>'cd-'+(++n)});const fill=async t=>{document.getElementById('itmCode').value=t;document.getElementById('itmScanBtn').click();await tickN();};return {document,state,page,fill,get enqueued(){return enqueued}};}
 
-test('BUG-C 批量模式裸码兜底：裸库位/容器码锚定 + 裸 WP 码入批 + 未建档裸码仍拒',async()=>{
+test('BUG-C 批量模式裸码兜底：裸库位/容器码入行 + 裸 WP 码入批 + 未建档裸码仍拒',async()=>{
  const {document:d,page,fill}=setupBatchCD();
  d.getElementById('itmBatchStart-receive').click();await tickN();
- await fill('L-A');                                    /* 裸库位码（无 LOC: 前缀） */
- assert.equal(page.scan.batchState()._loc.code,'L-A');
- await fill('C-A');                                    /* 裸容器码 */
- assert.equal(page.scan.batchState().anchor.loc,'L-A');
- assert.equal(page.scan.batchState().anchor.ctn,'C-A');
- page.scan.setBatchQty(1);
- await fill('i-p');                                    /* 裸物品码（小写也命中） */
+ page.scan.setBatchQty(3);                            /* v3.13.36 数量先行对每件生效 */
+ await fill('L-A');                                   /* 裸库位码（无 LOC: 前缀） */
+ assert.equal(page.scan.row().values[0].code,'L-A');
+ await fill('C-A');                                   /* 裸容器码 */
+ assert.deepEqual(page.scan.row().values.map(v=>v.type+v.code),['LOCL-A','CTNC-A'],'批量与单行共用 acceptParsed 行路由');
+ await fill('i-p');                                   /* 裸物品码（小写也命中） */
  assert.match(d.getElementById('itmStatus').textContent,/I-P 已入批/);
- await fill('NOPE-404');                               /* 未建档裸码仍明确拒绝 */
+ await fill('NOPE-404');                              /* 未建档裸码仍明确拒绝 */
  assert.match(d.getElementById('itmStatus').textContent,/无法识别编码/);
 });
 
 test('BUG-D 批量提交入队后自动退出批量模式，单行作业界面恢复',async()=>{
  const {document:d,page,fill,enqueued:_e}=setupBatchCD();
  d.getElementById('itmBatchStart-receive').click();await tickN();
+ page.scan.setBatchQty(1);                            /* v3.13.36 数量先行（流程适配，断言不变） */
  await fill('LOC:L-A');await fill('CTN:C-A');
- page.scan.setBatchQty(1);
  await fill('ITM:I-P');
  d.getElementById('itmConfirm').click();await tickN();   /* 批量模式下 = 提交本批 */
  assert.equal(page.scan.batchState(),null,'命令入队后批量会话必须结束');
@@ -523,17 +522,18 @@ test('B-4：多关键词 AND 命中 + 物品优先于容器库位',()=>{
  assert.ok(titles.findIndex(t=>/^库位/.test(t))>titles.findIndex(t=>/^容器/.test(t)),'库位排最后');
 });
 
-/* ================= P1a：批量模式容器未启用自动启用，目标=批量锚点库位（用户实测误报「请先扫描库位码」） ================= */
-test('P1a 批量锚点已扫：未启用容器自动启用，以批量锚点库位为目标，不再误报缺库位',async()=>{
+/* ================= P1a：批量模式容器未启用自动启用，APPLIED 后重试入行（v3.13.36 去锚点：断言行路由而非锚点） ================= */
+test('P1a 批量扫码中：未启用容器自动启用，APPLIED 后自动重试入当前行 CTN 步，不再误报缺库位',async()=>{
  const s=setupGuided();const d=s.document,page=s.page;
  page.scan.startBatch('receive');
- d.getElementById('itmCode').value='LOC:L-A';d.getElementById('itmScanBtn').click();await tickN();   /* 批量库位锚点（active）——走用户真实路径 itmScanBtn→acceptGuided→acceptBatchCode */
- assert.match(d.getElementById('itmStatus').textContent,/库位锚点 L-A/);
+ page.scan.setBatchQty(2);                            /* v3.13.36 数量先行 */
+ d.getElementById('itmCode').value='LOC:L-A';d.getElementById('itmScanBtn').click();await tickN();   /* 批量 LOC 步——走用户真实路径 itmScanBtn→acceptGuided→acceptBatchCode */
+ assert.match(d.getElementById('itmStatus').textContent,/请扫容器/,'单一事实源：当前行 stepsFor 下一步=CTN');
  d.getElementById('itmCode').value='CTN:C-OLD';d.getElementById('itmScanBtn').click();await tickN(12);
- assert.doesNotMatch(d.getElementById('itmStatus').textContent,/请先扫描该容器所在的库位码/,'批量锚点已定，不得再要求扫库位');
+ assert.doesNotMatch(d.getElementById('itmStatus').textContent,/请先扫描该容器所在的库位码/,'批量下不得再要求扫库位（旧实现拿 _loc 推断的错位已根除）');
  assert.equal(s.queued&&s.queued.kind,'activateContainer');
  assert.equal(s.queued&&s.queued.target,undefined,'A-5：activateContainer 纯启用，不带 target（定位由容器落位向导负责）');
- assert.deepEqual(page.scan.batchState()&&page.scan.batchState().anchor,{loc:'L-A',ctn:'C-OLD',ctnVersion:0},'APPLIED后自动重试锚点容器成功');
+ assert.deepEqual(page.scan.row().values.map(v=>v.type),['LOC','CTN'],'APPLIED 后自动重试：容器入当前行 CTN 步（原 anchor 深等断言删除）');
 });
 
 /* ================= P1b：屏障/版本拒绝的批量命令整批重建（旧实现只重建第一行→一批拆成一件） ================= */

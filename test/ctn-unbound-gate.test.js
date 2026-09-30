@@ -119,65 +119,71 @@ test('G7 旧模型容器定位匹配：普通 receive 照常放行（回归锚�
   assert.deepEqual(s.request().target, { loc: 'W01-G01', container: 'C-A' });
 });
 
-/* ---------- 批量（acceptBatchCode）---------- */
-test('G8 批量 receive：新模型容器×空闲自由位 → unbound 分类拒绝，锚点保持未定、_loc 保留（绑定后可原文本重放）', () => {
+/* ---------- 批量（acceptBatchCode，v3.13.36 去锚点：与单行共用 acceptParsed 同一门控）---------- */
+test('G8 批量 receive：新模型容器×空闲自由位 → unbound 分类拒绝，行不被污染（LOC 值保留可续扫）', () => {
   const st = mkState(), s = mk(st);
   s.startBatch('receive');
-  assert.match(s.acceptBatchCode({ type: 'LOC', code: 'W00-G01' }).text, /库位锚点/);
+  s.setBatchQty(2);
+  s.acceptBatchCode({ type: 'LOC', code: 'W00-G01' });
   const e = catchOf(() => s.acceptBatchCode({ type: 'CTN', code: 'C-B' }));
   assert.equal(e && e.code, 'CTN_LOC_UNBOUND');
   assert.deepEqual(e.detail, { kind: 'unbound', ctnCode: 'C-B', locCode: 'W00-G01' });
-  const b = s.snapshot().batch;
-  assert.equal(b.anchor, null, '锚点未定');
-  assert.deepEqual(b._loc, { code: 'W00-G01' }, '_loc 保留 → 标注后重放 CTN 文本可直达批量通道');
+  /* 门控在 values.push 之前抛：当前行仍只有 LOC 值——标注后按行续扫即可 */
+  const row = s.snapshot().rows[s.snapshot().active];
+  assert.equal(row.values.length, 1);
+  assert.equal(row.values[0].code, 'W00-G01');
 });
-test('G9 批量 own_sub 子位锚点转换（问题②批量侧闭环）：标注后重放 CTN → 一步转子位锚点并清 _loc，物品直存子位', () => {
+test('G9 批量 rebase 流（问题②批量侧闭环，与单行 G4 同构）：unbound 拒绝 → 标注（镜像翻转）→ CTN 文本被步表拒、同批行直接扫 ITM 子位直存', () => {
   const st = mkState(), s = mk(st);
   s.startBatch('receive');
+  s.setBatchQty(1);
   s.acceptBatchCode({ type: 'LOC', code: 'W00-G01' });
-  /* —— UI 标注 APPLIED → 镜像翻转 —— */
+  const e = catchOf(() => s.acceptBatchCode({ type: 'CTN', code: 'C-B' }));
+  assert.equal(e && e.code, 'CTN_LOC_UNBOUND');
+  assert.equal(e.detail.kind, 'unbound');
+  /* —— UI「标注子位并继续」确认卡 → activateLocation APPLIED → 镜像翻转 —— */
   locOf(st, 'W00-G01').role = '容器子位';
   locOf(st, 'W00-G01').parentContainer = 'C-B';
-  const r = s.acceptBatchCode({ type: 'CTN', code: 'C-B' });
-  assert.equal(r.stage, 'anchor');
-  assert.match(r.text, /子位锚点 W00-G01/);
-  const b = s.snapshot().batch;
-  assert.deepEqual(b.anchor, { loc: 'W00-G01', ctn: null, sub: true }, '子位锚点：无容器步骤');
-  assert.equal(b._loc, null, '_loc 已清（防 CTN 分支重触发）');
-  /* 转换后重扫 LOC 命中「锚点已定」守卫，不再重新锚定 */
-  assert.throws(() => s.acceptBatchCode({ type: 'LOC', code: 'W00-G01' }), /锚点已定/);
-  /* 连扫合成 2 值子位行 */
-  s.setBatchQty(1);
+  /* 与单行 G2/G4 同契约：stepsFor 活读镜像已动态变为 ['LOC','ITM']，重放 CTN 文本被步表拒；
+     直接扫 ITM：同一行零改行完成（own_sub 门控分支被分流前置，公开 API 不可直达） */
+  assert.deepEqual(s.stepsFor(s.row()), ['LOC', 'ITM'], '批量行 stepsFor 动态分流与单行同判');
+  const e2 = catchOf(() => s.acceptBatchCode({ type: 'CTN', code: 'C-B' }));
+  assert.match(e2 && e2.message, /当前请扫描ITM码/);
   assert.match(s.acceptBatchCode({ type: 'ITM', code: 'WP-NEW' }).text, /第 1 件/);
-  const rows = s.snapshot().rows.filter(r2 => r2.values.some(v => v.type === 'ITM'));
-  assert.deepEqual(rows[0].values.map(v => v.type + v.code), ['LOCW00-G01', 'ITMWP-NEW']);
   const snap = s.snapshot();
-  s.select(snap.rows.indexOf(snap.rows.find(r2 => r2.values.some(v => v.type === 'ITM'))));
+  const rows = snap.rows.filter(r2 => r2.values.some(v => v.type === 'ITM'));
+  assert.deepEqual(rows[0].values.map(v => v.type + v.code), ['LOCW00-G01', 'ITMWP-NEW']);
+  s.select(snap.rows.indexOf(rows[0]));
   const q = s.request();
-  assert.deepEqual(q.target, { loc: 'W00-G01', container: '', sub: true });
+  assert.deepEqual(q.target, { loc: 'W00-G01', container: '', sub: true }, '子位行 request 形状与单行同款');
 });
-test('G10 批量：库位已从属别的容器 → bound_other（锚点阶段拒绝）', () => {
+test('G10 批量：库位已从属别的容器（bound_other 形态）→ 步表前置拒绝，绝不静默放行进错误容器（与单行 G2 同构）', () => {
   const st = mkState(), s = mk(st);
   s.startBatch('receive');
+  s.setBatchQty(2);
   s.acceptBatchCode({ type: 'LOC', code: 'W00-G01' });
   locOf(st, 'W00-G01').role = '容器子位';
   locOf(st, 'W00-G01').parentContainer = 'C-N2';
   const e = catchOf(() => s.acceptBatchCode({ type: 'CTN', code: 'C-B' }));
-  assert.equal(e && e.detail.kind, 'bound_other');
+  assert.ok(e, '必须拒绝');
+  assert.match(e.message, /当前请扫描ITM码/, '步表分流前置（门控 bound_other 为竞态防御，公开 API 不可直达）');
+  assert.equal(s.row().values.length, 1, '行不被污染');
 });
 test('G11 批量：库位被旧模型占位 → legacy_occupied', () => {
   const st = mkState(), s = mk(st);
   s.startBatch('receive');
+  s.setBatchQty(2);
   s.acceptBatchCode({ type: 'LOC', code: 'W01-G01' }); // C-A 以旧模型占位
   const e = catchOf(() => s.acceptBatchCode({ type: 'CTN', code: 'C-B' }));
   assert.equal(e && e.detail.kind, 'legacy_occupied');
 });
-test('G12 批量：旧模型容器归属不符语义不变（S2 同口径回归锚，文案带双库位）', () => {
+test('G12 批量：旧模型容器归属不符语义不变（与单行 G6 同文案，S2 同口径回归锚）', () => {
   const st = mkState(), s = mk(st);
   s.startBatch('receive');
+  s.setBatchQty(2);
   s.acceptBatchCode({ type: 'LOC', code: 'W01-G01' });
   const e = catchOf(() => s.acceptBatchCode({ type: 'CTN', code: 'C-D' }));
   assert.ok(e);
   assert.equal(e.code, undefined, '旧模型路径不产结构化码');
-  assert.match(e.message, /归属不符（C-D 在 W02-G01，不在 W01-G01）/);
+  assert.match(e.message, /归属不符/, '批量与单行共用 acceptParsed → 同款比对文案（旧批量富文案随锚点分支删除）');
 });

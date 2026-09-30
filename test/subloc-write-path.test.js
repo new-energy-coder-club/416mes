@@ -454,46 +454,41 @@ test('SCL-8.6 A7 批量鉴别器红线：无 sub 键 → 旧 pair/容器路径�
   assert.throws(() => planOf(st, issuBatch('b8-6b', { loc: 'SUB-A1' }, [{ itemCode: 'I-SUB', containerCode: '', expectedItemVersion: 4 }]), oper), e => e.code === 'SOURCE_MISMATCH' && /@ I-SUB$/.test(e.message));
 });
 
-test('SCL-8.7 C5 批量扫描器：子位 LOC 一步成锚、2 值行 stepsFor 与 sub 请求形状；容器锚点回归不变', () => {
+test('SCL-8.7 v3.13.36 去锚点批量：子位库位件（2 步行）+ 普通库位件（3 步行）混批，行满自动开行、请求形状与单行同款', () => {
   const st = seed();
   st.items.push(U.normalize('items', { code: 'I-P', status: 'pending', container: '', loc: '', version: 1, lastOpId: 'reg-1' }));
   let n = 0;
   const scan = Scan.create({ getState: () => st, id: () => 'id-' + (++n) });
   scan.startBatch('receive');
-  scan.setBatchQty(2);
-  /* 子位 LOC 一步完成锚点（无 CTN 步） */
+  scan.setBatchQty(3);
+  /* 第一件：子位库位 LOC → stepsFor 分流为 2 步 ['LOC','ITM']，物品直存子位 */
   const a = scan.acceptBatchCode({ type: 'LOC', code: 'SUB-A1' });
-  assert.equal(a.stage, 'anchor');
-  assert.deepEqual(scan.batchState().anchor, { loc: 'SUB-A1', ctn: null, sub: true });
-  /* 连扫物品 → 每件一条 2 值行 */
+  assert.equal(a.stage, 'step');
+  assert.match(a.text, /请扫物品/);
+  assert.deepEqual(scan.stepsFor(scan.row()), ['LOC', 'ITM'], '子位行两步表（与单行 stepsFor 同判）');
   assert.equal(scan.acceptBatchCode({ type: 'ITM', code: 'I-OUT' }).stage, 'item');
+  /* 第二件：普通库位 → 行满自动开新行，完整三步 LOC→CTN→ITM */
+  assert.equal(scan.acceptBatchCode({ type: 'LOC', code: 'L-A' }).stage, 'step');
+  assert.deepEqual(scan.stepsFor(scan.row()), ['LOC', 'CTN', 'ITM'], '普通行三步原表');
+  scan.acceptBatchCode({ type: 'CTN', code: 'C-A' });
   scan.acceptBatchCode({ type: 'ITM', code: 'I-P' });
   const snap = scan.snapshot();
   const rows = snap.rows.filter(r => !r.locked && r.values.some(v => v.type === 'ITM'));
-  assert.equal(rows.length, 2);
-  rows.forEach(r => {
-    assert.deepEqual(scan.stepsFor(r), ['LOC', 'ITM'], '子位锚点行两步表');
-    assert.deepEqual(r.values.map(v => v.type), ['LOC', 'ITM']);
-    assert.equal(r.values[0].code, 'SUB-A1');
-  });
-  /* 2 值行 request() 形状：target sub + expected 只派 itemVersion（容器版本种子被整体替换） */
+  assert.equal(rows.length, 2, '两件两行（子位 2 值 + 普通 3 值混批）');
+  assert.deepEqual(rows[0].values.map(v => v.type), ['LOC', 'ITM']);
+  assert.equal(rows[0].values[0].code, 'SUB-A1');
+  assert.deepEqual(rows[1].values.map(v => v.type), ['LOC', 'CTN', 'ITM']);
+  assert.deepEqual(rows[1].values.map(v => v.code), ['L-A', 'C-A', 'I-P']);
+  /* 子位 2 值行 request() 形状：target sub + expected 只派 itemVersion（request 零改动） */
   scan.select(snap.rows.indexOf(rows[0]));
   const q = scan.request();
   assert.equal(q.kind, 'receive');
   assert.equal(q.itemCode, 'I-OUT');
   assert.deepEqual(q.target, { loc: 'SUB-A1', container: '', sub: true });
   assert.deepEqual(q.expected, { itemVersion: 5 });
-  /* 容器锚点回归：LOC→CTN 两步锚定、3 值行原表 */
-  scan.startBatch('receive');
-  scan.setBatchQty(1);
-  assert.equal(scan.acceptBatchCode({ type: 'LOC', code: 'L-A' }).stage, 'anchor');
-  assert.equal(scan.batchState().anchor, null, 'FREE 位锚点未完成（等容器）');
-  scan.acceptBatchCode({ type: 'CTN', code: 'C-A' });
-  assert.deepEqual(scan.batchState().anchor, { loc: 'L-A', ctn: 'C-A', ctnVersion: 2 });
-  scan.acceptBatchCode({ type: 'ITM', code: 'I-P' });
-  const snap2 = scan.snapshot();
-  const row2 = snap2.rows.filter(r => !r.locked && r.values.some(v => v.type === 'ITM'))[0];
-  assert.deepEqual(scan.stepsFor(row2), ['LOC', 'CTN', 'ITM'], '容器锚点行三步原表');
-  assert.deepEqual(row2.values.map(v => v.type), ['LOC', 'CTN', 'ITM']);
-  assert.deepEqual(row2.values.map(v => v.code), ['L-A', 'C-A', 'I-P']);
+  /* 普通 3 值行 request() 形状不变 */
+  scan.select(snap.rows.indexOf(rows[1]));
+  const q2 = scan.request();
+  assert.deepEqual(q2.target, { loc: 'L-A', container: 'C-A' });
+  assert.deepEqual(q2.expected, { itemVersion: 1, containerVersion: 2 });
 });
