@@ -1075,3 +1075,95 @@ test('H0⑤：镜像在等待窗口内迟到翻转（~30ms）→ 自动继续填
  assert.deepEqual(page.scan.row().values.map(v=>v.code),['L-OLD'],'翻转后自动继续填入');
  assert.equal(d.getElementById('itmStatus').querySelector('button'),null,'全程零人工按钮');
 });
+
+/* ================= 3.13.34 读取面补洞（用户反馈：查物品在库、查库位/容器却说为空） =================
+   根因：子位接收写入 container:''+loc=子位码（P1 形状），写入端正确，但读取面
+   （positionSummary / detail 三分支 / 出库换箱预览）只认容器链，把直存件误报「当前不在库」。 */
+function setupDirectRead(){
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document}=parseHTML(html);let n=0;
+ const state={
+  locations:[
+   {code:'L-A',status:'active'},
+   {code:'SUB-1',status:'active',role:'容器子位',parentContainer:'CTN-S',kind:'货架',desc:'子位一'},
+  ],
+  containers:[
+   {code:'CTN-S',status:'active',version:1,desc:'料箱S'},          // 未定位容器，经子位挂直存件
+   {code:'CTN-2',loc:'L-A',status:'active',version:1},             // 容器链回归对照
+  ],
+  items:[
+   {code:'ITM-D',name:'直存件',status:'in_stock',container:'',loc:'SUB-1',version:2}, // P1 子位直存
+   {code:'ITM-C',name:'链上件',status:'in_stock',container:'CTN-2',loc:'',version:1}, // 容器链回归
+   {code:'ITM-O',name:'出库件',status:'out',container:'',loc:'L-A',version:1},        // 历史线索回归
+   {code:'ITM-U',name:'旧档案件',status:'unknown',container:'',loc:'L-A',version:0},  // 旧定位回归
+  ],
+ };
+ const page=UI.mount({document,getState:()=>state,getPersistence:()=>null,getCommands:async()=>[],id:()=>String(++n)});
+ return {document,state,page};
+}
+test('3.13.34①：物品详情对子位直存件显示 当前直存 SUB-1 + 库位跳转，不再误报当前不在库',()=>{
+ const {document:d,state}=setupDirectRead();
+ d.getElementById('itmSearch').value='ITM:ITM-D';d.getElementById('itmSearchBtn').click();
+ const text=d.getElementById('itmResults').textContent;
+ assert.match(text,/当前直存 SUB-1/,'P1 直存位置是现状，不是历史线索');
+ assert.doesNotMatch(text,/当前不在库/,'在库直存件不得报不在库（用户截图①的误报）');
+ const jump=[...d.getElementById('itmResults').querySelectorAll('button')].find(b=>b.textContent==='库位 SUB-1');
+ assert.ok(jump,'应提供库位跳转按钮');
+ jump.click();
+ assert.match(d.getElementById('itmResults').textContent,/直存 ITM-D/,'跳到库位详情应能看到直存件');
+});
+test('3.13.34②：候选卡位置摘要对直存件显示 当前直存；未定位容器卡计入子位在库件',()=>{
+ const {document:d}=setupDirectRead();
+ d.getElementById('itmSearch').value='直存件';d.getElementById('itmSearchBtn').click();
+ assert.match(d.getElementById('itmResults').textContent,/位置：当前直存 SUB-1/,'候选卡与详情同源，不再漏报');
+ d.getElementById('itmSearch').value='CTN';d.getElementById('itmSearchBtn').click();
+ const cards=[...d.getElementById('itmResults').querySelectorAll('.itm-result-card')];
+ assert.equal(cards.length,2,'CTN 前缀命中两个容器候选');
+ assert.match(cards.find(c=>c.textContent.includes('CTN-S')).textContent,/位置：未定位（在库单件 1）/,'未定位容器经子位挂件必须计为在库 1 件');
+ assert.match(cards.find(c=>c.textContent.includes('CTN-2')).textContent,/位置：当前库位：L-A/,'已落位容器文案不变');
+ d.getElementById('itmSearch').value='子位一';d.getElementById('itmSearchBtn').click();
+ assert.match(d.getElementById('itmResults').textContent,/在库单件 1/,'库位候选卡计入直存件');
+});
+test('3.13.34③：容器详情计数并陈列子位直存件（按钮带子位标注）',()=>{
+ const {document:d}=setupDirectRead();
+ d.getElementById('itmSearch').value='CTN:CTN-S';d.getElementById('itmSearchBtn').click();
+ const box=d.getElementById('itmResults');
+ assert.match(box.textContent,/在库单件：1/,'子位直存件计入容器在库数');
+ const btn=[...box.querySelectorAll('button')].find(b=>b.textContent.includes('ITM-D'));
+ assert.ok(btn&&/（子位 SUB-1）/.test(btn.textContent),'陈列直存件并标注所在子位');
+ btn.click();
+ assert.match(d.getElementById('itmResults').textContent,/当前直存 SUB-1/,'点入物品详情链路一致');
+});
+test('3.13.34④：库位详情计数直存件（容器数+直存）并提供 直存 按钮',()=>{
+ const {document:d}=setupDirectRead();
+ d.getElementById('itmSearch').value='LOC:SUB-1';d.getElementById('itmSearchBtn').click();
+ const box=d.getElementById('itmResults');
+ assert.match(box.textContent,/容器数：0；在库单件：1/,'直存件计入库位在库单件数');
+ const btn=[...box.querySelectorAll('button')].find(b=>b.textContent.startsWith('直存 ITM-D'));
+ assert.ok(btn,'直存件以 直存 按钮陈列');
+ btn.click();
+ assert.match(d.getElementById('itmResults').textContent,/当前直存 SUB-1/,'点入物品详情链路一致');
+});
+test('3.13.34⑤：回归——容器链/出库/旧档案物品的原文案不得被直存分支劫持',()=>{
+ const {document:d}=setupDirectRead();
+ d.getElementById('itmSearch').value='ITM:ITM-C';d.getElementById('itmSearchBtn').click();
+ assert.match(d.getElementById('itmResults').textContent,/当前 CTN-2 → L-A/,'容器链物品文案不变');
+ d.getElementById('itmSearch').value='ITM:ITM-O';d.getElementById('itmSearchBtn').click();
+ assert.match(d.getElementById('itmResults').textContent,/当前不在库；历史线索：L-A/,'出库物品保留历史线索文案');
+ d.getElementById('itmSearch').value='ITM:ITM-U';d.getElementById('itmSearchBtn').click();
+ assert.match(d.getElementById('itmResults').textContent,/旧定位，容器待核实：L-A/,'旧档案物品保留旧定位文案');
+});
+test('3.13.34⑥：出库预览对子位直存件显示 物品现状：在库 @ 子位（子位直存）',async()=>{
+ const {document:d,page}=setupDirectRead();
+ page.scan.add('issue');
+ await page.accept('ITM:ITM-D');
+ assert.match(d.getElementById('itmStep').textContent,/物品现状：在库 @ SUB-1（子位直存）/,'直存件出库前必须看到现状');
+ assert.match(d.getElementById('itmStep').textContent,/确认后即从该子位出库/);
+});
+test('3.13.34⑦：查询详情同步时间取 st.__savedAt（不再永久「待同步」）',()=>{
+ const {document:d,state}=setupDirectRead();
+ d.getElementById('itmSearch').value='ITM:ITM-D';d.getElementById('itmSearchBtn').click();
+ assert.match(d.getElementById('itmResults').textContent,/同步时间：待同步/,'未落盘时保持待同步');
+ state.__savedAt='2026-02-11T08:30:00.000Z';
+ d.getElementById('itmSearchBtn').click();
+ assert.match(d.getElementById('itmResults').textContent,/同步时间：2026-02-11/,'save() 写入 __savedAt 后显示真实时间');
+});
