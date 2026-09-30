@@ -21,7 +21,8 @@ test('pending cards never auto-submit and preserve original command for explicit
 test('query missing codes and detail errors stay local without mutating state or drafts',()=>{const {document:d,page,state}=setup();const before=JSON.stringify(state),draft=page.scan.snapshot(),work=d.getElementById('itmStatus').textContent;page.queryScan('ITM:missing');assert.match(d.getElementById('itmSearchStatus').textContent,/未找到编码/);page.detail('items','missing');assert.match(d.getElementById('itmSearchStatus').textContent,/查询失败/);assert.equal(d.getElementById('itmStatus').textContent,work);assert.equal(JSON.stringify(state),before);assert.deepEqual(page.scan.snapshot(),draft);});
 test('DOM location drilldown to container then item works via actual clicks',()=>{const {document:d,state}=setup();state.items[1]={...state.items[1],status:'in_stock',container:'C-A'};d.getElementById('itmSearch').value='LOC:L-A';d.getElementById('itmSearchBtn').click();d.getElementById('itmResults').querySelector('button').click();const buttons=[...d.getElementById('itmResults').querySelectorAll('button')];buttons.find(b=>b.textContent.includes('I-P')).click();assert.match(d.getElementById('itmResults').textContent,/C-A → L-A/);});
 const tickN=async(n=6)=>{for(let i=0;i<n;i++)await new Promise(r=>setImmediate(r));};
-function setupGuided(){const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document}=parseHTML(html);let n=0;const state={locations:[{code:'L-OLD',status:'unknown'},{code:'L-A',status:'active'}],containers:[{code:'C-OLD',loc:'L-A',status:'unknown',version:0}],items:[]};let queued=null,submitted=0;const persistence={async enqueue(r){queued=r;},async saveDraft(){},async recover(){return{drafts:[],commands:[]}}};let clientSubmit=null;const client={async submit(c){submitted++;if(clientSubmit)return clientSubmit(c);if(c.request.kind==='activateLocation')state.locations[0].status='active';if(c.request.kind==='activateContainer')state.containers[0].status='active';return {phase:'APPLIED',code:c.id};}};const page=UI.mount({document,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>queued?[{id:queued.opId,op:'itemOperation',request:queued}]:[],getClient:()=>client,id:()=>'guided-'+(++n)});return {document,state,page,get queued(){return queued},get submitted(){return submitted},set clientSubmit(f){clientSubmit=f;}};}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function setupGuided(){const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document}=parseHTML(html);let n=0;const state={locations:[{code:'L-OLD',status:'unknown'},{code:'L-A',status:'active'}],containers:[{code:'C-OLD',loc:'L-A',status:'unknown',version:0}],items:[]};let queued=null,submitted=0;const persistence={async enqueue(r){queued=r;},async saveDraft(){},async recover(){return{drafts:[],commands:[]}}};let clientSubmit=null;const client={async submit(c){submitted++;if(clientSubmit)return clientSubmit(c);if(c.request.kind==='activateLocation')state.locations[0].status='active';if(c.request.kind==='activateContainer')state.containers[0].status='active';return {phase:'APPLIED',code:c.id};}};const page=UI.mount({document,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>queued?[{id:queued.opId,op:'itemOperation',request:queued}]:[],getClient:()=>client,id:()=>'guided-'+(++n),mirrorWaitMs:5,mirrorWaitTicks:40});return {document,state,page,get queued(){return queued},get submitted(){return submitted},set clientSubmit(f){clientSubmit=f;}};}
 /* ================= 3.7.0 C1（单端直提）：扫到未启用实体自动核实启用，不再等人工点按钮 ================= */
 test('guided activate: unknown LOC auto-activates without manual click and retries into step',async()=>{
  const s=setupGuided();const d=s.document,page=s.page;
@@ -307,7 +308,7 @@ test('guided activate REJECTED legacy mismatch abandons card and offers plain re
  /* 扫描未启用容器会在扫码时直接跑 guidedActivate（lib :536），无中间启用按钮；
     只对第一个 activateContainer 提交给 LEGACY 拒绝，重试（换新 opId）后放行 */
  const client={async submit(cmd){if(cmd&&cmd.request&&cmd.request.kind==='activateContainer'){ctnSub++;return ctnSub===1?{phase:'REJECTED',error:'LEGACY_LOCATION_CONFLICT'}:{phase:'APPLIED'};}return {phase:'APPLIED'};}};
- const page=UI.mount({document:d,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>queued?[{id:queued.opId,op:'itemOperation',request:queued}]:[],getClient:()=>client,id:()=>'g2-'+(++n)});
+ const page=UI.mount({document:d,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>queued?[{id:queued.opId,op:'itemOperation',request:queued}]:[],getClient:()=>client,id:()=>'g2-'+(++n),mirrorWaitMs:5,mirrorWaitTicks:40});
  await page.accept('LOC:L-A');
  d.getElementById('itmCode').value='CTN:C-OLD';d.getElementById('itmScanBtn').click();await tickN(12);
  const text=d.getElementById('itmStatus').textContent;
@@ -319,7 +320,7 @@ test('guided activate REJECTED legacy mismatch abandons card and offers plain re
  assert.doesNotMatch(text,/请查询原命令/,'拒绝后不再指向已删除的卡');
  const retry=d.getElementById('itmStatus').querySelector('button');
  assert.ok(retry&&retry.textContent==='重试启用','失败就地给「重试启用」（换新 opId 重新走 guidedActivate）');
- retry.click();await tickN(12);
+ retry.click();await tickN(12);await sleep(300);
  assert.equal(ctnSub,2,'重试重新提交激活命令');
  assert.match(d.getElementById('itmStatus').textContent,/已启用 C-OLD/,'重试成功后回到正常启用流程');
 });
@@ -835,7 +836,12 @@ function setupActivateUI(opts={}){
  const persistence={async enqueue(r){enqueued.push(r);},async saveDraft(){},async recover(){return{drafts:[],commands:[]}},async abandonCommand(id){abandoned.push(id);}};
  const page=UI.mount({document:d,state,getState:()=>state,getPersistence:()=>persistence,
   getCommands:async()=>preCards.concat(enqueued.map(r=>({id:r.opId,op:'itemOperation',request:r,status:'pending'}))),
-  getClient:()=>({submit:async c=>{submitted.push(structuredClone(c.request));return {phase:'APPLIED',code:c.id,kind:c.request.kind,request:c.request};},
+  /* 3.13.33 镜像守卫：mock client 与生产语义对齐——APPLIED 前内联翻转本机镜像（真实链路是
+     服务端落库 + 同步拉取整体替换状态），使启用走健康同步路径而非等待窗口。 */
+  getClient:()=>({submit:async c=>{submitted.push(structuredClone(c.request));
+   if(c.request.kind==='activateLocation'){const loc=(state.locations||[]).find(x=>x.code===c.request.locationCode);if(loc)loc.status='active';}
+   if(c.request.kind==='activateContainer'){const ct=(state.containers||[]).find(x=>x.code===c.request.containerCode);if(ct)ct.status='active';}
+   return {phase:'APPLIED',code:c.id,kind:c.request.kind,request:c.request};},
    query:async c=>({phase:'APPLIED',code:c.id,kind:c.request.kind,request:c.request})}),
   id:()=>'act-'+(enqueued.length+1),isOnline:()=>opts.online!==false,refreshConflicts:async()=>{}});
  return {d,page,enqueued,submitted,abandoned,state};
@@ -1013,13 +1019,13 @@ test('BUG-8③：批量模式中切类型 → 不改行，提示先结束批量'
 test('H0①：APPLIED 但本机镜像未翻转（LOC）→ 恰好 1 次提交不风暴，给人工出口；点击才再试 1 次',async()=>{
  const s=setupGuided();const d=s.document;
  s.clientSubmit=async()=>({phase:'APPLIED',code:'x',kind:'activateLocation',request:{}});
- d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN(12);
+ d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN(12);await sleep(300);
  assert.equal(s.submitted,1,'镜像未翻转：恰好 1 次提交，绝不自动重试');
  assert.equal(s.state.locations[0].status,'unknown','守卫路径不得改动本地镜像');
  const btn=d.getElementById('itmStatus').querySelector('button');
  assert.ok(btn,'镜像未翻转必须给人工出口按钮');
  assert.equal(btn.textContent,'重新填入并继续');
- btn.click();await tickN(12);
+ btn.click();await tickN(12);await sleep(300);
  assert.equal(s.submitted,2,'点击人工出口后恰好再提交 1 次（一次点击一次提交，环已断开）');
  assert.ok(d.getElementById('itmStatus').querySelector('button'),'镜像仍未翻转：再次收敛到人工出口而非风暴');
 });
@@ -1027,13 +1033,13 @@ test('H0②：APPLIED 但本机镜像未翻转（CTN）→ 同样恰好 1 次提
  const s=setupGuided();const d=s.document,page=s.page;
  await page.accept('LOC:L-A');
  s.clientSubmit=async()=>({phase:'APPLIED',code:'x',kind:'activateContainer',request:{}});
- d.getElementById('itmCode').value='CTN:C-OLD';d.getElementById('itmScanBtn').click();await tickN(12);
+ d.getElementById('itmCode').value='CTN:C-OLD';d.getElementById('itmScanBtn').click();await tickN(12);await sleep(300);
  assert.equal(s.submitted,1,'容器分支同样不自动重试');
  assert.equal(s.state.containers[0].status,'unknown');
  const btn=d.getElementById('itmStatus').querySelector('button');
  assert.ok(btn,'容器镜像未翻转也必须给人工出口按钮');
  assert.equal(btn.textContent,'重新填入并继续');
- btn.click();await tickN(12);
+ btn.click();await tickN(12);await sleep(300);
  assert.equal(s.submitted,2,'点击后恰好再提交 1 次');
 });
 test('H0③：健康路径（clientSubmit 翻转镜像后返回 APPLIED）→ 自动继续填入，零人工按钮',async()=>{
@@ -1048,7 +1054,7 @@ test('H0④：镜像迟到翻转（点击人工出口后镜像才翻转）→ �
  const s=setupGuided();const d=s.document,page=s.page;
  let calls=0;
  s.clientSubmit=async c=>{if(++calls===2&&c.request.kind==='activateLocation')s.state.locations[0].status='active';return {phase:'APPLIED',code:c.id};};
- d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN(12);
+ d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN(12);await sleep(300);
  assert.equal(s.submitted,1,'第一次提交时镜像未翻转：不出自动风暴');
  const btn=d.getElementById('itmStatus').querySelector('button');
  assert.ok(btn&&btn.textContent==='重新填入并继续','镜像未翻转先给人工出口');
@@ -1056,4 +1062,16 @@ test('H0④：镜像迟到翻转（点击人工出口后镜像才翻转）→ �
  assert.equal(s.submitted,2,'一次点击一次提交');
  assert.deepEqual(page.scan.row().values.map(v=>v.code),['L-OLD'],'点击后镜像已翻转：自动继续填入');
  assert.equal(d.getElementById('itmStatus').querySelector('button'),null,'痊愈后不再有按钮');
+});
+test('H0⑤：镜像在等待窗口内迟到翻转（~30ms）→ 自动继续填入，零人工按钮（问题①死胡同回归守卫）',async()=>{
+ /* 生产实测（B-01-01-03/SLG-002）：APPLIED 后本机同步拉取稍后才整体替换状态——旧实现拿
+    提交前快照判「未翻转」，把已启用的用户卡进「重新填入并继续」死胡同。守卫窗口内轮询
+    实时 getState()，迟到翻转必须自动痊愈：不再重发命令、自动填入、无按钮。 */
+ const s=setupGuided();const d=s.document,page=s.page;
+ s.clientSubmit=async()=>({phase:'APPLIED',code:'x',kind:'activateLocation',request:{}});
+ setTimeout(()=>{s.state.locations[0].status='active';},30);
+ d.getElementById('itmCode').value='LOC:L-OLD';d.getElementById('itmScanBtn').click();await tickN(12);await sleep(300);
+ assert.equal(s.submitted,1,'窗口内翻转：不重发命令，恰好 1 次提交');
+ assert.deepEqual(page.scan.row().values.map(v=>v.code),['L-OLD'],'翻转后自动继续填入');
+ assert.equal(d.getElementById('itmStatus').querySelector('button'),null,'全程零人工按钮');
 });

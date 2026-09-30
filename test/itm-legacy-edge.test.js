@@ -46,11 +46,19 @@ test('A1 receive: pending物品(表中无位置) 正常放行，三码完成', (
   const q = s.request();
   assert.equal(q.kind, 'receive'); assert.deepEqual(q.target, { loc: 'W01-G01', container: 'C-A' });
 });
-test('A2 receive: 目标容器未定位(loc空) 在CTN步被拒', () => {
+test('A2（3.13.33 A-9 改判）receive: 新模型容器(loc空,无子位标注) → CTN步抛 CTN_LOC_UNBOUND/unbound，不再静默放行也不再用「归属不符」死端', () => {
   const st = state(), s = scanOf(st, 'receive');
-  s.accept('LOC:W01-G01');
-  const r = outcome(() => s.accept('CTN:C-B'));
-  assert.equal(r.ok, false); assert.match(r.error, /容器与库位归属不符/);
+  st.locations.push({ code: 'W03-G01', status: 'active' }); // 真正空闲的自由位（W01/W02 均被旧模型占位）
+  s.accept('LOC:W03-G01');
+  let e = null;
+  try { s.accept('CTN:C-B'); } catch (err) { e = err; }
+  assert.ok(e, 'C-B(loc="")×W03-G01 无从属关系必须被门控拒绝（放行会被 apply 层 pair 再拒）');
+  assert.equal(e.code, 'CTN_LOC_UNBOUND');
+  assert.deepEqual(e.detail, { kind: 'unbound', ctnCode: 'C-B', locCode: 'W03-G01' });
+  assert.match(e.message, /尚未建立从属/);
+  /* 门控在 values.push 之前抛：行不被污染，步骤表动态重估后可继续 */
+  assert.equal(s.row().values.length, 1);
+  assert.equal(s.row().values[0].type, 'LOC');
 });
 test('A3 receive: unknown旧物品(WP-001) 直接放行（核实已并入入库）', () => {
   const st = state(), s = scanOf(st, 'receive');
