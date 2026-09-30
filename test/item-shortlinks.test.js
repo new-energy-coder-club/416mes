@@ -28,7 +28,8 @@ const TYPES = {
 };
 function loadFn(name, extraWindow) {
   const win = Object.assign({ ItemLink }, extraWindow || {});
-  const deps = { shortlinksCsvText: ['csvEscCell'], shortlinksCopyText: [], shortlinkRows: [], qrPayload: [], labelAttrs: [], csvEscCell: [] };
+  const deps = { shortlinksCsvText: ['csvEscCell'], shortlinksCopyText: [], shortlinkRows: [], qrPayload: [], labelAttrs: [], csvEscCell: [],
+    ctnShortlinkRows: [], ctnLinksCsvText: ['csvEscCell'], ctnLinksCopyText: [] };
   const src = (deps[name] || []).map(fnSrc).join('') + fnSrc(name);
   return new Function('window', 'TYPES', src + '; return ' + name + ';')(win, TYPES);
 }
@@ -60,6 +61,20 @@ test('qrPayload：非 itm 类型一律走 TYPES 前缀（短链短路不截获�
   assert.equal(qrPayload('mat', 'M-001'), 'MAT:M-001');
   assert.equal(qrPayload('ctn', 'C-01'), 'CTN:C-01');
   assert.equal(qrPayload('wip', 'LL20260916001'), 'WIP:LL20260916001');
+});
+
+/* ---------- 容器短链（v3.13.35 W5）：ctn 分支 ---------- */
+test('qrPayload：ctn 规范容器码 → 42 字符 /C/ 短链；非规范码回退 CTN: 前缀（D6 存量零失效）', () => {
+  const CtnLink = require('../lib/ctn-link');
+  const qrPayload = loadFn('qrPayload', { CtnLink });
+  const link = qrPayload('ctn', 'A4SH-001');
+  assert.match(link, /^HTTPS:\/\/MES\.NEWENERGYCODER\.CLUB\/C\/[0-9A-HJKMNP-TV-Z]{8}$/, '规范容器码必须给 /C/ 短链');
+  assert.equal(link.length, 42, '与物品短链同容量口径（QR V3-M 余量 19）');
+  assert.equal(qrPayload('ctn', 'C-01'), 'CTN:C-01', 'C-01 不在白名单：回退断言保持为真');
+  assert.equal(qrPayload('ctn', 'C-A'), 'CTN:C-A', '自由现场编号回退 CTN: 前缀串');
+  assert.equal(qrPayload('ctn', 'C-01'), 'CTN:C-01', 'window 无 CtnLink 时也回退（旧环境兜底）');
+  const qrPayloadNoCtn = loadFn('qrPayload');
+  assert.equal(qrPayloadNoCtn('ctn', 'A4SH-001'), 'CTN:A4SH-001', '无 CtnLink 依赖 → 走 TYPES 前缀');
 });
 
 /* ---------- shortlinkRows（面板数据源，§6.2） ---------- */
@@ -152,4 +167,58 @@ test('labelAttrs(itm)：右栏第 4 条为「短码 XXXX」，非规范码显「
   assert.deepEqual(legacy[3], ['短码', '—'], 'WP-随机串无短码显「—」，不得抛异常');
   const noIL = new Function('window', 'TYPES', fnSrc('labelAttrs') + '; return labelAttrs;')({}, TYPES);
   assert.deepEqual(noIL('itm', { code: 'WP-001', name: 'x' })[3], ['短码', '—'], 'ItemLink 缺失也不崩');
+});
+
+/* ================= 容器短链（v3.13.35 W6/W8/D9）：平行纯函数 ================= */
+test('ctnShortlinkRows：规范容器码给短码+短链，非规范码留空 ok=false（平行物品侧）', () => {
+  const CtnLink = require('../lib/ctn-link');
+  const ctnShortlinkRows = loadFn('ctnShortlinkRows', { CtnLink });
+  const rows = ctnShortlinkRows([
+    { code: 'A4SH-001', type: 'A4四抽收纳盒', spec: '蓝色' },
+    { code: 'C-A', type: '自由', spec: '' }
+  ]);
+  assert.equal(rows.length, 2, '非规范码行必须保留在面板里标状态，不得过滤');
+  assert.deepEqual(rows[0], { code: 'A4SH-001', type: 'A4四抽收纳盒', spec: '蓝色', short: 'XW4QYGBY', link: 'HTTPS://MES.NEWENERGYCODER.CLUB/C/XW4QYGBY', ok: true });
+  assert.equal(rows[1].short, '');
+  assert.equal(rows[1].link, '');
+  assert.equal(rows[1].ok, false, 'C-A 不在白名单：无短码');
+  const noCL = new Function('window', 'TYPES', fnSrc('ctnShortlinkRows') + '; return ctnShortlinkRows;')({}, TYPES);
+  assert.equal(noCL([{ code: 'A4SH-001' }])[0].ok, false, 'CtnLink 缺失时全部回退 ok=false，不抛异常');
+});
+test('ctnLinksCsvText：BOM + 表头「容器码,类型,规格,短码,短链接」+ 顺序保持', () => {
+  const CtnLink = require('../lib/ctn-link');
+  const ctnShortlinkRows = loadFn('ctnShortlinkRows', { CtnLink });
+  const ctnLinksCsvText = loadFn('ctnLinksCsvText');
+  const rows = ctnShortlinkRows([
+    { code: 'A4SH-001', type: 'A4四抽收纳盒', spec: '' },
+    { code: 'C-A', type: '自由', spec: '' }
+  ]);
+  const csv = ctnLinksCsvText(rows);
+  assert.equal(csv.charCodeAt(0), 0xFEFF, '必须以 UTF-8 BOM 开头');
+  const lines = csv.slice(1).split('\r\n');
+  assert.equal(lines[0], '容器码,类型,规格,短码,短链接', '表头固定 5 列（W8 规格文案）');
+  assert.equal(lines[1], 'A4SH-001,A4四抽收纳盒,,XW4QYGBY,HTTPS://MES.NEWENERGYCODER.CLUB/C/XW4QYGBY');
+  assert.ok(lines[2].startsWith('C-A,自由,,,'), '非规范码行保留且短码/短链接留空');
+});
+test('ctnLinksCopyText：每行 42 字符 /C/ 短链、LF 分隔、无短链行跳过', () => {
+  const CtnLink = require('../lib/ctn-link');
+  const ctnShortlinkRows = loadFn('ctnShortlinkRows', { CtnLink });
+  const ctnLinksCopyText = loadFn('ctnLinksCopyText');
+  const rows = ctnShortlinkRows([{ code: 'A4SH-001' }, { code: 'C-A' }, { code: 'SLG-003' }]);
+  const text = ctnLinksCopyText(rows);
+  const lines = text.split('\n');
+  assert.equal(lines.length, 2, '无短链的行不产生空行');
+  lines.forEach(l => { assert.equal(l.length, 42); assert.ok(l.startsWith('HTTPS://MES.NEWENERGYCODER.CLUB/C/')); });
+  assert.equal(lines[0], 'HTTPS://MES.NEWENERGYCODER.CLUB/C/XW4QYGBY');
+});
+test('labelAttrs(ctn)：右栏第 4 条为「短码 XXXX」，非规范码显「—」', () => {
+  const CtnLink = require('../lib/ctn-link');
+  const labelAttrs = new Function('window', 'TYPES', fnSrc('labelAttrs') + '; return labelAttrs;')({ ItemLink, CtnLink }, TYPES);
+  const attrs = labelAttrs('ctn', { code: 'A4SH-001', type: 'A4四抽收纳盒', spec: '蓝色', loc: 'B-01' });
+  assert.equal(attrs.length, 4, 'ctn 右栏 4 行（类型/规格/库位/短码）');
+  assert.deepEqual(attrs[3], ['短码', 'XW4QYGBY']);
+  const legacy = labelAttrs('ctn', { code: 'C-A', type: '自由' });
+  assert.deepEqual(legacy[3], ['短码', '—'], '自由现场编号无短码显「—」，不得抛异常');
+  const noCL = new Function('window', 'TYPES', fnSrc('labelAttrs') + '; return labelAttrs;')({ ItemLink }, TYPES);
+  assert.deepEqual(noCL('ctn', { code: 'A4SH-001' })[3], ['短码', '—'], 'CtnLink 缺失也不崩');
 });

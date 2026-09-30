@@ -11,6 +11,14 @@
     {
       "source": "/I/:code",
       "destination": "/api/item-link/:code"
+    },
+    {
+      "source": "/c/:code",
+      "destination": "/api/ctn-link/:code"
+    },
+    {
+      "source": "/C/:code",
+      "destination": "/api/ctn-link/:code"
     }
   ],
   "headers": [

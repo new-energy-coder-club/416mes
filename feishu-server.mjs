@@ -164,6 +164,17 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { json(res, 500, { ok: false, error: String((e && e.message) || e) }); }
     return;
   }
+  /* 容器短链：/c/{8位} 前缀路由（v3.13.35），复用云端同一个 handler（与 vercel.json rewrite
+     等价）。冻结 URL 是大写 /C/（QR alphanumeric 模式），小写 /c/ 保留兼容入口——
+     物品侧曾因只配小写生产 404，两条都必须配。 */
+  if (u.pathname.startsWith('/c/') || u.pathname.startsWith('/C/')) {
+    try {
+      const h = require('./api/ctn-link/[code].js');
+      req.query = Object.assign({}, req.query || {}, { code: u.pathname.slice(3) });
+      await h(req, adaptRes(res));
+    } catch (e) { json(res, 500, { ok: false, error: String((e && e.message) || e) }); }
+    return;
+  }
   if (u.pathname.startsWith('/api/feishu/')) {
     return json(res, 501, {
       ok: false, code: 'LOCAL_ROUTE_UNSUPPORTED',

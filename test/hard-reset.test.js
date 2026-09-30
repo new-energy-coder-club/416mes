@@ -77,6 +77,7 @@ function makeContext(opts) {
     /* boot IIFE 首段还引用这些（切片起点已覆盖到 IIFE 首行）。 */
     _pendingMissCheck: [],
     _pendingItemCheck: null,
+    _pendingCtnCheck: null,
     _pendingWipChecks: [],
     deepLinkMiss: () => {},
     showWipDetail: () => {},

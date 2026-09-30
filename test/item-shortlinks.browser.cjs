@@ -38,7 +38,11 @@ test('E2: 标签二维码 jsQR 解码 === 短链（三路径）+ 回退 + 短链
       localStorage.setItem('e2-test-seeded', 'yes');
       localStorage.setItem('mes416_state_v1', JSON.stringify({
         materials: [{ code: 'M-001', name: 'MAT', qty: 7 }],
-        locations: [{ code: 'L-A', status: 'active' }], containers: [],
+        locations: [{ code: 'L-A', status: 'active' }],
+        containers: [
+          { code: 'A4SH-001', type: 'A4四抽收纳盒', spec: '蓝色', loc: 'L-A', status: 'active', version: 1, lastOpId: '' },
+          { code: 'C-A', type: '自由编号', spec: '', loc: '', status: 'active', version: 1, lastOpId: '' }
+        ],
         items: [
           { code: 'WP-001', name: '齿轮', spec: 'S1', loc: 'L-A', materialCode: 'M-001', status: 'pending', container: '', version: 0, lastOpId: '' },
           { code: 'WP-TS-002', name: 'TS件', spec: '', loc: '', materialCode: '', status: 'pending', container: '', version: 0, lastOpId: '' },
@@ -175,6 +179,116 @@ test('E2: 标签二维码 jsQR 解码 === 短链（三路径）+ 回退 + 短链
   assert.equal(panelStateLoc.hidden, true, '非 itm 类型面板必须隐藏');
   assert.equal(panelStateLoc.rows, 0, '非 itm 类型面板不得有数据行');
 
+  /* ---------- 容器短链面板（v3.13.35 W7-W9/D9）：平行行为 ---------- */
+  const C = require('../lib/ctn-link');
+  const CTN_LINK_001 = 'HTTPS://MES.NEWENERGYCODER.CLUB/C/' + C.fromCtnCode('A4SH-001');   // XW4QYGBY
+  /* 容器标签三路径 QR === /c/ 短链；非规范容器码回退 CTN:<码> */
+  const ctnDecoded = await page.evaluate(async (ctnLink) => {
+    async function decodeSvg(svg) {
+      const patched = svg.replace('width="100%"', 'width="264"').replace('height="100%"', 'height="264"');
+      const img = new Image();
+      await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('svg rasterize failed')); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(patched); });
+      const cv = document.createElement('canvas'); cv.width = 264; cv.height = 264;
+      const ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 264, 264); ctx.drawImage(img, 0, 0);
+      const d = ctx.getImageData(0, 0, 264, 264);
+      const r = jsQR(d.data, d.width, d.height);
+      return r && r.data;
+    }
+    function decodeCanvas(cv) {
+      const ctx = cv.getContext('2d');
+      const d = ctx.getImageData(0, 0, cv.width, cv.height);
+      const r = jsQR(d.data, d.width, d.height);
+      return r && r.data;
+    }
+    const rec = { code: 'A4SH-001', type: 'A4四抽收纳盒', spec: '蓝色', loc: 'L-A' };
+    const out = {};
+    const html = labelHtml('ctn', rec);
+    out.htmlQr = await decodeSvg(html.match(/<svg[\s\S]*?<\/svg>/)[0]);
+    out.htmlShortAttr = html.includes('短码') && html.includes('XW4QYGBY');
+    const p1 = await pdfLabelPage(rec, 'ctn', null);
+    out.pdfQr = decodeCanvas(p1.cv);
+    const p2 = await pdfA4SheetPage([rec], 'ctn', null);
+    out.a4Qr = decodeCanvas(p2.cv);
+    out.attrs4 = JSON.stringify(labelAttrs('ctn', rec)[3]);
+    /* 非规范容器码（C-A 自由编号）→ 回退 CTN:<码>（D6 存量零失效） */
+    out.fallbackFreeCode = await decodeSvg(labelHtml('ctn', { code: 'C-A', type: '自由编号', spec: '' }).match(/<svg[\s\S]*?<\/svg>/)[0]);
+    return out;
+  });
+  assert.equal(ctnDecoded.htmlQr, CTN_LINK_001, '容器 labelHtml 预览 QR 必须解出 /c/ 大写短链');
+  assert.equal(ctnDecoded.pdfQr, CTN_LINK_001, '容器 pdfLabelPage QR 必须解出同一条短链');
+  assert.equal(ctnDecoded.a4Qr, CTN_LINK_001, '容器 pdfA4SheetPage QR 必须解出同一条短链');
+  assert.equal(ctnDecoded.htmlShortAttr, true, '容器标签右栏必须含「短码 XW4QYGBY」行');
+  assert.equal(ctnDecoded.attrs4, '["短码","XW4QYGBY"]', '容器 PDF 侧 attrs 第 4 条必须是短码行');
+  assert.equal(ctnDecoded.fallbackFreeCode, 'CTN:C-A', '自由编号容器必须回退 CTN:<码>（旧标签零失效）');
+
+  /* 容器短链面板：curType==='ctn' 才渲染；行数 === sel.ctn.size；非规范码禁用 */
+  await page.locator('#typeBar button[data-t="ctn"]').click();
+  const ctnPanelState = await page.evaluate(() => {
+    const panel = document.getElementById('ctnLinksPanel');
+    return {
+      hidden: panel.hidden,
+      exists: !!panel,
+      inPrintSheet: !!panel.closest('#printSheet'),
+      rows: panel.querySelectorAll('#ctnLinksTable tbody tr:not(.links-empty)').length,
+      itemPanelHidden: document.getElementById('itemLinksPanel').hidden
+    };
+  });
+  assert.equal(ctnPanelState.exists, true, '#ctnLinksPanel 必须存在');
+  assert.equal(ctnPanelState.hidden, false, 'ctn 类型下容器短链面板必须渲染');
+  assert.equal(ctnPanelState.inPrintSheet, false, '容器面板不得是 #printSheet 后代');
+  assert.equal(ctnPanelState.itemPanelHidden, true, '物品面板此时必须隐藏（互斥渲染）');
+
+  const ctnBoxes = page.locator('#recTable tbody .recSel');
+  await ctnBoxes.nth(0).check();   // A4SH-001
+  await ctnBoxes.nth(1).check();   // C-A
+  const ctnRowsInfo = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('#ctnLinksTable tbody tr:not(.links-empty)')];
+    return {
+      selSize: sel.ctn.size,
+      count: rows.length,
+      cells: rows.map(tr => [...tr.querySelectorAll('td')].slice(0, 6).map(td => td.textContent.trim())),
+      disabledBtns: rows.map(tr => [...tr.querySelectorAll('button')].filter(b => b.disabled).length)
+    };
+  });
+  assert.equal(ctnRowsInfo.count, ctnRowsInfo.selSize, '容器面板行数必须 === sel.ctn.size');
+  assert.equal(ctnRowsInfo.count, 2);
+  assert.deepEqual(ctnRowsInfo.cells[0].slice(0, 5), ['A4SH-001', 'A4四抽收纳盒', '蓝色', 'XW4QYGBY', CTN_LINK_001]);
+  assert.equal(ctnRowsInfo.cells[0][5], '可生成');
+  assert.equal(ctnRowsInfo.cells[1][0], 'C-A');
+  assert.equal(ctnRowsInfo.cells[1][3], '', '非规范容器码短码单元格必须为空');
+  assert.equal(ctnRowsInfo.cells[1][5], '无短链，印 CTN: 码', '非规范容器码状态提示');
+  assert.equal(ctnRowsInfo.disabledBtns[1], 2, '非规范容器码行的复制/预览按钮必须禁用');
+
+  /* 复制全部（容器）接到平行纯函数；切回 itm 后容器面板隐藏 */
+  assert.equal(await page.locator('#btnCtnLinksCopyAll').count(), 1);
+  assert.equal(await page.locator('#btnCtnLinksCsv').count(), 1);
+  const ctnCopyText = await page.evaluate(() => ctnLinksCopyText(document.getElementById('ctnLinksPanel')._rows));
+  assert.equal(ctnCopyText, CTN_LINK_001, '容器复制全部只产出有短链的行');
+  await page.locator('#typeBar button[data-t="itm"]').click();
+  const ctnPanelHiddenAfterItm = await page.evaluate(() => document.getElementById('ctnLinksPanel').hidden);
+  assert.equal(ctnPanelHiddenAfterItm, true, '切回 itm 后容器面板必须隐藏');
+
+  /* /c/ 链接扫码归一（handleScan W1）：扫整条短链 → CTN 查询定位 */
+  const scanResult = await page.evaluate(async (url) => {
+    goTab('scan');
+    handleScan(url);
+    await new Promise(r => setTimeout(r, 50));
+    const box = document.getElementById('scanResult');
+    return { text: box.textContent, hasCtnCard: !!box.querySelector('.scan-prefix--ctn') || box.textContent.includes('CTN:A4SH-001') };
+  }, CTN_LINK_001);
+  assert.ok(scanResult.hasCtnCard || scanResult.text.includes('A4SH-001'), '/c/ 链接扫码必须归一为容器查询，不得报「未找到物料」');
+  assert.ok(!scanResult.text.includes('未找到物料'), '磨损守卫反向：正常 /c/ 短链绝不能落 MAT: 兜底');
+
+  /* 磨损 /c/ URL（校验位破坏）→ 容器磨损警示卡（W1 建议②：大小写不敏感守卫） */
+  const wornShort = C.fromCtnCode('A4SH-001').slice(0, 7) + (C.fromCtnCode('A4SH-001')[7] === 'X' ? 'Y' : 'X');
+  const wornResult = await page.evaluate(async (url) => {
+    handleScan(url.toUpperCase());
+    await new Promise(r => setTimeout(r, 50));
+    return document.getElementById('scanResult').textContent;
+  }, 'https://mes.newenergycoder.club/c/' + wornShort);
+  assert.match(wornResult, /容器短码识别失败/, '大写磨损 /c/ URL 必须出容器磨损卡（守卫大小写不敏感）');
+  assert.ok(!wornResult.includes('未找到物料'), '磨损 URL 绝不能静默落 MAT: 兜底');
+
   assert.deepEqual(errors, [], '页面不得有未捕获异常');
-  console.log(JSON.stringify({ threePaths: decoded.htmlQr === decoded.pdfQr && decoded.pdfQr === decoded.a4Qr, fallback: [decoded.fallbackNoIL, decoded.fallbackRandom], panelRows: rowsInfo.count, pageErrors: errors }));
+  console.log(JSON.stringify({ threePaths: decoded.htmlQr === decoded.pdfQr && decoded.pdfQr === decoded.a4Qr, fallback: [decoded.fallbackNoIL, decoded.fallbackRandom], panelRows: rowsInfo.count, ctnThreePaths: ctnDecoded.htmlQr === ctnDecoded.pdfQr && ctnDecoded.pdfQr === ctnDecoded.a4Qr, ctnPanelRows: ctnRowsInfo.count, pageErrors: errors }));
 });

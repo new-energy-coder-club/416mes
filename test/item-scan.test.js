@@ -41,6 +41,36 @@ test('scan: 印刷版全大写短链 URL 在 ITM 步骤解析为物品码（冻�
  assert.equal(s.row().values[2].code,'WP-001');
 });
 
+/* ---------- 容器短链（v3.13.35 W15）：/c/ URL 在非批量作业行 CTN 步解析为容器码 ---------- */
+test('scan: /c/ 容器短链在 CTN 步骤解析为容器码（receive 主战场，离线本地解码）',()=>{
+ const C=require('../lib/ctn-link');
+ const s=Scan.create({getState:()=>({locations:[{code:'L-A',status:'active'}],containers:[{code:'A4SH-001',loc:'L-A',status:'active',version:2}],items:[{code:'WP-001',status:'pending',version:1}]}),id:()=> 't'+Math.random()});
+ s.add('receive');s.accept('LOC:L-A');
+ s.accept(C.linkFor('A4SH-001'));
+ assert.equal(s.row().values.length,2,'CTN 步通过');
+ assert.equal(s.row().values[1].type,'CTN','/c/ URL 必须归一为 CTN 步');
+ assert.equal(s.row().values[1].code,'A4SH-001');
+});
+test('scan: /c/ 容器短链错步骤仍被拒（LOC 步骤扫容器短链）',()=>{
+ const C=require('../lib/ctn-link');
+ const s=Scan.create({getState:()=>({locations:[],containers:[],items:[]}),id:()=> 't'});
+ s.add('receive');
+ assert.throws(()=>s.accept(C.linkFor('A4SH-001')),/当前请扫描/);
+});
+test('scan: 印刷版全大写 /C/ URL 在 CTN 步骤解析为容器码（冻结规格整条大写）',()=>{
+ const C=require('../lib/ctn-link');
+ const s=Scan.create({getState:()=>({locations:[{code:'L-A',status:'active'}],containers:[{code:'SLG-003',loc:'L-A',status:'active',version:2}],items:[]}),id:()=> 't'+Math.random()});
+ s.add('receive');s.accept('LOC:L-A');
+ s.accept(C.linkFor('SLG-003').toUpperCase());
+ assert.equal(s.row().values[1].code,'SLG-003');
+});
+test('scan: 裸 8 位容器短码不进作业行（D8 立规：容器仅 /c/ URL 识别）',()=>{
+ const C=require('../lib/ctn-link');
+ const s=Scan.create({getState:()=>({locations:[{code:'L-A',status:'active'}],containers:[{code:'A4SH-001',loc:'L-A',status:'active',version:2}],items:[]}),id:()=> 't'});
+ s.add('receive');
+ assert.throws(()=>s.accept(C.fromCtnCode('A4SH-001')),/前缀/,'裸 8 位必须抛前缀指引，不误判');
+});
+
 test('scan: 行已填齐后再扫给明确指引而不是「当前请扫描已完成」',()=>{
  const s=Scan.create({getState:()=>({locations:[{code:'L-A',status:'active',version:0}],containers:[{code:'C-A',loc:'L-A',status:'active',version:1}],items:[{code:'WP-001',status:'pending',version:0}]}),id:()=>'t'});
  s.add('receive');

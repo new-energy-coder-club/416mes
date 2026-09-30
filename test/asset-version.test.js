@@ -14,7 +14,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const REPO = path.join(__dirname, '..');
 const LOCAL_SCRIPTS = ['nec-gallery.js', 'jsqr.min.js', 'mes-core.js',
-  'lib/outbox.js', 'lib/store.js', 'lib/replay-checkpoint.js', 'lib/incremental.js', 'lib/three-way-merge.js'];
+  'lib/outbox.js', 'lib/store.js', 'lib/replay-checkpoint.js', 'lib/incremental.js', 'lib/three-way-merge.js',
+  'lib/ctn-link.js'];
 
 test('index.html：每个本地库 script 都带 ?v=，且与 APP_VERSION 一致', () => {
   const html = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');

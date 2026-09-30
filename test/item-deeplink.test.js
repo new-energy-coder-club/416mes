@@ -54,3 +54,39 @@ test('D2-②：replaceState 不触发 hashchange，无递归（回归守卫：�
   const itemBranch = s.slice(s.indexOf("startsWith('item/')"));
   assert.ok(!/location\.hash\s*=/.test(itemBranch), '直接赋 location.hash 会触发 hashchange → applyHash 递归');
 });
+
+/* ================= 容器短链（v3.13.35 W3/W4）：#ctn/ 分支与 #item/ 完全平行 ================= */
+
+test('CTN-①：#ctn/ 深链登记 _pendingCtnCheck 待复检（applyHash 早于 localStoreReady 的误报防线）', () => {
+  const s = fnSrc('applyHash');
+  const ctnBranch = s.slice(s.indexOf("startsWith('ctn/')"));
+  assert.match(ctnBranch, /_pendingCtnCheck = ctnCode/, 'containers 必须接入与 #item/ 同款的待复检登记');
+  assert.match(ctnBranch, /queryScan\('CTN:' \+ ctnCode\)/, '落地必须 queryScan CTN: 前缀（查询页容器一等公民）');
+  assert.match(HTML, /let _pendingCtnCheck = null/, '待复检变量必须声明');
+});
+
+test('CTN-①：boot 在 localStoreReady 之后复检 #ctn/ 深链', () => {
+  const boot = HTML.slice(HTML.indexOf('(async function boot()'));
+  const awaitIdx = boot.indexOf('await localStoreReady');
+  const recheckIdx = boot.indexOf('_pendingCtnCheck');
+  assert.ok(awaitIdx >= 0 && recheckIdx > awaitIdx, '复检必须排在 await localStoreReady 之后');
+  assert.match(boot, /_pendingCtnCheck = null/, '复检后必须清掉待复检项，幂等');
+  assert.match(boot, /itemPage\.queryScan\('CTN:' \+ c\)/, '复检必须重新定位容器详情');
+  assert.match(boot, /si\.value === 'CTN:' \+ c \|\| si\.value === c/, '用户已手改查询框则不覆盖');
+});
+
+test('CTN-②：#ctn/ 落地后 history.replaceState 补回 #ctn/<码>（goTab 会改写成 #items）', () => {
+  const s = fnSrc('applyHash');
+  const ctnBranch = s.slice(s.indexOf("startsWith('ctn/')"));
+  assert.match(ctnBranch, /history\.replaceState\(null, '', '#ctn\/' \+ encodeURIComponent\(ctnCode\)\)/,
+    '容器码必须留在 hash 里，刷新/分享后仍能定位');
+  const goTabIdx = ctnBranch.indexOf("goTab('items')");
+  const restoreIdx = ctnBranch.indexOf("history.replaceState(null, '', '#ctn/'");
+  assert.ok(goTabIdx >= 0 && restoreIdx > goTabIdx, '补回 hash 必须在 goTab 改写之后');
+});
+
+test('CTN-②：#ctn/ 分支同样无递归（不得改成 location.hash 赋值）', () => {
+  const s = fnSrc('applyHash');
+  const ctnBranch = s.slice(s.indexOf("startsWith('ctn/')"));
+  assert.ok(!/location\.hash\s*=/.test(ctnBranch), '直接赋 location.hash 会触发 hashchange → applyHash 递归');
+});
