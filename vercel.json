@@ -74,5 +74,10 @@
       "destination": "/home.html",
       "statusCode": 307
     }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "main": false
+    }
+  }
 }

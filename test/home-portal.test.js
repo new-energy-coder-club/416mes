@@ -13,6 +13,7 @@ test('首页作为 Vercel 唯一根入口，index.html 和短链/API 仍各自�
   assert.deepEqual((config.redirects || []).filter(r => r.source === '/'), [
     { source: '/', destination: '/home.html', statusCode: 307 }
   ]);
+  assert.equal(config.git?.deploymentEnabled?.main, false, 'main 只能由 Actions 测试通过后通过 Vercel CLI 生产部署，禁止原生 Git 重复部署');
   for (const route of ['/i/:code', '/I/:code', '/c/:code', '/C/:code']) {
     assert.ok(config.rewrites.some(r => r.source === route), '短链不可回退：' + route);
   }
