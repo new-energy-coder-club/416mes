@@ -202,10 +202,14 @@ test('S1b 剩余清单覆盖两种形态：物品化按件、旧 MAT 按物料',
 
 test('S2 出库批量不再传 source.loc（假锚点），入库仍传 target.loc', () => {
   const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-  const m = html.match(/const anchorLoc = \(WIP_EXEC\.target && WIP_EXEC\.target\.loc\);\n  if \(inbound && !anchorLoc\)[\s\S]{0,700}?kind: 'issueBatch'[\s\S]{0,200}?source: \{\}/);
-  assert.ok(m, '出库分支必须 source: {}（不再传假锚点）');
-  assert.ok(/kind: 'receiveBatch', target: \{ loc: anchorLoc \}/.test(html),
-    '入库必须保留 target.loc（东西要放到某个架子上）');
+  const start = html.indexOf('const anchorLoc = (WIP_EXEC.target && WIP_EXEC.target.loc);');
+  const end = html.indexOf('batch.forEach(b => wipItemMark', start);
+  assert.ok(start >= 0 && end > start, '必须取得批次请求构造代码');
+  const block = html.slice(start, end);
+  assert.match(block, /kind: 'issueBatch', source: \{\}/, '出库不得携带假的 source.loc');
+  assert.match(block, /kind: 'receiveBatch'/, '入库仍使用 receiveBatch');
+  assert.match(block, /target: subInbound \? \{ loc: anchorLoc, container: '', sub: true \} : \{ loc: anchorLoc \}/,
+    '普通入库保留 LOC，子位入库必须使用显式 sub:true');
 });
 
 test('S2b 出库提交不再从 batch[0].source 推导 anchorLoc', () => {

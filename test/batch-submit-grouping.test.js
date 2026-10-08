@@ -108,3 +108,35 @@ test('BSG-3 批量出库：一条 issueBatch、source 深等 {}（TASK-11 S2 先
   assert.deepEqual(req.items[1], { itemCode: 'WP-TS-006', sub: true, locCode: 'SUB-1', expectedItemVersion: 1 }, 'P3：子位件条目带 sub/locCode');
   assert.equal(page.scan.batchState(), null);
 });
+
+test('BSG-补丁：原子批量入队失败不能锁行或退出批量模式（UI 仍可重试）', async () => {
+  const st = mkState();
+  const { document: d } = parseHTML(fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8'));
+  d.defaultView.ItemLink = require('../lib/item-link');
+  d.defaultView.CtnLink = require('../lib/ctn-link');
+  let tries = 0, fallbackCalls = 0;
+  let seq = 0;
+  const p = {
+    async enqueueBatch() { tries++; throw Error('IDB_WRITE_ABORTED'); },
+    async enqueue() { fallbackCalls++; throw Error('MUST_NOT_FALLBACK'); },
+    async saveDraft() {},
+    async recover() { return { drafts: [], commands: [] }; }
+  };
+  const page = UI.mount({ document: d, getState: () => st, getPersistence: () => p,
+    getCommands: async () => [], id: () => 'patch-'+(++seq) });
+  const scan = async txt => {
+    d.getElementById('itmCode').value = txt;
+    d.getElementById('itmScanBtn').click();
+    await tick();
+  };
+  d.getElementById('itmBatchStart-receive').click(); await tick();
+  page.scan.setBatchQty(2);
+  await scan('LOC:L-A'); await scan('CTN:C-A'); await scan('ITM:WP-TS-001');
+  await scan('LOC:L-B'); await scan('CTN:C-B'); await scan('ITM:WP-TS-002');
+  d.getElementById('itmConfirm').click(); await tick(16);
+  assert.equal(tries, 1);
+  assert.equal(fallbackCalls, 0, '正式提供 enqueueBatch 的持久化不许静默退回逐组入队');
+  assert.equal(page.scan.snapshot().rows.filter(r => r.locked).length, 0, '所有行保持未锁定');
+  assert.ok(page.scan.batchState(), '失败后仍保留当前批，可重试');
+  assert.equal(page.scan.snapshot().rows.filter(r => r.values.some(v => v.type === 'ITM')).length, 2);
+});

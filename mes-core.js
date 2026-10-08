@@ -760,9 +760,13 @@
   function itemPosition(state, itemCode) {
     var item = findItem(state, itemCode);
     if (!item) return { item: null, container: null, location: null };
-    if ((item.status || 'unknown') !== 'in_stock' || !item.container) {
-      return { item: item, container: null, location: null };
+    if ((item.status || 'unknown') !== 'in_stock') return { item: item, container: null, location: null };
+    /* 与 UniqueItems.currentPosition 一致：在库 container XOR loc，子位无需容器。 */
+    if (item.loc) {
+      var directLoc = (state.locations || []).find(function (r) { return r && r.code === item.loc; });
+      return { item: item, container: null, location: directLoc && directLoc.role === '容器子位' ? directLoc : null };
     }
+    if (!item.container) return { item: item, container: null, location: null };
     var container = null, location = null;
     ((state && state.containers) || []).forEach(function (r) { if (r && r.code === item.container) container = r; });
     if (container) {
@@ -821,15 +825,19 @@
     var outbound = isOutbound(order.type);
     var target = opts.target || null;
     if (!outbound) {
-      if (!target || !target.loc || !target.container) {
-        return { ok: false, errors: [(WIP_NAMES[order.type] || order.type) + '（入库）必须指定目标库位与容器（opts.target）'], commands: [], ops: [] };
+      if (!target || !target.loc) {
+        return { ok: false, errors: [(WIP_NAMES[order.type] || order.type) + '（入库）必须指定目标库位与容器（子位直存只需库位）'], commands: [], ops: [] };
       }
-      /* 目标必须真实存在，否则命令发到操作协议那里也会被拒，不如在这里就报清楚 */
-      var tloc = null, tctn = null;
-      ((state && state.locations) || []).forEach(function (r) { if (r && r.code === target.loc) tloc = r; });
-      ((state && state.containers) || []).forEach(function (r) { if (r && r.code === target.container) tctn = r; });
+      var tloc = (state.locations || []).find(function (r) { return r && r.code === target.loc; });
+      var targetIsSub = !!(tloc && tloc.role === '容器子位');
       if (!tloc) errors.push('目标库位未建档：' + target.loc);
-      if (!tctn) errors.push('目标容器未建档：' + target.container);
+      if (targetIsSub) {
+        if (target.container) errors.push('容器子位入库不能再指定容器：' + target.loc);
+      } else {
+        if (!target.container) errors.push('普通入库必须指定目标容器');
+        else if (!(state.containers || []).some(function (r) { return r && r.code === target.container; }))
+          errors.push('目标容器未建档：' + target.container);
+      }
     }
     (codes || []).forEach(function (raw, idx) {
       var v = validateItemScan(state, order, raw);
@@ -838,16 +846,19 @@
       var opId = typeof opts.opIdFor === 'function' ? opts.opIdFor(c, idx) : (String(order.code || 'ITEM') + '-' + c);
       if (outbound) {
         var pos = itemPosition(state, c);
-        if (!pos.container || !pos.location) {
-          errors.push('物品 ' + c + ' 标记在库但位置无法解析（容器或库位缺失）');
+        if (!pos.location || (!pos.container && !pos.item.loc)) {
+          errors.push('物品 ' + c + ' 标记在库但位置无法解析（容器或子位缺失）');
           return;
         }
-        commands.push({ opId: opId, kind: 'issue', itemCode: c, source: { loc: pos.location.code, container: pos.container.code } });
-        ops.push({ opId: opId, itemCode: c, fromLoc: pos.location.code, fromContainer: pos.container.code });
+        var source = pos.container
+          ? { loc: pos.location.code, container: pos.container.code }
+          : { loc: pos.location.code, container: '', sub: true };
+        commands.push({ opId: opId, kind: 'issue', itemCode: c, source: source });
+        ops.push({ opId: opId, itemCode: c, fromLoc: pos.location.code, fromContainer: pos.container ? pos.container.code : '' });
       } else {
         var tl = String(target.loc), tc = String(target.container);
-        commands.push({ opId: opId, kind: 'receive', itemCode: c, target: { loc: tl, container: tc } });
-        ops.push({ opId: opId, itemCode: c, fromLoc: tl, fromContainer: tc });
+        commands.push({ opId: opId, kind: 'receive', itemCode: c, target: targetIsSub ? { loc: tl, container: '', sub: true } : { loc: tl, container: tc } });
+        ops.push({ opId: opId, itemCode: c, fromLoc: tl, fromContainer: targetIsSub ? '' : tc });
       }
     });
     return { ok: errors.length === 0, errors: errors, commands: commands, ops: ops };
@@ -948,8 +959,8 @@
       ((b && b.ops) || []).forEach(function (o) {
         if (!o || !o.itemCode) return;
         var loc = o.fromLoc || '', container = o.fromContainer || '';
-        if (!loc || !container) {
-          errors.push('物品 ' + o.itemCode + ' 缺少执行时的位置留痕，无法生成反向命令');
+        if (!loc) {
+          errors.push('物品 ' + o.itemCode + ' 缺少执行时的库位留痕，无法生成反向命令');
           return;
         }
         var it = (state.items || []).find(function (x) { return x && x.code === o.itemCode; });
@@ -971,18 +982,36 @@
             skipped.push({ itemCode: o.itemCode, reason: '物品当前状态为「' + (it.status || '未知') + '」，不是「已出库」，无需或无法冲销' });
             return;
           }
-          var tgtCtn = (state.containers || []).find(function (x) { return x && x.code === container; });
-          if (!tgtCtn) {
+          var tgtLoc = (state.locations || []).find(function (x) { return x && x.code === loc; });
+          var isSubReturn = !container && tgtLoc && tgtLoc.status === 'active' && tgtLoc.role === '容器子位';
+          if (!container && !isSubReturn) {
+            errors.push('物品 ' + o.itemCode + ' 的原子位 ' + loc + ' 不存在或未启用，不能冲销');
+            return;
+          }
+          var tgtCtn = container && (state.containers || []).find(function (x) { return x && x.code === container; });
+          if (container && !tgtCtn) {
             errors.push('物品 ' + o.itemCode + ' 的退回容器 ' + container + ' 已不存在，无法生成反向命令');
             return;
           }
-          commands.push({ opId: opId, kind: 'receive', itemCode: o.itemCode, target: { loc: loc, container: container }, reverseOf: o.opId || '',
-            expected: { itemVersion: Number(it.version) || 0, containerVersion: Number(tgtCtn.version) || 0 } });
+          commands.push({ opId: opId, kind: 'receive', itemCode: o.itemCode,
+            target: isSubReturn ? { loc: loc, container: '', sub: true } : { loc: loc, container: container },
+            reverseOf: o.opId || '',
+            expected: isSubReturn ? { itemVersion: Number(it.version) || 0 } : { itemVersion: Number(it.version) || 0, containerVersion: Number(tgtCtn.version) || 0 } });
         } else {
           /* 入库单冲销 = issue 从留痕位置（= receive 的目标）取出。
              物品已 out 说明已经取出过 → 跳过；仍在库但换过容器 → 按当前位置取出。 */
           if (it.status === 'out') {
             skipped.push({ itemCode: o.itemCode, reason: '物品当前已出库（不在任何容器），无需也无法冲销' });
+            return;
+          }
+          if (it.status === 'in_stock' && it.loc && !it.container) {
+            var subLoc = (state.locations || []).find(function (x) { return x && x.code === it.loc; });
+            if (!subLoc || subLoc.status !== 'active' || subLoc.role !== '容器子位') {
+              errors.push('物品 ' + o.itemCode + ' 的当前子位无效，不能冲销'); return;
+            }
+            commands.push({ opId: opId, kind: 'issue', itemCode: o.itemCode,
+              source: { loc: it.loc, container: '', sub: true }, reverseOf: o.opId || '',
+              expected: { itemVersion: Number(it.version) || 0 } });
             return;
           }
           var ctnCode = it.container || '';
