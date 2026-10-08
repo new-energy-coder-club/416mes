@@ -1,17 +1,18 @@
 'use strict';
 /* TASK-19（BUG-14）验收：未决卡「重试」在扫码行丢失时用 request 快照重建，不再死局。
    覆盖任务书 4 条：单件重建 / 批量重建一条 / 坏命令人话兜底 / 既有扫码行路径不回归。 */
-const test = require('node:test'), assert = require('node:assert/strict'), fs = require('node:fs');
+const test = require('node:test'), assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path');
+const ROOT = path.resolve(__dirname, '..');
 const { parseHTML } = require('linkedom');
-const UI = require('/srv/416mes/lib/item-ui');
-const Store = require('/srv/416mes/lib/store.js');
-const PERSIST = require('/srv/416mes/lib/item-persistence.js');
-const Client = require('/srv/416mes/lib/item-client.js');
+const UI = require(path.join(ROOT, 'lib/item-ui'));
+const Store = require(path.join(ROOT, 'lib/store.js'));
+const PERSIST = require(path.join(ROOT, 'lib/item-persistence.js'));
+const Client = require(path.join(ROOT, 'lib/item-client.js'));
 
 const tick = async (n = 12) => { for (let i = 0; i < n; i++) await new Promise(r => setImmediate(r)); };
 
 async function setupProd() {
-  const html = fs.readFileSync('/srv/416mes/index.html', 'utf8');
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   const { document } = parseHTML(html);
   let n = 0;
   const serverLog = [];
@@ -184,7 +185,7 @@ test('T19-6 批量坏清单（items 缺 itemCode）：同样人话兜底', async
 /* ---------- 发现 R（v3.13.13）：同一命令的提交/查询必须进程内串行 ---------- */
 
 test('发现 R：executeCommand 以 method+id 为键复用 in-flight Promise（连点不产生重复请求）', () => {
-  const src = fs.readFileSync('/srv/416mes/lib/item-ui.js', 'utf8');
+  const src = fs.readFileSync(path.join(ROOT, 'lib/item-ui.js'), 'utf8');
   assert.match(src, /const _execInFlight = Object\.create\(null\);/, '必须有 in-flight 表');
   assert.match(src, /const inFlightKey = method \+ ':' \+ String\(\(c && c\.id\) \|\| ''\);/, '键必须是 method+命令id');
   assert.match(src, /if \(_execInFlight\[inFlightKey\]\) return _execInFlight\[inFlightKey\];/, '重复调用必须直接复用同一个 Promise');
@@ -195,7 +196,7 @@ test('发现 R：executeCommand 以 method+id 为键复用 in-flight Promise（�
 });
 
 test('发现 R：待处理卡动作按钮在飞行中禁用，结束后恢复', () => {
-  const src = fs.readFileSync('/srv/416mes/lib/item-ui.js', 'utf8');
+  const src = fs.readFileSync(path.join(ROOT, 'lib/item-ui.js'), 'utf8');
   assert.match(src, /const own=\[\.\.\.section\.querySelectorAll\('button'\)\];\s*own\.forEach\(b=>\{b\.disabled=true;\}\);/,
     '执行前必须禁用本卡所有按钮');
   assert.match(src, /finally\{ own\.forEach\(b=>\{b\.disabled=false;\}\);/,
@@ -207,7 +208,7 @@ test('发现 R：待处理卡动作按钮在飞行中禁用，结束后恢复', 
 /* ---------- 发现 Z（v3.13.16）：扫码执行不得发到上一张工单上 ---------- */
 
 test('发现 Z：wipItemExecScan 必须与当前详情单一致，不一致时切回而非发到旧单', () => {
-  const html = fs.readFileSync('/srv/416mes/index.html', 'utf8');
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   // 必须有上下文一致性守卫
   assert.match(html, /if \(wipDetailCode && wipDetailCode !== cur\.code\) \{/,
     '必须比对 wipDetailCode 与执行会话的单号');
@@ -224,7 +225,7 @@ test('发现 Z：wipItemExecScan 必须与当前详情单一致，不一致时�
 });
 
 test('发现 Z：wipExecSubmitBatch 同样只认 WIP_EXEC.code，需与详情单一致', () => {
-  const html = fs.readFileSync('/srv/416mes/index.html', 'utf8');
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   const seg = html.slice(html.indexOf('async function wipExecSubmitBatch()'), html.indexOf('async function wipExecSubmitBatch()') + 400);
   assert.match(seg, /state\.workorders\.find\(x => x\.code === WIP_EXEC\.code\)/, '批量提交按会话单取单（守卫在扫码入口已拦）');
 });
@@ -232,7 +233,7 @@ test('发现 Z：wipExecSubmitBatch 同样只认 WIP_EXEC.code，需与详情单
 /* ---------- 发现 AA（v3.13.17）：执行条渲染后焦点必须交给执行输入框 ---------- */
 
 test('发现 AA：scanWipItemized 渲染执行条后必须把焦点交给 wipExecItemInput', () => {
-  const html = fs.readFileSync('/srv/416mes/index.html', 'utf8');
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   assert.match(html, /v3\.13\.17（发现 AA）：执行条渲染完必须把焦点交给执行输入框/, '必须有焦点交接说明');
   // 必须在 scanWipItemized 函数体内（而不是别处）
   const fn = (html.match(/function scanWipItemized\(w, box\) \{[\s\S]*?\n\}/) || [''])[0];
@@ -246,6 +247,6 @@ test('发现 AA：scanWipItemized 渲染执行条后必须把焦点交给 wipExe
 });
 
 test('发现 AA：点「去扫码执行」仍保留 WIP: 预填（不回归原有用意）', () => {
-  const html = fs.readFileSync('/srv/416mes/index.html', 'utf8');
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   assert.match(html, /si\.value = 'WIP:' \+ w\.code; si\.focus\(\); si\.select\(\);/, '扫码输入框预填 WIP: 的行为必须保留（带上工单上下文）');
 });

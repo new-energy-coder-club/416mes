@@ -48,3 +48,30 @@ test('同步成功文案必须从 SYNC_TABLES 动态取表数，禁止再次硬�
   assert.match(index, /SYNC_TABLES\.length\s*\+\s*' 张表数据条数全部一致/);
   assert.doesNotMatch(index, /8 张表数据条数全部一致/);
 });
+
+test('CI 可移植性：测试不得写死开发机 /srv/416mes 项目目录', () => {
+  const paths = walk(path.join(root, 'test'));
+  const bad = paths.filter(f => /['"]\/srv\/416mes\//.test(fs.readFileSync(f, 'utf8')));
+  assert.deepEqual(bad.map(f => path.relative(root, f)), [],
+    '测试应从 __dirname 推导仓库位置，而不是依赖 /srv/416mes');
+});
+
+test('CI 可重现性：测试 require 的第三方包必须在 package.json 中声明', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  const allowed = new Set([...Object.keys(manifest.dependencies || {}), ...Object.keys(manifest.devDependencies || {})]);
+  const { builtinModules } = require('node:module');
+  const builtins = new Set(builtinModules);
+  const missing = [];
+  for (const file of walk(path.join(root, 'test'))) {
+    const src = fs.readFileSync(file, 'utf8');
+    const rex = /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+    for (const match of src.matchAll(rex)) {
+      const name = match[1];
+      if (name.startsWith('.') || name.startsWith('/') || name.startsWith('node:') || builtins.has(name)) continue;
+      const pkg = name.startsWith('@') ? name.split('/').slice(0, 2).join('/') : name.split('/')[0];
+      if (!allowed.has(pkg)) missing.push(path.relative(root, file) + ': ' + pkg);
+    }
+  }
+  assert.deepEqual([...new Set(missing)], [],
+    '测试引用了未声明依赖；本机残留 node_modules 会掩盖 CI MODULE_NOT_FOUND');
+});

@@ -2,18 +2,19 @@
 /* TASK-18 修复验证：BUG-16 崩溃根因（坏行/坏草稿不再崩 render）+ BUG-15 verifyLegacy
  * 入口 + BUG-13 方向文案 + errText 兜底 + 退役可用性（全真 harness）。 */
 const test = require('node:test'), assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path');
+const ROOT = path.resolve(__dirname, '..');
 const { parseHTML } = require('linkedom');
-const UI = require('/srv/416mes/lib/item-ui');
-const Store = require('/srv/416mes/lib/store.js');
-const PERSIST = require('/srv/416mes/lib/item-persistence.js');
-const Client = require('/srv/416mes/lib/item-client.js');
-const Scan = require('/srv/416mes/lib/item-scan.js');
+const UI = require(path.join(ROOT, 'lib/item-ui'));
+const Store = require(path.join(ROOT, 'lib/store.js'));
+const PERSIST = require(path.join(ROOT, 'lib/item-persistence.js'));
+const Client = require(path.join(ROOT, 'lib/item-client.js'));
+const Scan = require(path.join(ROOT, 'lib/item-scan.js'));
 
 const tick = async (n = 12) => { for (let i = 0; i < n; i++) await new Promise(r => setImmediate(r)); };
 
 function setupProd() {
   return (async () => {
-    const html = fs.readFileSync('/srv/416mes/index.html', 'utf8');
+    const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
     const { document } = parseHTML(html);
     let n = 0;
     const commands = [];
@@ -82,7 +83,7 @@ test('BUG-16：restore 空 rows / 缺 rows 的草稿不崩', () => {
 });
 
 test('BUG-16：领域错误仍显中文，TypeError 文案走人话兜底正则', async () => {
-  const html = fs.readFileSync('/srv/416mes/index.html', 'utf8');
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   const { document } = parseHTML(html);
   let n = 0;
   const state = { locations: [], containers: [], items: [], itemOperations: [] };

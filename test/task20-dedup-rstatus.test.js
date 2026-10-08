@@ -1,17 +1,18 @@
 'use strict';
 /* TASK-20 验收：BUG-17（注册页提示落在本页容器）+ BUG-18（同物品未决 retire/activate 查重）。 */
 const test = require('node:test'), assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path');
-const uiSrc = fs.readFileSync('/srv/416mes/lib/item-ui.js', 'utf8');
+const ROOT = path.resolve(__dirname, '..');
+const uiSrc = fs.readFileSync(path.join(ROOT, 'lib/item-ui.js'), 'utf8');
 const { parseHTML } = require('linkedom');
-const UI = require('/srv/416mes/lib/item-ui');
-const Store = require('/srv/416mes/lib/store.js');
-const PERSIST = require('/srv/416mes/lib/item-persistence.js');
-const Client = require('/srv/416mes/lib/item-client.js');
+const UI = require(path.join(ROOT, 'lib/item-ui'));
+const Store = require(path.join(ROOT, 'lib/store.js'));
+const PERSIST = require(path.join(ROOT, 'lib/item-persistence.js'));
+const Client = require(path.join(ROOT, 'lib/item-client.js'));
 
 const tick = async (n = 12) => { for (let i = 0; i < n; i++) await new Promise(r => setImmediate(r)); };
 
 async function setupProd({ online = true } = {}) {
-  const html = fs.readFileSync('/srv/416mes/index.html', 'utf8');
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   const { document } = parseHTML(html);
   let n = 0;
   let state = {
@@ -151,7 +152,7 @@ test('发现 H：ITM NOT_FOUND 引导按当前行 kind 取词，出库不再被�
 /* ---------- 发现 K（TASK-21）：服务端错误码汉化全覆盖 ---------- */
 
 test('发现 K：服务端全部 fail 错误码都在 errZh 有中文（防新增码静默漏译）', () => {
-  const U = fs.readFileSync('/srv/416mes/lib/unique-items.js', 'utf8');
+  const U = fs.readFileSync(path.join(ROOT, 'lib/unique-items.js'), 'utf8');
   const ui = uiSrc;
   const codes = [...new Set([...U.matchAll(/fail\('([A-Z_]+)'/g)].map(m => m[1]))].sort();
   const errZh = (ui.match(/const errZh=\{[\s\S]*?\};/) || [''])[0];
@@ -169,7 +170,7 @@ test('发现 K：errText 对 INACTIVE_ENTITY 走中文而非裸码', () => {
 /* ---------- 发现 C（TASK-21）：写前重计划比对顺序无关 ---------- */
 
 test('发现 C：写前重计划的 before/after 比对顺序无关（快照顺序漂移不误报，实质变化仍检出）', () => {
-  const op = fs.readFileSync('/srv/416mes/lib/item-operation.js', 'utf8');
+  const op = fs.readFileSync(path.join(ROOT, 'lib/item-operation.js'), 'utf8');
   assert.match(op, /function normalizeSnapshot\(arr\)/, '必须有 normalizeSnapshot');
   assert.match(op, /function snapshotChanged\(a, b\)/, '必须有 snapshotChanged');
   assert.match(op, /snapshotChanged\(currentPlan\.before, plan\.before\)/, '写前比对必须走 snapshotChanged');

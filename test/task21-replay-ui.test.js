@@ -84,7 +84,7 @@ test('发现 L：无跳过时不得渲染该提示（不制造噪音）', () => 
 /* ---------- 发现 BE（v3.13.18）：扫码页文案自相矛盾 ---------- */
 
 test('发现 BE：扫码页提示必须说「七类」且含 ITM（与 summary、实际功能一致）', () => {
-  const html = fs.readFileSync('/srv/416mes/index.html', 'utf8');
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   const tab = (html.match(/<section class="tab" id="tab-scan">[\s\S]{0,3000}/) || [''])[0];
   assert.ok(tab.length > 0, '必须能取到 tab-scan');
   // 不能再出现「六类」
@@ -106,7 +106,7 @@ test('发现 BE：扫码页提示必须说「七类」且含 ITM（与 summary�
 /* ---------- 发现 BF（v3.13.19）：fsFullResync 日志谎报「探测连续失败」 ---------- */
 
 test('发现 BF：全量拉取日志必须按真实探测状态说话（探测正常时不得宣称连续失败）', () => {
-  const html = fs.readFileSync('/srv/416mes/index.html', 'utf8');
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   const fn = (html.match(/async function fsFullResync\(why\) \{[\s\S]{0,400}/) || [''])[0];
   assert.ok(fn.length > 0, '必须能取到 fsFullResync');
   // 不得再无条件打印失败
