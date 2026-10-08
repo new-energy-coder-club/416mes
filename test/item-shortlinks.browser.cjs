@@ -120,15 +120,17 @@ test('E2: 标签二维码 jsQR 解码 === 短链（三路径）+ 回退 + 短链
       inPrintSheet: !!panel.closest('#printSheet'),
       parentIsPanel: panel.parentElement.classList.contains('panel'),
       prevIsLabelLayout: !!panel.previousElementSibling && panel.previousElementSibling.classList.contains('label-layout'),
-      nextIsDanger: !!panel.nextElementSibling && panel.nextElementSibling.classList.contains('danger-zone'),
+      nextIsCtnPanel: !!panel.nextElementSibling && panel.nextElementSibling.id === 'ctnLinksPanel',
+      ctnPanelNextIsDanger: !!document.getElementById('ctnLinksPanel').nextElementSibling && document.getElementById('ctnLinksPanel').nextElementSibling.classList.contains('danger-zone'),
       rows: panel.querySelectorAll('#linksTable tbody tr:not(.links-empty)').length
     };
   });
   assert.equal(panelState0.hidden, false, 'itm 类型下面板必须渲染');
   assert.equal(panelState0.inPrintSheet, false, '面板不得是 #printSheet 后代（打印自动隐藏的结构保证）');
   assert.equal(panelState0.parentIsPanel, true, '面板必须是 .panel 直子');
-  assert.equal(panelState0.prevIsLabelLayout, true, '面板必须紧跟 .label-layout');
-  assert.equal(panelState0.nextIsDanger, true, '面板必须在 danger-zone 之前');
+  assert.equal(panelState0.prevIsLabelLayout, true, '物品短链面板必须紧跟 .label-layout');
+  assert.equal(panelState0.nextIsCtnPanel, true, 'v3.13.35 后物品短链面板之后应是容器短链面板');
+  assert.equal(panelState0.ctnPanelNextIsDanger, true, '两个短链面板整体必须位于 danger-zone 之前');
   assert.equal(panelState0.rows, 0, '未勾选时无数据行');
 
   /* 勾选 WP-001（下标0）与 WP-a1b2c3d4（下标2）→ 行数 === sel.itm.size */

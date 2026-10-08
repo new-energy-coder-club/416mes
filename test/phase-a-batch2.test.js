@@ -115,15 +115,15 @@ test('PA3-3 A-3 增量B 占用者门禁：子位下仍有在库物品 → SUBLOC
   assert.throws(() => planOf(st, { schemaVersion: 1, kind: 'activateLocation', opId: 'pa3-3b', locationCode: 'SUB-1', role: '自由位', parentContainer: '' }, admin), e => e.code === 'SUBLOC_UNBIND_UNSPECIFIED', '缺 confirmSublocUnbind = 未给解除形态');
 });
 
-test('PA3-4 A-3 增量B 解绑成功：role/parentContainer 双重清除；out 历史件不算占用', () => {
+test('PA3-4 A-3 增量B 解绑成功：role 显式自由位 + parentContainer 清空；out 历史件不算占用', () => {
   const st = seed();
   st.items = st.items.filter(x => x.code !== 'I-IN');   // 前置：占用件已移出（不在本命令职责内）
   const p = planOf(st, { schemaVersion: 1, kind: 'activateLocation', opId: 'pa3-4a', locationCode: 'SUB-1', role: '自由位', parentContainer: '', confirmSublocUnbind: true }, admin);
-  assert.deepEqual(p.after.locations, [{ code: 'SUB-1', status: 'active', role: '', parentContainer: '' }], '双重清除：role 与 parentContainer 一并置空');
+  assert.deepEqual(p.after.locations, [{ code: 'SUB-1', status: 'active', role: '自由位', parentContainer: '' }], '解绑：role 显式落「自由位」，parentContainer 清空（飞书单选不靠空串清值）');
   assert.deepEqual(p.before.locations, [{ code: 'SUB-1', status: 'active', role: '容器子位', parentContainer: 'C-P' }]);
   /* SUB-1 上仅剩 out 件 I-HIST（loc 是历史线索）未阻挡解绑；SUB-2 完全无物品照常解绑 */
   const p2 = planOf(st, { schemaVersion: 1, kind: 'activateLocation', opId: 'pa3-4b', locationCode: 'SUB-2', role: '自由位', parentContainer: '', confirmSublocUnbind: true }, admin);
-  assert.deepEqual(p2.after.locations, [{ code: 'SUB-2', status: 'active', role: '', parentContainer: '' }]);
+  assert.deepEqual(p2.after.locations, [{ code: 'SUB-2', status: 'active', role: '自由位', parentContainer: '' }]);
 });
 
 test('PA3-5 A-3 权限边界：activateLocation 的子位化与解绑形态都是 admin 专属', () => {

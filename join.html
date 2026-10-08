@@ -118,8 +118,8 @@ footer{border-top:1px solid rgba(142,162,216,.2);padding:18px 0 26px;text-align:
 @media(max-width:860px){.recruit{grid-template-columns:1fr;}.poster{grid-template-columns:1fr;}.hero h1{font-size:34px;}.label-card .lbody{flex-direction:column;}}
 </style>
 </head>
-<body><!-- 首屏加载缓冲（用户指定：3D 塔形 loader）。window.load 后由脚本收起，
-       兜底 6 秒内必须让开；点击罩层可立即跳过。 -->
+<body><!-- 首屏加载缓冲（3D 塔形 loader）。window.load 后由脚本收起；
+       最迟 10 秒兜底让开；点击罩层可立即跳过。 -->
 <div id="appLoader" class="mes-load" role="status" aria-live="polite" aria-label="页面加载中">
   <div class="mes-load__stage">
     <div class="loader">
@@ -204,8 +204,8 @@ footer{border-top:1px solid rgba(142,162,216,.2);padding:18px 0 26px;text-align:
       <h3>// 已经在跑的能力</h3>
       <ul>
         <li>七类标签打印：60×40 热敏满版 / A4 整版 3×7 密排，高对比 / 彩色双模式</li>
-        <li>物料台账 + 人员台账：Excel 导入导出、JSON 全量备份合并、库存流水可审计</li>
-        <li>扫码出入库闭环：没有扫码动作，库存数不变</li>
+        <li>唯一物品（ITM）逐件仓储：库位 / 容器 / 子位直存、人员档案、JSON 备份与操作记录可审计</li>
+        <li>扫码作业闭环：查询只读；入库 / 出库 / 换箱与 WIP 执行必须经确认和受控操作命令</li>
         <li>NEC 小工单：RW 任务 / CG 采购 / WX 维修，可推送飞书多维表格 + 群通知</li>
       </ul>
       <p style="margin-top:10px">入口：<a href="home.html">mes.newenergycoder.club</a> · 扫码入位 →</p>
@@ -240,8 +240,8 @@ footer{border-top:1px solid rgba(142,162,216,.2);padding:18px 0 26px;text-align:
 </script>
 
 <script>
-/* 首屏 loader 收起：window.load 后收起，且至少展示 4s（用户指定，顺便罩住资源加载）；
-   兜底 6 秒内必须让开（防卡死）；点击罩层可立即跳过。 */
+/* 首屏 loader 收起：window.load 后收起，且至少展示 4s；
+   最迟 10 秒兜底让开（防资源异常时永久遮罩）；点击罩层可立即跳过。 */
 (function () {
   var el = document.getElementById('appLoader');
   if (!el) return;

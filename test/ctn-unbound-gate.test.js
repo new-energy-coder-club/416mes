@@ -6,7 +6,7 @@
  * 门控只做分类拒绝（Error.code='CTN_LOC_UNBOUND'，detail={kind,ctnCode,locCode}），
  * 绑定由 UI「标注子位并继续」显式确认卡承接，绝不静默放行/改数据。
  * 覆盖：单行/批量四分类（含批量 own_sub 子位锚点转换）、门控抛出后行不被污染、
- * 标注后的单行 rebase 流、verifyLegacy/旧模型容器原契约不变。
+ * 标注后的单行 rebase 流、旧模型容器回归，以及 v3.13.41 verifyLegacy 历史 replay 的新子位迁移兼容。
  * 夹具库位语义：W00-G01=空闲自由位（unbound 场景）；W01-G01=被 C-A 旧模型占位；
  * W02-G01=被 C-D 旧模型占位。 */
 const test = require('node:test');
@@ -94,13 +94,21 @@ test('G4 单行 rebase 流（问题②的修复闭环）：门控拒绝 → 标�
   assert.deepEqual(q.target, { loc: 'W00-G01', container: '', sub: true }, '子位直存请求形状');
   assert.deepEqual(q.expected, { itemVersion: 1 });
 });
-test('G5 verifyLegacy 原契约不变：新模型容器(loc空)仍走旧逐字比对（归属不符，无结构化码）', () => {
-  const st = mkState(), s = mk(st, 'verifyLegacy');
-  s.accept('LOC:W01-G01');
-  const e = catchOf(() => s.accept('CTN:C-B'));
-  assert.ok(e);
-  assert.equal(e.message, '容器与库位归属不符', 'verifyLegacy 分支字节级保持旧文案');
-  assert.equal(e.code, undefined);
+test('G5 v3.13.41：历史 verifyLegacy replay 兼容已迁移 own_sub 关系，并按子位直存落库', () => {
+  const st = mkState();
+  locOf(st, 'W00-G01').role = '容器子位';
+  locOf(st, 'W00-G01').parentContainer = 'C-B';
+  st.items.push({ code: 'WP-OLD', name: '历史旧件', status: 'unknown', loc: 'W00-G01', container: '', version: 0, lastOpId: '' });
+  const s = mk(st, 'verifyLegacy');
+  s.accept('LOC:W00-G01');
+  s.accept('CTN:C-B');
+  assert.equal(s.accept('ITM:WP-OLD').complete, true);
+  const q = s.request();
+  assert.deepEqual(q.target, { loc: 'W00-G01', container: 'C-B' }, '历史请求形状保持不变');
+  const p = U.plan(st, q, { id: 'admin', roles: ['admin','operator'] });
+  assert.deepEqual(p.after.items[0], {
+    code: 'WP-OLD', container: '', loc: 'W00-G01', status: 'in_stock', version: 1, lastOpId: q.opId
+  }, '容器已迁移到 own_sub 时，历史核实必须按新模型直存，不得再依赖 containers.loc');
 });
 test('G6 旧模型容器定位在别处：普通 receive 仍是原「归属不符」逐字比对（不进新门控）', () => {
   const st = mkState(), s = mkr(st);

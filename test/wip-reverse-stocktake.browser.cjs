@@ -12,8 +12,10 @@ const SEED={
   locations:[{code:'L-A',kind:'货架库位',desc:'A区角钢货架',status:'active'}],
   containers:[{code:'C-A',type:'收纳盒',spec:'32cm',loc:'L-A',status:'active',version:2}],
   items:[
-    {code:'WP-TS-001',name:'内六角扳手',spec:'M3',loc:'',container:'C-A',status:'in_stock',version:2,lastOpId:''},
-    {code:'WP-GJ-001',name:'螺丝刀',spec:'PH2',loc:'',container:'',status:'pending',version:1,lastOpId:''}],
+    /* 已执行 LL（领料）后的真实现状必须是 out；execBatches 里的 fromLoc/fromContainer 才是冲销退回目标。 */
+    {code:'WP-TS-001',name:'内六角扳手',spec:'M3',loc:'L-A',container:'',status:'out',version:2,lastOpId:'X-1'},
+    {code:'WP-GJ-001',name:'螺丝刀',spec:'PH2',loc:'',container:'',status:'pending',version:1,lastOpId:''},
+    {code:'WP-QT-001',name:'盘点夹具',spec:'',loc:'',container:'C-A',status:'in_stock',version:1,lastOpId:''}],
   workorders:[],
   materials:[],transactions:[],members:[],manuals:[],necOrders:[]
 };
@@ -100,7 +102,8 @@ test('阶段B第二批：冲销入口 / outbox.put / 盘点差异出口 / 死文
 
   /* ③ 盘点结束报告要给差异处理出口 */
   const stocktake = await page.evaluate(async () => {
-    state.stocktake = { startedAt: new Date().toISOString(), operator: state.operator || '', scanned: [], baseline: ['WP-TS-001', 'WP-GJ-001'] };
+    /* 基线必须包含一件真实 in_stock 且未扫到的物品，才能产生“差异”出口；out/pending 不属于在库盘点基线。 */
+    state.stocktake = { startedAt: new Date().toISOString(), operator: state.operator || '', scanned: [], baseline: ['WP-QT-001'] };
     save();
     stocktakeEnd(document.getElementById('scanResult'));
     const box = document.getElementById('scanResult');

@@ -116,8 +116,8 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
 @media(max-width:560px){header h1{font-size:22px;} .card.wide{flex-direction:column;align-items:flex-start;} header{padding:24px 16px;} main{padding:18px 14px 30px;} .ops{font-size:12px;} .ops code{font-size:11px;word-break:break-all;}}
 </style>
 </head>
-<body><!-- 首屏加载缓冲（用户指定：3D 塔形 loader）。window.load 后由脚本收起，
-       兜底 6 秒内必须让开；点击罩层可立即跳过。 -->
+<body><!-- 首屏加载缓冲（3D 塔形 loader）。window.load 后由脚本收起；
+       最迟 10 秒兜底让开；点击罩层可立即跳过。 -->
 <div id="appLoader" class="mes-load" role="status" aria-live="polite" aria-label="页面加载中">
   <div class="mes-load__stage">
     <div class="loader">
@@ -134,7 +134,7 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
   <div class="wrap">
     <div class="eyebrow">BUILT TO DAWN · KEEP BUILDING&#9608;</div>
     <h1><span class="logo"><img src="nec-logo-white.png" alt="NEC"></span>常州工NEC · 智能仓库MES</h1>
-    <div class="sub">七类标签（库位 / 容器 / 物料 / 物品 / 手册 / 库存工单 / NEC工单）· 扫码工作台（查询只读 · 执行需确认）· Excel 台账 · 扫码出入库闭环<br>Design by 常州工 NEC · newenergycoder.club</div>
+    <div class="sub">唯一物品（ITM）逐件仓储 · 库位 / 容器 / 子位关系 · 库存工单 · 操作审计 · 飞书同步 · 七类标签打印<br>Design by 常州工 NEC · newenergycoder.club</div>
     <div class="status-row">
       <span class="chip" id="chip-mes"><span class="dot"></span>416MES 前端检测中…</span>
     </div>
@@ -142,17 +142,17 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
 </header>
 
 <main>
-  <!-- ========== 运营看板（读本设备 localStorage，无数据时隐藏） ========== -->
+  <!-- ========== 运营看板（读本机业务快照；云端是否最新仍以同步页为准） ========== -->
   <div id="dash">
-    <div class="section-title">📊 运营看板（本设备实时数据）</div>
+    <div class="section-title">📊 运营看板（本机业务快照）</div>
     <div class="tiles" id="dashTiles"></div>
   </div>
 
-  <div class="section-title">📦 416MES 单机作业端</div>
+  <div class="section-title">📦 416MES 作业端</div>
   <div class="grid">
-    <a class="card c-blue" href="index.html#ledger">
-      <div class="icon">📋</div><h3>物料台账·历史</h3>
-      <p>历史台账只读视图：存量物料数据照常展示，数量账已封存；新物品请到「物品」页建档。</p>
+    <a class="card c-blue" href="index.html#item-work">
+      <div class="icon">📦</div><h3>唯一物品作业</h3>
+      <p>当前主业务入口：逐件 ITM 入库、出库、换箱与批量作业；位置支持容器链和容器子位直存，所有写入都进入受控操作账。</p>
       <span class="go">进入 →</span>
     </a>
     <a class="card c-green" href="index.html#label">
@@ -165,7 +165,7 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
       <p>社团成员名录：编号 / 姓名 / 学号 / 部门SIG / 职务，姓名直通「操作人」与 NEC 任务负责人。</p>
       <span class="go">进入 →</span>
     </a>
-    <a class="card c-amber" href="index.html#gen">
+    <a class="card c-amber" href="index.html#register">
       <div class="icon">🔢</div><h3>批量建档与编码</h3>
       <p>主数据建档：按货架/层/位批量补齐空位码，容器码、物品码、手册码一键生成。库存工单请到「库存工单」页。</p>
       <span class="go">进入 →</span>
@@ -176,13 +176,13 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
       <span class="go">进入 →</span>
     </a>
     <a class="card c-navy" href="join.html">
-      <div class="icon">📣</div><h3>加入协作</h3>
-      <p>场务 SIG 招募令：主美 / 设计师 / MES 感兴趣的队友，扫码入群，A416 线下集结。</p>
+      <div class="icon">📣</div><h3>协作 / 历史招募</h3>
+      <p>查看场务 SIG 招募归档；原群码已于 2026-09-19 过期，如需加入请按页面提示联系管理员获取新入口。</p>
       <span class="go">查看 →</span>
     </a>
     <a class="card c-red" href="index.html#scan">
       <div class="icon">🔫</div><h3>扫码工作台</h3>
-      <p>扫 MAT/LOC/CTN 码即查位置与库存（<b>只读</b>）；扫 WIP 工单码并<b>确认执行</b>才增减库存。盘点已物品化（只读报告），MAT 数量账已封存。</p>
+      <p>扫码查询本身<b>只读</b>；ITM 入库/出库/换箱和 WIP 工单执行都走受控确认与操作账。实际在库状态以唯一物品及操作记录为准，MAT 数量账仅保留历史。</p>
       <span class="go">进入 →</span>
     </a>
   </div>
@@ -195,7 +195,7 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
   </div>
 </main>
 
-<footer>常州工NEC · 智能仓库MES ｜ 数据存于浏览器 localStorage，请定期导出 Excel 备份</footer>
+<footer>常州工NEC · 智能仓库MES ｜ 本机持久化 + 飞书同步；重要操作以操作账为准，并定期导出 JSON 备份</footer>
 
 <script>
 (function(){
@@ -206,31 +206,30 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
   var chipMes = document.getElementById('chip-mes');
   try {
     var s = JSON.parse(localStorage.getItem('mes416_state_v1') || '{}');
-    if (s.materials) {
-      var mats = s.materials;
+    if (s.items || s.materials) {
+      var items = s.items || [];
+      var inStock = items.filter(function(i){ return i && i.status === 'in_stock'; }).length;
+      var outCount = items.filter(function(i){ return i && i.status === 'out'; }).length;
       // 待办 = 未执行 / 待执行 / 部分执行；「已取消」（含已冲销）不再计入待办
       var wips = (s.workorders || []).filter(function(w){ return w.status === '未执行' || w.status === '待执行' || w.status === '部分执行'; });
-      var totalVal = mats.reduce(function(a, m){ return a + (m.qty || 0) * (m.cost || 0); }, 0);
       var lastBackup = +(localStorage.getItem('mes416_last_backup') || 0);
       var days = lastBackup ? Math.floor((Date.now() - lastBackup) / 864e5) : 99;
       chipMes.className = 'chip ' + (days > 7 ? 'bad' : 'ok');
-      chipMes.innerHTML = '<span class="dot"></span><span class="t">在管物料 ' + mats.length +
-        ' 项 · 历史台账估值 ¥' + totalVal.toFixed(0) + ' · 待执行工单 ' + wips.length +
+      chipMes.innerHTML = '<span class="dot"></span><span class="t">唯一物品 ' + items.length +
+        ' 件 · 在库 ' + inStock + ' · 已出库 ' + outCount + ' · 待执行工单 ' + wips.length +
         (days > 7 ? ' · ⚠已 ' + days + ' 天未备份' : ' · 备份 ' + (lastBackup ? days + ' 天前' : '从未')) + '</span>';
-      // 运营看板
+      // 运营看板：只展示现行业务真相，不再把已封存的 MAT qty/估值包装成“实时库存”
       document.getElementById('dash').style.display = 'block';
       var tiles = [
-        { n: mats.length, l: '在管物料', w: false },
-        { n: '¥' + totalVal.toFixed(0), l: '历史台账估值', w: false },
+        { n: items.length, l: '唯一物品', w: false },
+        { n: inStock, l: '当前在库', w: false },
         { n: wips.length, l: '待执行工单', w: wips.length > 0 },
-        { n: (s.transactions || []).length, l: '库存流水', w: false },
+        { n: (s.itemOperations || []).length, l: '物品操作记录', w: false },
         { n: lastBackup ? days + ' 天前' : '从未', l: '上次备份', w: days > 7 }
       ];
       document.getElementById('dashTiles').innerHTML = tiles.map(function(t){
         return '<div class="tile' + (t.w ? ' warn' : '') + '"><div class="num">' + t.n + '</div><div class="lbl">' + t.l + '</div></div>';
       }).join('');
-      /* G3：低库存/负库存预警卡片已移除 —— MAT 数量账封存，minQty 不再预警。
-         台账页本身已是「物料台账·历史」只读视图。 */
     } else {
       chipMes.className = 'chip ok';
       chipMes.innerHTML = '<span class="dot"></span><span class="t">本地址 localStorage 快照（本设备暂无台账数据）· 服务在线 ≠ 业务数据已同步</span>';
@@ -244,8 +243,8 @@ footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1p
 </script>
 
 <script>
-/* 首屏 loader 收起：window.load 后收起，且至少展示 4s（用户指定，顺便罩住资源加载）；
-   兜底 6 秒内必须让开（防卡死）；点击罩层可立即跳过。 */
+/* 首屏 loader 收起：window.load 后收起，且至少展示 4s；
+   最迟 10 秒兜底让开（防资源异常时永久遮罩）；点击罩层可立即跳过。 */
 (function () {
   var el = document.getElementById('appLoader');
   if (!el) return;

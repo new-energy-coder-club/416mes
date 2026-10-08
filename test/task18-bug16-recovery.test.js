@@ -133,18 +133,16 @@ test('BUG-16：建档+退役全真链路走通，界面无裸露错误', async (
   assert.doesNotMatch(d.getElementById('itmStatus').textContent, /forEach|Cannot read/, '执行后不得出现裸露 JS 错误');
 });
 
-test('BUG-15：itmKind 下拉含 verifyLegacy，且该类型可新建行', async () => {
+test('v3.13.41：verifyLegacy 不再暴露为新建作业入口，但历史扫码序列仍保留给 replay', async () => {
   const s = await setupProd();
   const d = s.document;
   const sel = d.getElementById('itmKind');
   const vals = [...sel.options].map(o => o.value);
-  assert.ok(vals.includes('verifyLegacy'), '下拉必须含 verifyLegacy');
-  for (const o of sel.options) { if (o.value === 'verifyLegacy') o.setAttribute('selected', ''); else o.removeAttribute('selected'); }
-  sel.dispatchEvent(new d.defaultView.Event('change'));
-  d.getElementById('itmNewRow').click();
-  await tick();
-  assert.equal(s.page.scan.row().kind, 'verifyLegacy', '能新建旧物品核实行');
-  assert.match(d.getElementById('itmStep').textContent, /核实库位/, '步骤引导按 verifyLegacy 渲染');
+  assert.deepEqual(vals, ['receive','issue','transfer'], '用户新建作业只保留现行三类；unknown 旧物品统一走入库');
+  assert.ok(Scan.sequences.verifyLegacy, '历史草稿/命令 replay 仍需保留 verifyLegacy 序列');
+  s.page.scan.add('verifyLegacy');
+  s.page.render();
+  assert.match(d.getElementById('itmStep').textContent, /核实库位/, '历史恢复行仍能正确渲染，不因 UI 下线而丢兼容');
 });
 
 test('BUG-13：各作业类型的提交方向文案', async () => {

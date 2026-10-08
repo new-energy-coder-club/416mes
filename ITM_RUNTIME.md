@@ -1,71 +1,209 @@
-# ITM 运行与协调契约
+# 416MES ITM 运行时与恢复契约
 
-## 当前默认：首版试运行
+> 当前基线：v3.13.41 / 2026-10-08
+> 本文说明当前真实运行模式、持久化、同步、身份与失败恢复边界。
 
-用户明确要求先跑通现场验证，暂不接身份认证和持久共享协调。生产handler默认`feishu-trial`；`ITM_OPERATION_MODE=disabled`停写，`strict`恢复严格门禁。`createRuntime()`本身仍默认strict，测试和其他调用不隐式放开。
+## 1. 推荐运行方式
 
-飞书试运行是best-effort，不是跨实例事务。仅一名操作员、同一时间一条在途命令，等待结果后再继续；未知结果只查原opId，不新建命令重发。无认证意味着知道接口地址的人可提交管理操作，不能把姓名视为验证身份；禁止直接编辑飞书受控列。页面常驻提示此边界。
+开发/现场调试优先通过 HTTP 启动：
 
-保留schema检查、opId/载荷查重、PREPARED意图、写前二次核对、实体单次写/回读及异常REPAIR_REQUIRED；不能保证同时穿透检查的多实例互斥。空状态保持unknown，通过首次核实操作启用，不批量猜测在库。缺字段返回明确503；飞书操作表ID已只读核实为tblWyVuqDDBnU05t。
-
-## 严格模式（未来多人正式使用）
-
-`api/feishu/item-operation.js`通过`lib/item-runtime.js:createRuntime`组合真实飞书仓储与操作协议。strict模式无认证/协调时HTTP401/503拒绝，不发飞书写。
-
-部署可接入 `createRuntime({api,authenticate,coordinator,enabled:true})` 后交 `handlerFor(service)`。api默认是现有feishu-api；仓储实现完整schema检查、PREPARED建行、按record_id改关系并显式清空、实体回读、日志终态回读。部署工厂不是测试fake仓储。
-
-## 部署接线示例（需外部适配验收，默认文件不自动启用）
-
-```js
-// 在部署专用入口中组合，禁止把测试fixture复制成生产适配器。
-const { createRuntime } = require('../../lib/item-runtime');
-const { handlerFor } = require('./item-operation');
-// 由部署方实现并通过持久性/跨实例/未知迟到验收：
-const { authenticate, coordinator } = require('../../deployment/verified-item-adapters');
-module.exports = handlerFor(createRuntime({ authenticate, coordinator, enabled: true }));
+```bash
+npm ci
+npm run dev
+# 或
+npm run serve:static
 ```
 
-上例deployment模块当前不存在，不能直接复制后声称可上线；它是明确外部接入点。真实Repository已实现，不需替换业务协议；隔离测试通过相同工厂注入fake API地址与适配器。注册命令复用同一认领/日志/恢复协议，不走通用upsert。
+早期“直接双击 index.html 就是完整产品”的说法已不再准确。当前应用的正常能力涉及：
 
-## 认证
+- IndexedDB；
+- Web Lock / 单写者约束；
+- Vercel / 本地 API；
+- 飞书同步；
+- item / container 短链；
+- 相机与 worker；
+- 受控 item-operation。
 
-authenticate(req)须验证服务端会话/签名，返回{id,roles}；不能相信请求operator或客户端姓名。operator可创建与查看本人操作；admin/service可查看跨用户操作；恢复只允许service。没有roles一律403。GET无恢复写副作用。真实身份提供者尚未配置，为外部门禁。
+纯静态环境仍可降级查看/操作部分本机能力，但不代表完整在线闭环。
 
-## 持久协调适配器
+## 2. 本地持久化
 
-必须提供contract=`durable-global-barrier-v1`、verified=true，并真实满足下列方法的持久、跨实例原子语义；字符串标记不是验收证明：
+### LocalStorage
 
-- claim({opId,requestHash,request,operator})：原子保存不可变命令和全局认领。已有同键异摘要返回conflict；已有同键返回existing；其他未决命令返回未取得。首版全局串行，包括容器操作。
-- get(opId)：持久命令/operation/result读取。
-- prepare(opId,operation)：飞书首次写前持久保存冻结计划。函数此后崩溃同样维持屏障。
-- progress、uncertain：记录进度及未知原因，绝不释放认领。TTL不得解冻。
-- finish(opId,result)：原子保存最终结果并释放认领；仅明确无副作用REJECTED或经过回读的APPLIED。
-- claimRecovery(opId)：原子恢复认领，只能恢复当前屏障持有者，不允许恢复者并发。
+主要承担：
 
-`test/fixtures/item-protocol.js` 是内存模拟，只证明执行协议测试，生产不导入、不宣称持久。真实KV/队列/事务设施尚未选型验证，正式写保持关闭。
+- 应用状态快照；
+- UI 偏好；
+- deviceId / operator 等轻量状态；
+- 部分启动与备份标记。
 
-## 恢复与限制
+### IndexedDB
 
-日志创建超时/实体写超时/终态写超时都保持屏障。readAfter为before不证明请求不会迟到，恢复不重发apply；只有after一致且唯一日志摘要吻合，服务恢复可修复终态。日志重复或截断立即隔离。仓储每次调用tenantToken，依赖API已有过期缓存，不私建永久缓存。
+当前 ITM 可靠性主路径之一，保存：
 
-前端fetch 15秒超时，AbortController不等于撤销远端业务，命令标未知且保留原opId；未知只提供查询。ACK本机落盘失败不能显示完成，未知标记也失败则合并报告并保留原命令。
+- records / transactions 等持久状态；
+- syncMeta；
+- 草稿；
+- outbox / itemOperation 命令；
+- baseline / conflict / deletion journal 等仓库。
 
-当前环境模板仅为占位说明：
+### 单写者
 
+`item-persistence.js` 配合 Web Lock 控制一个浏览器生命周期中的写者，降低多标签页同时写本地状态的竞态。
+
+## 3. item-operation 执行模型
+
+客户端提交一个稳定 opId 的 request。
+
+服务端大体流程：
+
+```text
+认证/模式检查
+  -> 读取当前真源
+  -> plan（before / after）
+  -> PREPARED 日志
+  -> apply
+  -> readAfter
+  -> APPLIED / REJECTED / REPAIR_REQUIRED
+  -> 客户端 acknowledge
 ```
-FEISHU_APP_ID=<isolated-app-id>
-FEISHU_APP_SECRET=<isolated-secret>
-FEISHU_BASE_TOKEN=<isolated-base-token>
-FEISHU_TABLES=<nine-table-json-with-itemOperations>
+
+原则：
+
+- requestHash 防止同 opId 被换载荷；
+- expected version 防止陈旧镜像覆盖新状态；
+- apply 后必须回读；
+- 结果未知时保留命令；
+- 重试优先查询原 opId；
+- 不因网络超时就默认“没写进去”。
+
+## 4. 当前运行模式
+
+`lib/item-mode.js` 当前支持：
+
+- `disabled`
+- `strict`
+- `feishu-trial`
+
+若没有设置 `ITM_OPERATION_MODE`，默认是 **feishu-trial**。
+
+这仍是“单操作员/小规模现场试运行”语义，不是正式多用户事务系统。
+
+## 5. 身份与授权
+
+### ITM_OPERATOR_TOKENS
+
+`api/feishu/item-operation.js` 支持：
+
+```text
+ITM_OPERATOR_TOKENS = {
+  "<token>": { "id": "...", "roles": ["operator"] }
+}
 ```
 
-不读取/复制真实环境。新表由用户创建不等于schema、ACL或生产协调已验证。不要把旧网页回滚当作恢复关键字段普通写权限。
+配置后，请求需要携带 `X-416MES-Token`。
 
-## 2.64.0 部署边界与可选项（Phase D）
-- 实体级分桶：trial 协调器对 PREPARED 行按实体键集相交互斥（unique-items.entityKeysOf），
-  不同物品/容器可并行；REPAIR_REQUIRED 仍全局屏障；写前 TRIAL_PRECONDITION_CHANGED 重计划不变。
-- 最小身份（可选）：Vercel 环境变量 ITM_OPERATOR_TOKENS = JSON（token→{id,roles}）。
-  配置后 POST 必须带 X-416MES-Token，操作人记真实 id，register*/retire/activate* 的
-  admin 校验激活；未配置则保持 trial-unverified（现状兼容）。
-  前端在浏览器控制台执行 localStorage.setItem('mes416_itm_token','<token>') 一次性录入。
-- 边界：共享 token 防误不防恶意；正式多用户走飞书 OAuth+持久协调器（长期方案）。
+未配置时，为兼容试运行：
+
+```text
+id = trial-unverified
+roles = [admin, operator]
+```
+
+因此：
+
+- 页面显示的“操作人”不等同于强身份；
+- Same-Origin 不等同于身份认证；
+- 共享 token 也只是有限门禁；
+- 真正多人生产化应使用可验证身份（如飞书 OAuth / 服务端 session）与明确 RBAC。
+
+## 6. 飞书 9 表与同步
+
+当前主数据 9 表：
+
+`materials, locations, containers, members, items, manuals, workorders, transactions, itemOperations`。
+
+同步路径包含：
+
+- full state；
+- changes 探测；
+- incremental；
+- three-way merge；
+- reconcile；
+- outbox；
+- schema / schema-options；
+- item-operation 专用受控写。
+
+受控关系字段不应走普通 upsert 绕过协议。
+
+## 7. 离线与失败恢复
+
+### 普通同步/outbox
+
+普通网络失败可以进入 outbox，并在恢复后重试；达到阈值后进入 needs_attention，由用户决定重试或放弃/导出。
+
+### ITM 命令
+
+ITM 命令更严格：
+
+- 已提交/结果未知时不能擅自换 opId 重发；
+- 查询原 opId 的云端终态；
+- REPAIR_REQUIRED / unknown 必须保留可见人工出口；
+- 本地 acknowledge 只有在持久化成功后才能把 UI 宣称为完成。
+
+## 8. 草稿
+
+扫码会话会自动保存到 IndexedDB，刷新后自动恢复路径会：
+
+- 过滤不兼容旧序列；
+- 丢弃没有命令背书的僵尸锁定行；
+- 按 savedAt 选择最近可用草稿；
+- restore 后 render。
+
+v3.13.40 起，手动“恢复最近草稿”和自动恢复共用同一套可用草稿筛选、`savedAt` 排序和 `render()` 路径；真 IndexedDB 刷新恢复已纳入 browser 回归。
+
+## 9. 子位与位置
+
+当前关系真源：
+
+```text
+locations.role = 容器子位
+locations.parentContainer = CTN
+```
+
+物品现状：
+
+- 容器链：`item.container`
+- 子位直存：`item.loc`
+
+读取面必须同时支持两种，不得再假设“所有物品位置都由容器派生”。
+
+## 10. 批量
+
+批量不是另一套领域协议，而是单件步骤机的批量壳：
+
+- receive：每件独立 LOC / CTN / ITM；
+- subloc：LOC / ITM；
+- issue：逐件 ITM；
+- submit 时按 LOC 分组为 batch request；
+- 版本在提交时重新从当前 state 派生，而不是扫描时冻结。
+
+## 11. schema 失配策略
+
+当飞书关键列缺失、类型不匹配或选项不合法时，应 fail closed：
+
+- 不允许“少一列就先写其它列”破坏受控状态组；
+- schema 面板应告诉用户缺什么；
+- 修复 schema 后再恢复写入。
+
+普通描述字段和受控字段要分开处理。
+
+## 12. 当前运行边界与发布门禁
+
+- 子位 unbind 已在 v3.13.40 完成领域、Repository、UI、占用门禁和审计闭环；自由位使用显式 `role='自由位'`。
+- `verifyLegacy` 只保留为历史兼容/replay 分支，已从新建作业 UI 下线；v3.13.41 同时补齐新子位模型的 replay 兼容，正常新业务统一走 `receive`。
+- 默认 `feishu-trial` 在未配置 token 时仍不是强身份认证；多人生产化应另行推进 OAuth/session/RBAC。
+- GitHub Actions 已在 Vercel build/deploy 前执行 `npm test` 和 Chromium browser 回归；测试红灯会阻断生产部署。
+- Browser 回归当前 7/7 全绿；源码卫生测试还锁住 Git 冲突标记、门户死链和同步表数硬编码。
+
+v3.13.41 的当前结论与完整验证状态见 `CURRENT_STATUS.md`。

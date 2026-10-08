@@ -15,8 +15,13 @@ test('entire index boots in Chromium, real IDB draft survives reload, narrow UI 
  for(const code of ['LOC:L-A','CTN:C-A']){await page.locator('#itmCode').fill(code);await page.locator('#itmScanBtn').click();}
  await page.locator('#itmDraftSave').click();await page.waitForFunction(()=>document.getElementById('itmStatus').textContent.includes('已保存本机'));
  await page.reload({waitUntil:'domcontentloaded'});await page.evaluate(()=>localStoreReady);await page.evaluate(()=>goTab('item-work'));await page.locator('#itmDraftRestore').click();await page.waitForFunction(()=>document.getElementById('itmStep').textContent.includes('目标容器：C-A'));
- await page.locator('#itmCode').fill('WP-001');await page.locator('#itmScanBtn').click();await page.locator('#itmConfirm').click();await page.waitForFunction(()=>document.getElementById('itmStatus').textContent.includes('本机已保存'));
- await page.getByRole('button',{name:'执行',exact:true}).click();await page.waitForFunction(()=>document.getElementById('itmStatus').textContent.includes('自动提交未完成')||document.getElementById('itmStatus').textContent.includes('拒绝')||document.getElementById('itmStatus').textContent.includes('试运行表结构'));
+ await page.locator('#itmCode').fill('WP-001');await page.locator('#itmScanBtn').click();await page.locator('#itmConfirm').click();
+ /* 离线 fixture 会让 autoSubmitCommand 在 isOnline 门禁处停住，命令应稳定保存在 outbox。
+    不再等待一闪而过的“本机已保存”文案，而是直接等待持久化事实，然后从待处理区人工执行一次。 */
+ await page.waitForFunction(async()=>{const xs=await localStore.getAll('outbox');return xs.some(c=>c.op==='itemOperation'&&c.status==='pending');});
+ await page.getByRole('button',{name:'执行',exact:true}).click();
+ await page.waitForFunction(async()=>{const xs=await localStore.getAll('outbox');return xs.some(c=>c.op==='itemOperation'&&c.status==='needs_attention');});
+ await page.waitForFunction(()=>/结果未回|上次结果|重试（按最新数据）/.test(document.getElementById('itmPending').textContent));
  const actual=await page.evaluate(async()=>({commands:await localStore.getAll('outbox'),mat:state.materials.find(m=>m.code==='M-KEEP').qty,item:state.items.find(i=>i.code==='WP-001')}));assert.equal(actual.mat,7);assert.equal(actual.item.status,'pending');assert.equal(actual.commands.filter(c=>c.op==='itemOperation').length,1);assert.equal(actual.commands.find(c=>c.op==='itemOperation').status,'needs_attention');
  assert.deepEqual(errors,[]);console.log(JSON.stringify({blockedExternalOrigins:[...new Set(denied)],viewport:390,commands:1,pageErrors:errors}));
 });

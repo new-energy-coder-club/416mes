@@ -1,6 +1,6 @@
 'use strict';
 /* 阶段B 第三批 —— 真机（Chromium + 真 IDB）验证。
-   ① 物料台账恢复低库存/负库存预警（行底色 + 徽标 + 汇总）
+   ① G3 后物料数量账保持历史归档（不得再冒充实时低库存/负库存告警）
    ② items 同号守卫：同码两条记录时停止给出权威结果
    ③ 残缺码识别态：不像任何编码形状 → 提示可能磨损，而不是「未找到物料」
    ④ 资源档案：唯一实体的「作废删除」按钮禁用并带原因
@@ -22,7 +22,7 @@ const SEED={
   workorders:[],transactions:[],members:[],manuals:[],necOrders:[],scanHistory:[]
 };
 
-test('阶段B第三批：库存预警 / items同号守卫 / 残缺码 / resDelete禁用 / 扫码记录 / 首次引导',{timeout:180000},async t=>{
+test('阶段B第三批：MAT归档口径 / items同号守卫 / 残缺码 / resDelete禁用 / 扫码记录 / 首次引导',{timeout:180000},async t=>{
   const server=http.createServer(async(req,res)=>{try{const url=new URL(req.url,'http://localhost');const file=path.resolve(root,'.'+decodeURIComponent(url.pathname==='/'?'/index.html':url.pathname));if(!file.startsWith(root+path.sep))throw Error('path');const bytes=await fs.readFile(file);res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':'text/html');res.end(bytes);}catch(e){res.statusCode=404;res.end('nf');}});
   await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));
   const origin='http://127.0.0.1:'+server.address().port;
@@ -55,7 +55,8 @@ test('阶段B第三批：库存预警 / items同号守卫 / 残缺码 / resDelet
   assert.equal(onboard.mentionsNameQuery, true, '引导要告诉用户可以按名称查询');
   await page.evaluate(() => { const c = document.getElementById('btnOnboardClose'); if (c) c.click(); });
 
-  /* ① 物料台账低库存/负库存预警 */
+  /* ① G3 后 MAT 数量账已经归档：历史 qty 可以展示，但绝不能再产生实时库存告警。
+     真正“是否在库/在哪里”由 ITM + 操作记录承担。 */
   const ledger = await page.evaluate(async () => {
     goTab('ledger');
     const rows = [...document.querySelectorAll('#matTable tbody tr')].map(tr => ({
@@ -67,15 +68,12 @@ test('阶段B第三批：库存预警 / items同号守卫 / 残缺码 / resDelet
   });
   const byCode = {};
   ledger.rows.forEach(r => { byCode[r.code] = r; });
-  assert.match(byCode['HC-BG-001'].cls, /row-low/, '低于安全库存要黄底');
-  assert.match(byCode['HC-BG-001'].text, /低于安全库存/, '低于安全库存要带徽标与阈值说明');
-  assert.match(byCode['QT-TEST-1'].cls, /row-neg/, '负库存要红底');
-  assert.match(byCode['QT-TEST-1'].text, /负库存/, '负库存要带徽标');
-  assert.match(byCode['GJ-SD-001'].cls || '', /^(?!.*row-(low|neg)).*$/, '充足库存不着色');
-  assert.doesNotMatch(byCode['GJ-SD-001'].text, /⚠/, '充足库存不出现预警徽标');
-  assert.match(ledger.summary, /低于安全库存 1 条/, '汇总要报低库存条数');
-  assert.match(ledger.summary, /负库存 1 条/, '汇总要报负库存条数');
-  assert.match(ledger.summary, /本页只读/, '要说明预警只提示、不在此改数');
+  for (const code of ['HC-BG-001','QT-TEST-1','QT-TEST-2','GJ-SD-001']) {
+    assert.doesNotMatch(byCode[code].cls || '', /row-(low|neg)/, '归档 MAT 数量不得再着实时库存告警色：'+code);
+    assert.match(byCode[code].text, /归档/, '历史数量列必须明确标“归档”：'+code);
+  }
+  assert.doesNotMatch(ledger.summary, /低于安全库存|负库存/, '归档数量账不得继续汇总实时库存告警');
+  assert.match(ledger.summary, /历史归档|数量账.*停用|实际库存.*操作记录/, '汇总必须明确当前库存真相不在 MAT qty');
 
   /* ② items 同号守卫 */
   const dupGuard = await page.evaluate(async () => {

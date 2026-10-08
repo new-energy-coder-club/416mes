@@ -1,7 +1,7 @@
 {
   "name": "416mes",
   "version": "1.0.0",
-  "description": "单文件网页应用：`index.html` 双击即用，无需安装、无需联网。适配汉印 N41 热敏打印机 + 60×40mm 三防标签纸。",
+  "description": "416MES 仓储/唯一物品作业 Web 系统：ITM 逐件扫码、工单、标签、飞书同步与操作审计。",
   "main": "index.js",
   "scripts": {
     "dev": "node feishu-server.mjs",

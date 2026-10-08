@@ -5,6 +5,17 @@ function setup(persistence=null,scanCamera=null){const html=fs.readFileSync(path
 function fakeCam(){return {opened:0,closed:0,lastOpts:null,isOpen:()=>false,async open(o){this.opened++;this.lastOpts=o;},close(){this.closed++;}};}
 test('DOM query typed prefix selects item and bare collision lists candidates without write',()=>{const {document:d,state}=setup(),before=JSON.stringify(state);d.getElementById('itmSearch').value='SAME';d.getElementById('itmSearchBtn').click();assert.match(d.getElementById('itmResults').textContent,/多个候选/);assert.equal(d.getElementById('itmResults').querySelectorAll('button').length,2);d.getElementById('itmSearch').value='ITM:SAME';d.getElementById('itmSearchBtn').click();assert.match(d.getElementById('itmResults').textContent,/数量：1/);assert.equal(JSON.stringify(state),before);});
 test('DOM draft save/restore and double confirm persist exactly one command',async()=>{let draft=null,calls=0;const persistence={async saveDraft(id,value){draft={key:'itmDraft:'+id,value:structuredClone(value)};},async recover(){return {drafts:draft?[draft]:[],commands:[]};},async enqueue(){calls++;}};const {document:d,page}=setup(persistence);await page.accept('LOC:L-A');await page.accept('CTN:C-A');d.getElementById('itmDraftSave').click();await new Promise(r=>setImmediate(r));page.scan.reset();d.getElementById('itmDraftRestore').click();await new Promise(r=>setImmediate(r));assert.equal(page.scan.row().values.length,2);await page.accept('ITM:I-P');d.getElementById('itmConfirm').click();d.getElementById('itmConfirm').click();await new Promise(r=>setImmediate(r));assert.equal(calls,1);assert.match(d.getElementById('itmStatus').textContent,/本机已保存/);});
+test('manual restore chooses newest compatible draft and immediately refreshes visible steps',async()=>{
+ const older={sessionId:'old',rows:[{rowId:'o1',kind:'receive',generation:0,values:[{type:'LOC',code:'L-A',version:0}],locked:false,opId:null}],active:0,savedAt:100};
+ const latest={sessionId:'new',rows:[{rowId:'n1',kind:'receive',generation:0,values:[{type:'LOC',code:'L-A',version:0},{type:'CTN',code:'C-A',version:2}],locked:false,opId:null}],active:0,savedAt:200};
+ const persistence={async saveDraft(){},async recover(){return{drafts:[{key:'new',value:latest},{key:'old',value:older}],commands:[]};}};
+ const {document:d,page}=setup(persistence);
+ assert.equal(page.scan.row().values.length,0);
+ d.getElementById('itmDraftRestore').click();await new Promise(r=>setImmediate(r));
+ assert.deepEqual(page.scan.row().values.map(v=>v.code),['L-A','C-A'],'必须按 savedAt 恢复最新草稿，而不是数组最后一项');
+ assert.match(d.getElementById('itmStep').textContent,/✓ 2 目标容器：C-A/,'restore 后必须立即 render，视觉状态与内部会话一致');
+ assert.match(d.getElementById('itmStatus').textContent,/已恢复最近草稿/);
+});
 test('DOM IDB enqueue failure does not display completion and leaves retry available',async()=>{const {document:d,page}=setup({async enqueue(){throw Error('IDB写失败');}});for(const text of ['LOC:L-A','CTN:C-A','ITM:I-P'])await page.accept(text);d.getElementById('itmConfirm').click();await new Promise(r=>setImmediate(r));assert.match(d.getElementById('itmStatus').textContent,/IDB写失败/);assert.equal(page.scan.row().locked,false);assert.equal(d.getElementById('itmConfirm').disabled,false);});
 test('work camera opens shared ScanCamera; confirm card fills input box, then user confirms into step',async()=>{const cam=fakeCam();const {document:d,page}=setup(null,cam);d.getElementById('itmCamera').click();await new Promise(r=>setImmediate(r));assert.equal(cam.opened,1);cam.lastOpts.onConfirm('LOC:L-A');await new Promise(r=>setImmediate(r));assert.equal(d.getElementById('itmCode').value,'LOC:L-A');assert.equal(page.scan.row().values.length,0);assert.match(d.getElementById('itmStatus').textContent,/已填入输入框/);d.getElementById('itmScanBtn').click();await new Promise(r=>setImmediate(r));assert.equal(page.scan.row().values.length,1);assert.equal(page.scan.row().values[0].code,'L-A');page.stopCamera();assert.equal(cam.closed,1);});
 test('acceptGuided with expired token shows ignored status instead of lying about success',async()=>{const {document:d,page}=setup();const token=page.scan.token();page.scan.add('receive');await page.accept('LOC:L-A',token);assert.match(d.getElementById('itmStatus').textContent,/被忽略/);assert.doesNotMatch(d.getElementById('itmStatus').textContent,/已填写草稿/);});
@@ -1166,4 +1177,47 @@ test('3.13.34⑦：查询详情同步时间取 st.__savedAt（不再永久「待
  state.__savedAt='2026-02-11T08:30:00.000Z';
  d.getElementById('itmSearchBtn').click();
  assert.match(d.getElementById('itmResults').textContent,/同步时间：2026-02-11/,'save() 写入 __savedAt 后显示真实时间');
+});
+
+
+test('subloc unbind UI queues explicit 自由位 + cleared parent without mutating local mirror',async()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const state={
+  locations:[{code:'SUB-1',status:'active',role:'容器子位',parentContainer:'C-A',kind:'货架',desc:''}],
+  containers:[{code:'C-A',status:'active',loc:'',version:1,lastOpId:''}],
+  items:[],itemOperations:[]
+ };
+ const queued=[];
+ const persistence={
+  async enqueue(r){queued.push({id:r.opId,op:'itemOperation',request:structuredClone(r),status:'pending'});},
+  async saveDraft(){},
+  async recover(){return{drafts:[],commands:queued};}
+ };
+ UI.mount({document:d,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>queued,id:()=>'unbind-1',isOnline:()=>false});
+ d.getElementById('itmAdminLoc').value='SUB-1';
+ d.getElementById('itmUnbindLoc').click();await tickN();
+ assert.equal(queued.length,1);
+ assert.deepEqual(queued[0].request,{
+  schemaVersion:1,opId:'unbind-1',kind:'activateLocation',locationCode:'SUB-1',
+  role:'自由位',parentContainer:'',confirmSublocUnbind:true,expected:{locationStatus:'active'}
+ });
+ assert.equal(state.locations[0].role,'容器子位','UI 只入队，不得先改本地镜像冒充成功');
+ assert.equal(state.locations[0].parentContainer,'C-A');
+ assert.match(d.getElementById('itmRegisterResult').textContent,/已保存本机|解除从属命令/);
+});
+
+test('subloc unbind UI blocks occupied slot before enqueue and names occupant',async()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{document:d}=parseHTML(html);
+ const state={
+  locations:[{code:'SUB-1',status:'active',role:'容器子位',parentContainer:'C-A'}],
+  containers:[{code:'C-A',status:'active',loc:'',version:1,lastOpId:''}],
+  items:[{code:'I-IN',status:'in_stock',loc:'SUB-1',container:'',version:2}],itemOperations:[]
+ };
+ let enqueued=0;
+ const persistence={async enqueue(){enqueued++;},async saveDraft(){},async recover(){return{drafts:[],commands:[]}}};
+ UI.mount({document:d,getState:()=>state,getPersistence:()=>persistence,getCommands:async()=>[],id:()=>'unbind-block',isOnline:()=>false});
+ d.getElementById('itmAdminLoc').value='SUB-1';
+ d.getElementById('itmUnbindLoc').click();await tickN();
+ assert.equal(enqueued,0);
+ assert.match(d.getElementById('itmRegisterResult').textContent,/仍有在库物品 I-IN/);
 });

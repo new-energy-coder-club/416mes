@@ -1,38 +1,195 @@
-# 唯一物品字段契约 v1
+# 416MES ITM / LOC / CTN 字段与状态契约
 
-本文件及 `lib/item-schema.js` 为只读核验清单，不是自动迁移脚本。八表保留原 ID/原字段，新增 itemOperations 的 ID 必须显式配置在 FEISHU_TABLES 中；未配置仍可读取旧表。不得使用生产凭据执行开发核验。
+> 当前基线：v3.13.41 / 2026-10-08
+> 代码真源：`lib/unique-items.js`、`lib/feishu-api.js`、`lib/item-schema.js`、`lib/item-repository.js`。
+> 本文描述**当前有效契约**，不是迁移脚本。
 
-## 扩列
+## 1. 飞书当前 9 表
 
-| 表 | 本地字段 → 飞书列 | 类型/选项 |
+`materials`、`locations`、`containers`、`members`、`items`、`manuals`、`workorders`、`transactions`、`itemOperations`。
+
+其中 ITM 受控作业直接涉及四张表：
+
+- `items`
+- `containers`
+- `locations`
+- `itemOperations`
+
+## 2. items（物品）
+
+关键字段：
+
+| 本地字段 | 飞书列 | 类型 | 说明 |
+|---|---|---|---|
+| code | 物品码 | 文本 | 业务键 |
+| name | 名称 | 文本 | 普通字段 |
+| spec | 规格型号 | 文本 | 普通字段 |
+| loc | 库位码 | 文本 | 子位直存时为当前位置；其它状态可为空/历史兼容 |
+| container | 容器码 | 文本 | 容器链在库时的当前容器 |
+| status | 状态 | 单选 | pending / in_stock / out / retired 等受控状态 |
+| version | 业务版本 | 数字 | 乐观版本前置 |
+| lastOpId | 最后操作ID | 文本 | 最近受控操作 |
+| materialCode | 关联物料码 | 文本 | 品类/物料关联，不是数量库存真相 |
+
+受控字段：`container, loc, status, version, lastOpId`。
+
+### 在库位置不变量
+
+合法在库形态是二选一：
+
+```text
+A. 容器链：container != '' && loc == ''
+B. 子位直存：container == '' && loc != ''
+```
+
+即 `container XOR loc`。
+
+## 3. containers（容器）
+
+| 本地字段 | 飞书列 | 类型 |
 |---|---|---|
-| items | container→容器码；lastOpId→最后操作ID；materialCode→关联物料码 | 文本，materialCode可选 |
-| items | status→状态 | 单选 unknown/pending/in_stock/out/retired |
-| items | version→业务版本 | 数字整数，未核实0 |
-| containers | status→状态 | 单选 active/disabled，旧空值本地unknown |
-| containers | version→业务版本；lastOpId→最后操作ID | 数字整数/文本 |
-| locations | status→状态 | 单选 active/disabled，旧空值本地unknown |
+| code | 容器码 | 文本 |
+| type | 容器类型 | 单选 |
+| spec | 规格 | 文本 |
+| loc | 当前库位码 | 文本 |
+| status | 状态 | 单选 |
+| version | 业务版本 | 数字 |
+| lastOpId | 最后操作ID | 文本 |
 
-容器旧当前库位码为关系真源。物品旧库位码保留历史，不反向更新容器归属。全部参与增量的表需系统最后更新时间（type 1002）。MAT 与旧流水不变。
+受控字段：`loc, status, version, lastOpId`。
 
-## 第九表 itemOperations
+### 关于 containers.loc
 
-code→操作ID（文本业务键，不是原生唯一约束）；kind→操作类型（文本或单选）；itemCode→物品码；containerCode→容器码；request→请求内容；requestHash→请求摘要；before→操作前快照；after→目标快照；phase→处理阶段；progress→执行进度；operator→操作人；device→设备；requestedAt→受理时间；finishedAt→完成时间；error→错误与恢复说明。
+v3.13.32 以后的**新子位模型不再用 `containers.loc` 表示容器拥有的子位**。
 
-request/before/after/progress 为文本JSON，时间为日期时间（type5），phase为单选 PREPARED/APPLIED/REJECTED/REPAIR_REQUIRED，其余为文本。操作类型支持 receive/issue/transfer/placeContainer/moveContainer/verifyLegacy/retire，以及用于旧档案启用的 activateLocation/activateContainer。
+`containers.loc` 仍存在是为了：
 
-操作类型另含registerItem/registerLocation/registerContainer：仅管理员、共享唯一认领下创建新码，已有码拒绝。ITM初值pending/v1；LOC/CTN注册时飞书状态留空，下行normalize为unknown，保持active/disabled单选不变，不要求添加unknown选项；CTN初始空库位/v1，随后核实启用。创建回读同时核对名称/规格及受控字段。
+- 旧模型数据兼容；
+- 旧容器位置读取；
+- 历史命令/迁移路径。
 
-## 旧 LOC/CTN 核实入口
+新的容器—子位归属真源在 locations。
 
-不把全部旧记录自动改 active。管理员受控操作依次：activateLocation（仅允许 unknown→active，要求 expected.locationStatus 一致；v1不支持停用/重新启用）→ activateContainer（核对现有库位线索，不匹配则拒绝；校验业务版本）→ verifyLegacy。三个操作都须按正式接口协议写日志和共享协调，不允许 ordinaryFields 带 status 绕过。领域层 bootstrap 已有自动化测试；页面及服务端接线属于后续 S3/S4。
+## 4. locations（库位）
 
-库位没有引入未经需求批准的新 version 列，activateLocation 使用当前状态前置条件和共享串行仲裁；缓存接收时需要核验操作 after。非管理员不得核实/启用。
+| 本地字段 | 飞书列 | 类型 | 说明 |
+|---|---|---|---|
+| code | 库位码 | 文本 | 业务键 |
+| kind | 类型 | 单选 | 货架/工位/站点等 |
+| desc | 说明 | 文本 | 描述 |
+| grants | 授权人员 | 文本 | 当前业务很少使用 |
+| role | 库位角色 | 单选 | 空/自由位语义或“容器子位” |
+| parentContainer | 所属容器码 | 文本 | 子位的 owning CTN |
+| status | 状态 | 单选 | active/disabled；旧空值会规范化为 unknown |
 
-## 权限与默认安全
+受控字段：`status, role, parentContainer`。
 
-- READ_TABLES 包含九表；GENERIC_WRITE_TABLES 不含操作表；APPEND_PROTECTED_TABLES 包含 MAT流水/物品操作。
-- 表存在任一状态/业务版本/最后操作ID标记即启用通用写保护，部分迁移不会重新打开旧旁路。普通改名剥离受控字段与相应 clearFields；禁止硬删或用通用 upsert 建新码。
-- 旧完全未迁移 schema 维持既有回归行为，不把 MAT/WIP 全局封停。正式操作仍须关键列全部满足，不能依赖该兼容路径写 ITM。
-- schema校验只证明列、类型、选项；不证明字段ACL、认证或共享协调。validate 的 writeEnabled 恒为 false，由正式服务端独立判断全部门禁。
-- 权限需隔离飞书人工核验：关键列普通用户只读，操作表禁止普通编辑/删除，系统操作身份才可写。未核验不得启用正式作业。
+### 子位不变量
+
+一个 LOC 是容器子位时：
+
+```text
+role === '容器子位'
+parentContainer === <唯一 CTN code>
+```
+
+一格只能从属一个容器。
+
+解除从属的目标状态是：
+
+```text
+role === '自由位'
+parentContainer === ''
+```
+
+v3.13.40 已完成端到端实现：UI 先做占用与确认门禁，领域层生成受控 `activateLocation` 命令，Repository 显式把飞书单选“库位角色”写为“自由位”，同时清空“所属容器码”。不再依赖空字符串去清除 SELECT，因此不会形成半解绑状态。
+
+## 5. itemOperations（物品操作账）
+
+关键字段：
+
+| 本地字段 | 飞书列 | 说明 |
+|---|---|---|
+| code | 操作ID | opId，幂等键 |
+| kind | 操作类型 | receive / issue / transfer / batch / register / activate 等 |
+| itemCode | 物品码 | 主物品 |
+| containerCode | 容器码 | 相关容器 |
+| request | 请求内容 | JSON |
+| requestHash | 请求摘要 | 防同 opId 异载荷 |
+| before | 操作前快照 | JSON |
+| after | 目标快照 | JSON |
+| phase | 处理阶段 | PREPARED / APPLIED / REJECTED / REPAIR_REQUIRED 等 |
+| progress | 执行进度 | JSON |
+| operator | 操作人 | 审计字段 |
+| device | 设备 | 审计字段 |
+| requestedAt | 受理时间 | 时间 |
+| finishedAt | 完成时间 | 时间 |
+| error | 错误与恢复说明 | 文本 |
+
+### 核心原则
+
+- opId 幂等；
+- 同 opId 不允许悄悄换 request；
+- 受控字段写入必须有 before/after；
+- 提交后必须回读；
+- 未知结果先查原 opId；
+- 不能用“再生成一个新命令”掩盖未知结果；
+- REPAIR_REQUIRED 必须保留人工恢复路径。
+
+## 6. 常用操作状态机
+
+### 物品
+
+```text
+pending
+  ├─ receive ─> in_stock
+  ├─ retire  ─> retired
+  └─（其它非法迁移拒绝）
+
+in_stock
+  ├─ issue    ─> out
+  ├─ transfer ─> in_stock（位置变化）
+  └─（直接 retire 受现行规则限制）
+
+out
+  ├─ receive  ─> in_stock
+  └─ retire   ─> retired
+
+retired
+  └─ 当前为终态
+```
+
+### 库位 / 容器启用
+
+unknown/空状态可以经受控 activate 进入 active。disabled 的重新启用/停用策略不应通过普通 upsert 旁路实现。
+
+## 7. 普通字段与受控字段边界
+
+普通描述字段可按普通 CRUD 更新；关系、位置、状态、版本必须通过受控操作路径。
+
+尤其禁止用普通 upsert 直接改：
+
+- items.container / loc / status / version / lastOpId
+- containers.loc / status / version / lastOpId
+- locations.status / role / parentContainer
+
+否则会绕过版本、幂等、before/after 和 itemOperations 审计链。
+
+## 8. MAT 与 ITM 的关系
+
+MAT 是品类/历史数量账层；ITM 是现场逐件实物层。
+
+G3 之后：
+
+- MAT 数量账封存；
+- MAT 台账作为历史/品类信息保留；
+- 当前“东西实际在哪里、是否在库”应以 ITM 与操作记录为准；
+- 不应重新把 `materials.qty` 当作 ITM 数量的自动汇总真源，除非未来另立明确的聚合读模型。
+
+## 9. 当前契约边界
+
+1. `verifyLegacy` 仅保留给历史命令/草稿/replay：v3.13.41 已从新建作业 UI 下线；旧模型继续识别 `containers.loc`，迁移后的新模型识别 `locations.role='容器子位' + parentContainer`，因此历史 replay 不再依赖已退役的单一 pair 语义。
+2. location 的本地 `unknown` 与飞书单选 active/disabled 的表达并不完全对称；当前通过空值/规范化兼容，这是迁移边界而不是现行业务 bug。
+3. `retired` 当前为终态；如未来要恢复退役件，应新增显式生命周期迁移，不允许直接旁路改飞书。
+
+这些边界都已在测试和运行文档中明确。

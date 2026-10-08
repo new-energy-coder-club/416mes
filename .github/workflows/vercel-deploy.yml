@@ -1,7 +1,7 @@
 name: Vercel Deploy (identity-independent)
 
-# 任何身份推送到 main 都会触发本工作流，用仓库 Secrets 里的 Vercel Token 部署，
-# 不依赖 Vercel 对推送者 GitHub 身份的团队校验。
+# main 进入生产前必须先通过 Node 全量回归 + Chromium 浏览器回归。
+# 部署仍使用仓库 Secrets 中的 Vercel Token，不依赖推送者 GitHub 身份。
 on:
   push:
     branches: [main]
@@ -17,10 +17,32 @@ env:
 
 jobs:
   deploy:
-    name: Deploy to Vercel (production)
+    name: Verify and deploy to Vercel
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install project dependencies
+        run: npm ci
+
+      - name: Node regression
+        run: npm test
+
+      - name: Install Chromium for browser regression
+        run: node node_modules/playwright-core/cli.js install --with-deps chromium
+
+      - name: Browser regression
+        shell: bash
+        run: |
+          export ITM_TEST_CHROMIUM="$(node -e "process.stdout.write(require('playwright-core').chromium.executablePath())")"
+          test -x "$ITM_TEST_CHROMIUM"
+          npm run test:browser
 
       - name: Install Vercel CLI
         run: npm install --global vercel@latest
