@@ -1,6 +1,6 @@
 # 416MES ITM / LOC / CTN 字段与状态契约
 
-> 当前基线：v3.13.41 / 2026-10-08
+> 当前基线：v3.13.42 / 2026-10-08
 > 代码真源：`lib/unique-items.js`、`lib/feishu-api.js`、`lib/item-schema.js`、`lib/item-repository.js`。
 > 本文描述**当前有效契约**，不是迁移脚本。
 

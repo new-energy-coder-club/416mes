@@ -1,11 +1,11 @@
 {
   "name": "常州工NEC · 智能仓库MES",
   "short_name": "416MES",
-  "description": "七类标签 · 物品唯一码闭环 · Excel 台账 · 飞书真源同步",
+  "description": "ITM 唯一物品逐件仓储、扫码作业、库存工单、操作审计与飞书同步",
   "start_url": "home.html",
   "display": "standalone",
   "background_color": "#16233a",
-  "theme_color": "#16233a",
+  "theme_color": "#102b55",
   "lang": "zh-CN",
   "icons": [
     {

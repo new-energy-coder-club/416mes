@@ -187,7 +187,7 @@ const server = http.createServer(async (req, res) => {
   // 静态文件
   let decoded;
   try {
-    decoded = decodeURIComponent(u.pathname === '/' ? '/index.html' : u.pathname);
+    decoded = decodeURIComponent(u.pathname === '/' ? '/home.html' : u.pathname);
   } catch (e) {
     // decodeURIComponent('%') 会抛 URIError。以前没有 try —— Node ≥15 默认把未捕获的
     // promise rejection 变成进程退出，一个 `GET /%` 就能把整个服务打掉。

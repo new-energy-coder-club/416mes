@@ -1,6 +1,6 @@
 # 416MES 仓储 / 物品作业系统
 
-> **当前主线：v3.13.41（2026-10-08）**
+> **当前主线：v3.13.42（2026-10-08，首页重构候选版）**
 >
 > 本 README 只描述**当前有效架构与业务口径**。v2.x 阶段方案、早期 InvenTree 方案、旧 MAT 数量账方案均属于历史资料，不再代表现状。当前状态、验证结果与明确架构边界见 [CURRENT_STATUS.md](CURRENT_STATUS.md)。
 
@@ -62,12 +62,17 @@ v3.13.36 起，批量入库不再共享“锚点”：
 13. NEC 任务
 14. 同步与状态
 
-`home.html` 是门户页；`join.html` 是历史招募页面，不属于业务主流程。
+**主页入口：** 生产环境访问 `https://mes.newenergycoder.club/` 会以临时 307 跳转到 `/home.html`；主业务端仍保留 `/index.html#...`，物品/容器短链和 API 不受影响。本地两种 HTTP 服务的 `/` 同样进入主页。
+
+`home.html` 为移动优先的仓库工作台：优先展示扫码作业、库存工单和只读查询；`home.css` 提供样式、`home.js` 只读取本地快照、备份记录和既有 IndexedDB 出队列。主页不直接写入库存或飞书，也不把网络在线误报为云端已同步。首页搜索通过 `index.html#items?q=...` 只读深链进入主应用，等待 IndexedDB 初始化后执行查询，刷新不会丢关键词。
+
+`join.html` 是历史招募页面，不属于业务主流程。
 
 ## 架构
 
 ### 浏览器端
 
+- `home.html` / `home.css` / `home.js`：入口门户、响应式工作台与只读本机摘要。
 - `index.html`：页面结构、传统 MAT/WIP 页面逻辑及应用启动。
 - `mes-core.js`：历史 MAT 数量账、工单与审计等纯领域逻辑。
 - `lib/unique-items.js`：LOC / CTN / ITM 状态机与受控字段约束。
@@ -112,8 +117,8 @@ npm run serve:static
 默认地址：
 
 ```text
-http://localhost:8000/home.html
-http://localhost:8000/index.html
+http://localhost:8000/             # 默认主页（或 /home.html）
+http://localhost:8000/index.html    # 完整业务工作台
 ```
 
 > 早期 README 所写“`index.html` 双击即可完整离线使用”已经不再是推荐运行方式。当前应用仍保留离线/降级能力，但 ITM 持久化、短链、云端真源和受控写入均以 HTTP 环境为正常路径。
@@ -129,10 +134,10 @@ npm run test:browser
 npm run lib:manifest
 ```
 
-**v3.13.41 当前回归状态：**
+**v3.13.42 本地回归已完成（尚未推送/部署）：**
 
-- `npm test`：**1378/1378，0 fail**；覆盖领域、持久化、同步、飞书、并发、工单、扫码、批量、子位、缓存版本与源码卫生守卫。
-- `npm run test:browser`：**7/7 全绿**；覆盖真 IndexedDB、历史随机码 QR、PDF/A4 可扫性、WIP 冲销、盘点等浏览器链路。
+- `npm test`：**1383/1383，0 fail**；覆盖领域、持久化、同步、飞书、并发、工单、扫码、批量、子位、缓存版本与源码卫生守卫。
+- `npm run test:browser`：**11/11 全绿**；含 4 项新增门户测试：根入口、响应式布局、只读本机看板、备份/离线、IndexedDB 和搜索深链；既有 7 项 QR、PDF、WIP、草稿与盘点回归不变。
 - GitHub Actions 已加入 `npm test` + Chromium browser 回归；任一测试失败都会在 Vercel 生产部署前阻断。
 - 新增源码卫生守卫，禁止 Git 冲突标记、门户无效 hash 和同步表数硬编码回流。
 

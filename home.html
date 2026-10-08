@@ -1,271 +1,117 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#16233a">
-<link rel="manifest" href="manifest.json">
-<link rel="icon" type="image/svg+xml" href="icon.svg">
-<link rel="apple-touch-icon" href="icon.svg">
-<title>常州工NEC · 智能仓库MES</title>
-<style>
-/* ============================================================
-   加载组件（用户指定 · 3D 塔形 loader，原作 csozi.hu 的 Vue SFC → 原生改写）
-   用途：① 首屏加载缓冲（所有页面） ② 页签切换缓冲（仅 index.html）
-   选择器全部收在 .mes-load 命名空间内；动画改名 mes-tower-* —— 均不与现有样式撞名。
-   ============================================================ */
-.mes-load{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;
-  background:#0E1A55;transition:opacity .26s ease;cursor:pointer;}
-.mes-load--hide{opacity:0;pointer-events:none;}
-.mes-load--tab{background:rgba(14,26,85,.82);}
-.mes-load--tab .loader{scale:2.2;}
-.mes-load__stage{display:flex;flex-direction:column;align-items:center;gap:56px;}
-.mes-load__cap{color:#B9C7DD;font-size:13px;letter-spacing:2px;}
-.mes-load .loader{scale:3;height:50px;width:40px;}
-.mes-load .box{position:relative;opacity:0;left:10px;}
-.mes-load .side-left{position:absolute;background-color:#286cb5;width:19px;height:5px;transform:skew(0deg,-25deg);top:14px;left:10px;}
-.mes-load .side-right{position:absolute;background-color:#2f85e0;width:19px;height:5px;transform:skew(0deg,25deg);top:14px;left:-9px;}
-.mes-load .side-top{position:absolute;background-color:#5fa8f5;width:20px;height:20px;rotate:45deg;transform:skew(-20deg,-20deg);}
-.mes-load .box-1{animation:mes-tower-l 4s infinite;}
-.mes-load .box-2{animation:mes-tower-r 4s infinite;animation-delay:1s;}
-.mes-load .box-3{animation:mes-tower-l 4s infinite;animation-delay:2s;}
-.mes-load .box-4{animation:mes-tower-r 4s infinite;animation-delay:3s;}
-@keyframes mes-tower-l{
-  0%{z-index:20;opacity:0;translate:-20px -6px;}
-  20%{z-index:10;opacity:1;translate:0px 0px;}
-  40%{z-index:9;translate:0px 4px;}
-  60%{z-index:8;translate:0px 8px;}
-  80%{z-index:7;opacity:1;translate:0px 12px;}
-  100%{z-index:5;translate:0px 30px;opacity:0;}
-}
-@keyframes mes-tower-r{
-  0%{z-index:20;opacity:0;translate:20px -6px;}
-  20%{z-index:10;opacity:1;translate:0px 0px;}
-  40%{z-index:9;translate:0px 4px;}
-  60%{z-index:8;translate:0px 8px;}
-  80%{z-index:7;opacity:1;translate:0px 12px;}
-  100%{z-index:5;translate:0px 30px;opacity:0;}
-}
-/* 减弱动效偏好：播静态塔，不做下落动画 */
-@media (prefers-reduced-motion:reduce){
-  .mes-load .box{animation:none;opacity:1;}
-  .mes-load .box-1{translate:0 0;} .mes-load .box-2{translate:0 8px;}
-  .mes-load .box-3{translate:0 16px;} .mes-load .box-4{translate:0 24px;}
-}
-
-:root{
-  --blue:#1f6fd6;--green:#2d9d4f;--amber:#e8a020;--red:#d33a2c;--purple:#7c4dbd;
-  --ink:#1c2534;--line:#dfe4ec;--bg:#eef1f6;--navy:#16233a;
-}
-*{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;display:flex;flex-direction:column;}
-/* ===== 顶栏 ===== */
-header{background:linear-gradient(115deg,#0E1A55 0%,#172A88 55%,#1f6fd6 120%);color:#fff;padding:34px 24px 30px;position:relative;overflow:hidden;}
-header::after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:#00B0F0;}
-header .wrap{max-width:1080px;margin:0 auto;}
-header .eyebrow{font-size:13px;letter-spacing:4px;color:#00B0F0;margin-bottom:8px;font-weight:bold;}
-header h1{font-size:30px;letter-spacing:2px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
-header h1 .logo{width:44px;height:44px;border-radius:10px;background:rgba(255,255,255,.12);display:inline-flex;align-items:center;justify-content:center;}
-header h1 .logo img{height:30px;width:auto;}
-header .sub{margin-top:10px;font-size:13px;color:#b9c7dd;line-height:1.8;}
-.status-row{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;}
-.chip{display:inline-flex;align-items:flex-start;gap:6px;font-size:12px;padding:4px 12px;border-radius:20px;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.18);max-width:100%;}
-.chip .dot{width:8px;height:8px;border-radius:50%;background:#8a94a6;flex:none;margin-top:4px;}
-.chip .t{min-width:0;overflow-wrap:anywhere;}
-.chip.ok .dot{background:#3ddc84;box-shadow:0 0 6px #3ddc84;}
-.chip.bad .dot{background:#ff6b5e;box-shadow:0 0 6px #ff6b5e;}
-/* ===== 主体 ===== */
-main{flex:1;max-width:1080px;margin:0 auto;padding:26px 24px 40px;width:100%;}
-.section-title{font-size:14px;color:#5a6b84;margin:22px 0 12px;letter-spacing:2px;display:flex;align-items:center;gap:8px;}
-.section-title::after{content:"";flex:1;height:1px;background:var(--line);}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;}
-.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:8px;transition:transform .15s,box-shadow .15s,border-color .15s;position:relative;overflow:hidden;}
-.card:hover{transform:translateY(-3px);box-shadow:0 8px 24px rgba(22,35,58,.12);border-color:#b9c8dd;}
-.card .icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;color:#fff;}
-.card h3{font-size:16px;}
-.card p{font-size:12.5px;color:#6b7a90;line-height:1.7;}
-.card .go{margin-top:auto;font-size:12px;color:var(--blue);font-weight:bold;}
-.c-blue .icon{background:var(--blue);}   .c-blue{border-top:3px solid var(--blue);}
-.c-green .icon{background:var(--green);} .c-green{border-top:3px solid var(--green);}
-.c-amber .icon{background:var(--amber);} .c-amber{border-top:3px solid var(--amber);}
-.c-red .icon{background:var(--red);}     .c-red{border-top:3px solid var(--red);}
-.c-purple .icon{background:var(--purple);}.c-purple{border-top:3px solid var(--purple);}
-.c-navy .icon{background:var(--navy);}   .c-navy{border-top:3px solid var(--navy);}
-.tag{font-size:11px;background:#eef2f7;border:1px solid var(--line);border-radius:4px;padding:2px 8px;color:#556;}
-/* 运维面板 */
-.ops{background:#16233a;border-radius:12px;padding:18px 20px;color:#c8d4e6;font-size:13px;line-height:2;}
-.ops h3{color:#fff;font-size:15px;margin-bottom:6px;}
-.ops code{background:#0e1727;border:1px solid #2b3b57;border-radius:5px;padding:2px 8px;font-family:Consolas,monospace;font-size:12px;color:#8fd3a8;user-select:all;}
-.ops .step{display:flex;gap:10px;align-items:baseline;}
-.ops .num{flex:none;width:20px;height:20px;border-radius:50%;background:var(--blue);color:#fff;font-size:11px;display:inline-flex;align-items:center;justify-content:center;transform:translateY(3px);}
-footer{padding:16px;text-align:center;font-size:12px;color:#98a2b3;border-top:1px solid var(--line);}
-/* 运营看板 */
-#dash{display:none;}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px;}
-.tile{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;text-align:center;}
-.tile .num{font-size:26px;font-weight:bold;color:var(--navy);line-height:1.2;}
-.tile .lbl{font-size:12px;color:#6b7a90;margin-top:2px;}
-.tile.warn .num{color:var(--red);}
-.tile.warn{border-color:#f2b8b0;background:#fffafa;}
-.lowlist{background:#fff;border:1px solid #f2d8a0;border-radius:12px;padding:12px 16px;}
-.lowlist h4{font-size:13px;color:#8a6a1a;margin-bottom:8px;}
-.lowlist .item{display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:6px 0;border-top:1px dashed var(--line);}
-.lowlist .item:first-of-type{border-top:none;}
-.lowlist .q{font-weight:bold;color:var(--red);}
-.lowlist a{font-size:12px;color:var(--blue);text-decoration:none;white-space:nowrap;margin-left:10px;}
-@media(max-width:560px){header h1{font-size:22px;} .card.wide{flex-direction:column;align-items:flex-start;} header{padding:24px 16px;} main{padding:18px 14px 30px;} .ops{font-size:12px;} .ops code{font-size:11px;word-break:break-all;}}
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#102b55">
+  <meta name="description" content="416MES 智能仓库工作台：物品查询、扫码出入库、库存工单和飞书同步。">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="home.css?v=3.13.42">
+  <script defer src="home.js?v=3.13.42"></script>
+  <title>仓库工作台 · 416MES</title>
 </head>
-<body><!-- 首屏加载缓冲（3D 塔形 loader）。window.load 后由脚本收起；
-       最迟 10 秒兜底让开；点击罩层可立即跳过。 -->
-<div id="appLoader" class="mes-load" role="status" aria-live="polite" aria-label="页面加载中">
-  <div class="mes-load__stage">
-    <div class="loader">
-      <div class="box box-1"><div class="side-left"></div><div class="side-right"></div><div class="side-top"></div></div>
-      <div class="box box-2"><div class="side-left"></div><div class="side-right"></div><div class="side-top"></div></div>
-      <div class="box box-3"><div class="side-left"></div><div class="side-right"></div><div class="side-top"></div></div>
-      <div class="box box-4"><div class="side-left"></div><div class="side-right"></div><div class="side-top"></div></div>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a href="home.html" class="brand" aria-label="416MES 工作台首页">
+        <span class="brand-mark"><img src="nec-logo-white.png" alt="" width="30" height="30"></span>
+        <span class="brand-copy"><strong>416MES</strong><span>常州工 NEC · 智能仓库</span></span>
+      </a>
+      <nav class="header-links" aria-label="顶部导航">
+        <a href="index.html#sync" class="header-sync"><span class="sync-dot" aria-hidden="true"></span><span>同步状态</span></a>
+        <a href="index.html#items" class="header-enter">完整工作台 <span aria-hidden="true">↗</span></a>
+      </nav>
     </div>
-    <div class="mes-load__cap">常州工NEC · 智能仓库MES</div>
-  </div>
-</div>
+  </header>
 
-<header>
-  <div class="wrap">
-    <div class="eyebrow">BUILT TO DAWN · KEEP BUILDING&#9608;</div>
-    <h1><span class="logo"><img src="nec-logo-white.png" alt="NEC"></span>常州工NEC · 智能仓库MES</h1>
-    <div class="sub">唯一物品（ITM）逐件仓储 · 库位 / 容器 / 子位关系 · 库存工单 · 操作审计 · 飞书同步 · 七类标签打印<br>Design by 常州工 NEC · newenergycoder.club</div>
-    <div class="status-row">
-      <span class="chip" id="chip-mes"><span class="dot"></span>416MES 前端检测中…</span>
-    </div>
-  </div>
-</header>
+  <main class="container" id="main">
+    <section class="welcome" aria-labelledby="welcomeTitle">
+      <div class="welcome-copy">
+        <div class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span> NEC · WAREHOUSE OPERATIONS</div>
+        <h1 id="welcomeTitle">仓库工作台<span class="headline-accent">，从这里开始。</span></h1>
+        <p>找物品、扫标签、办工单。常用操作就在眼前，重要记录都有去处。</p>
+      </div>
+      <div class="welcome-context" id="welcomeContext" role="status" aria-live="polite">
+        <span class="context-icon" aria-hidden="true">◎</span>
+        <div><strong id="networkLabel">正在检测网络</strong><span id="sourceSummary">库存数字读取本机快照，不代表云端已同步</span></div>
+      </div>
+    </section>
 
-<main>
-  <!-- ========== 运营看板（读本机业务快照；云端是否最新仍以同步页为准） ========== -->
-  <div id="dash">
-    <div class="section-title">📊 运营看板（本机业务快照）</div>
-    <div class="tiles" id="dashTiles"></div>
-  </div>
+    <section class="search-section" aria-labelledby="searchHeading">
+      <h2 class="sr-only" id="searchHeading">快速查询</h2>
+      <form class="search-form" id="homeSearchForm" action="index.html" method="get">
+        <svg class="search-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.5" stroke="currentColor" stroke-width="1.9"/><path d="m16 16 5 5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+        <label class="sr-only" for="homeSearch">搜索物品名称、物品码、容器码或库位码</label>
+        <input id="homeSearch" name="q" type="search" autocomplete="off" placeholder="查名称、物品码、容器码或库位码…" maxlength="150">
+        <button type="submit">立即查询 <span aria-hidden="true">→</span></button>
+      </form>
+      <p class="search-hint">只读查询，不会修改库存。支持名称、规格、LOC / CTN / ITM 编码。</p>
+    </section>
 
-  <div class="section-title">📦 416MES 作业端</div>
-  <div class="grid">
-    <a class="card c-blue" href="index.html#item-work">
-      <div class="icon">📦</div><h3>唯一物品作业</h3>
-      <p>当前主业务入口：逐件 ITM 入库、出库、换箱与批量作业；位置支持容器链和容器子位直存，所有写入都进入受控操作账。</p>
-      <span class="go">进入 →</span>
-    </a>
-    <a class="card c-green" href="index.html#label">
-      <div class="icon">🏷️</div><h3>标签打印</h3>
-      <p>60×40mm 三防标签，适配汉印 N41，支持 A4 整版。库位蓝 / 容器绿 / 物料黄 / 物品青 / 手册玫红 / 工单红 / NEC紫。</p>
-      <span class="go">进入 →</span>
-    </a>
-    <a class="card c-navy" href="index.html#member">
-      <div class="icon">👥</div><h3>成员名录</h3>
-      <p>社团成员名录：编号 / 姓名 / 学号 / 部门SIG / 职务，姓名直通「操作人」与 NEC 任务负责人。</p>
-      <span class="go">进入 →</span>
-    </a>
-    <a class="card c-amber" href="index.html#register">
-      <div class="icon">🔢</div><h3>批量建档与编码</h3>
-      <p>主数据建档：按货架/层/位批量补齐空位码，容器码、物品码、手册码一键生成。库存工单请到「库存工单」页。</p>
-      <span class="go">进入 →</span>
-    </a>
-    <a class="card c-purple" href="index.html#nec">
-      <div class="icon">🧾</div><h3>NEC 任务</h3>
-      <p>RW 任务 / CG 采购 / WX 维修等轻量任务，<b>纯记录、不改库存</b>，可导出 JSON 推送飞书多维表格+群通知。</p>
-      <span class="go">进入 →</span>
-    </a>
-    <a class="card c-navy" href="join.html">
-      <div class="icon">📣</div><h3>协作 / 历史招募</h3>
-      <p>查看场务 SIG 招募归档；原群码已于 2026-09-19 过期，如需加入请按页面提示联系管理员获取新入口。</p>
-      <span class="go">查看 →</span>
-    </a>
-    <a class="card c-red" href="index.html#scan">
-      <div class="icon">🔫</div><h3>扫码工作台</h3>
-      <p>扫码查询本身<b>只读</b>；ITM 入库/出库/换箱和 WIP 工单执行都走受控确认与操作账。实际在库状态以唯一物品及操作记录为准，MAT 数量账仅保留历史。</p>
-      <span class="go">进入 →</span>
-    </a>
-  </div>
+    <section class="section tasks-section" aria-labelledby="taskTitle">
+      <div class="section-head"><div><span class="section-kicker">QUICK ACTIONS</span><h2 id="taskTitle">开始作业</h2></div><p>现场高频操作</p></div>
+      <div class="action-grid">
+        <a class="action-card action-card--main" href="index.html#item-work" data-action="scan">
+          <span class="action-top"><span class="action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m8 0h3a2 2 0 0 0 2-2v-3M4 12h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span><span class="action-arrow" aria-hidden="true">↗</span></span>
+          <span class="action-name">扫码作业</span>
+          <span class="action-desc">逐件入库、出库与换箱，确认后进入操作账</span>
+          <span class="action-foot">进入物品作业台 <span aria-hidden="true">→</span></span>
+        </a>
+        <a class="action-card action-card--secondary" href="index.html#wip" data-action="wip">
+          <span class="action-top"><span class="action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="5" y="5" width="14" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M9 3v4m6-4v4M9 12h6m-6 4h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span><span class="action-arrow" aria-hidden="true">↗</span></span>
+          <span class="action-name">库存工单</span>
+          <span class="action-desc">创建、执行、逐件冲销</span>
+          <span class="action-foot">进入工单管理 <span aria-hidden="true">→</span></span>
+        </a>
+        <a class="action-card action-card--secondary" href="index.html#items" data-action="query">
+          <span class="action-top"><span class="action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M3 8 12 3l9 5v9l-9 4-9-4V8Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m3 8 9 5 9-5m-9 5v8" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></span><span class="action-arrow" aria-hidden="true">↗</span></span>
+          <span class="action-name">查询与定位</span>
+          <span class="action-desc">查物品、容器、子位与位置</span>
+          <span class="action-foot">打开只读查询 <span aria-hidden="true">→</span></span>
+        </a>
+      </div>
+    </section>
 
+    <section class="section" aria-labelledby="overviewTitle">
+      <div class="section-head"><div><span class="section-kicker">LOCAL OVERVIEW</span><h2 id="overviewTitle">仓库概况</h2></div><div class="overview-source"><span id="snapshotIndicator" class="indicator indicator--neutral">本机数据 · 未确认云端同步</span><button id="refreshSnapshot" type="button" class="icon-button" aria-label="重新读取本机概况" title="重新读取本机概况">↻</button></div></div>
+      <div class="stats-grid" id="statsGrid" aria-live="polite">
+        <div class="stat-card"><span class="stat-label">唯一物品</span><strong class="stat-value" id="statItems">—</strong><span class="stat-help">本机已知记录</span></div>
+        <div class="stat-card"><span class="stat-label">当前在库</span><strong class="stat-value" id="statInStock">—</strong><span class="stat-help">本机快照统计</span></div>
+        <div class="stat-card"><span class="stat-label">待执行工单</span><strong class="stat-value" id="statWip">—</strong><span class="stat-help">待执行及部分执行</span></div>
+        <div class="stat-card"><span class="stat-label">本机未决命令</span><strong class="stat-value" id="statPending">—</strong><span class="stat-help" id="pendingHelp">正在检查本机队列</span></div>
+      </div>
+      <div class="data-notice" id="dataNotice" role="status" aria-live="polite">正在读取本机快照；数字不代表云端实时库存。</div>
+      <div class="status-grid">
+        <div class="status-card"><div class="status-card__title"><span class="status-icon" aria-hidden="true">◷</span> 本机备份</div><strong id="backupStatus">正在检查…</strong><p id="backupHint">显示该浏览器的备份记录</p></div>
+        <div class="status-card"><div class="status-card__title"><span class="status-icon" aria-hidden="true">⇄</span> 飞书同步</div><strong id="cloudStatus">未验证</strong><p id="cloudHint">主页不把“网络在线”当作“数据已同步”</p><a href="index.html#sync" class="text-link">前往同步与状态 <span aria-hidden="true">→</span></a></div>
+      </div>
+    </section>
 
-  <div class="section-title">🛠️ 日常运维（数据同步闭环）</div>
-  <div class="ops">
-    <h3>NEC 工单与飞书同步（增改双向；删除仅本地，飞书侧需手工删行）</h3>
-    <div class="step"><span class="num">1</span><span>NEC 工单与飞书双向同步：<code>node nec-sync.mjs push</code>（推）/ <code>node nec-sync.mjs pull</code>（拉，生成文件后在台账页「导入合并」）</span></div>
-  </div>
-</main>
+    <section class="section" aria-labelledby="toolsTitle">
+      <div class="section-head"><div><span class="section-kicker">WORKSPACE</span><h2 id="toolsTitle">常用工具</h2></div><p>更少切换，更快完成</p></div>
+      <div class="tool-grid">
+        <a href="index.html#register" class="tool-link"><span class="tool-icon">＋</span><span><strong>建档管理</strong><small>编码与主数据</small></span><span class="tool-arrow" aria-hidden="true">↗</span></a>
+        <a href="index.html#label" class="tool-link"><span class="tool-icon">▤</span><span><strong>标签打印</strong><small>标签与二维码</small></span><span class="tool-arrow" aria-hidden="true">↗</span></a>
+        <a href="index.html#oplog" class="tool-link"><span class="tool-icon">≡</span><span><strong>操作记录</strong><small>逐件审计与结果</small></span><span class="tool-arrow" aria-hidden="true">↗</span></a>
+        <a href="index.html#sync" class="tool-link"><span class="tool-icon">⇄</span><span><strong>同步管理</strong><small>状态、冲突与队列</small></span><span class="tool-arrow" aria-hidden="true">↗</span></a>
+      </div>
+    </section>
 
-<footer>常州工NEC · 智能仓库MES ｜ 本机持久化 + 飞书同步；重要操作以操作账为准，并定期导出 JSON 备份</footer>
-
-<script>
-(function(){
-  var host = location.hostname || 'localhost';
-  var isHttps = location.protocol === 'https:';
-
-  // 416MES 芯片：读出 localStorage 里的真实运营数据（同源有效，跨设备各自独立）
-  var chipMes = document.getElementById('chip-mes');
-  try {
-    var s = JSON.parse(localStorage.getItem('mes416_state_v1') || '{}');
-    if (s.items || s.materials) {
-      var items = s.items || [];
-      var inStock = items.filter(function(i){ return i && i.status === 'in_stock'; }).length;
-      var outCount = items.filter(function(i){ return i && i.status === 'out'; }).length;
-      // 待办 = 未执行 / 待执行 / 部分执行；「已取消」（含已冲销）不再计入待办
-      var wips = (s.workorders || []).filter(function(w){ return w.status === '未执行' || w.status === '待执行' || w.status === '部分执行'; });
-      var lastBackup = +(localStorage.getItem('mes416_last_backup') || 0);
-      var days = lastBackup ? Math.floor((Date.now() - lastBackup) / 864e5) : 99;
-      chipMes.className = 'chip ' + (days > 7 ? 'bad' : 'ok');
-      chipMes.innerHTML = '<span class="dot"></span><span class="t">唯一物品 ' + items.length +
-        ' 件 · 在库 ' + inStock + ' · 已出库 ' + outCount + ' · 待执行工单 ' + wips.length +
-        (days > 7 ? ' · ⚠已 ' + days + ' 天未备份' : ' · 备份 ' + (lastBackup ? days + ' 天前' : '从未')) + '</span>';
-      // 运营看板：只展示现行业务真相，不再把已封存的 MAT qty/估值包装成“实时库存”
-      document.getElementById('dash').style.display = 'block';
-      var tiles = [
-        { n: items.length, l: '唯一物品', w: false },
-        { n: inStock, l: '当前在库', w: false },
-        { n: wips.length, l: '待执行工单', w: wips.length > 0 },
-        { n: (s.itemOperations || []).length, l: '物品操作记录', w: false },
-        { n: lastBackup ? days + ' 天前' : '从未', l: '上次备份', w: days > 7 }
-      ];
-      document.getElementById('dashTiles').innerHTML = tiles.map(function(t){
-        return '<div class="tile' + (t.w ? ' warn' : '') + '"><div class="num">' + t.n + '</div><div class="lbl">' + t.l + '</div></div>';
-      }).join('');
-    } else {
-      chipMes.className = 'chip ok';
-      chipMes.innerHTML = '<span class="dot"></span><span class="t">本地址 localStorage 快照（本设备暂无台账数据）· 服务在线 ≠ 业务数据已同步</span>';
-    }
-  } catch (e) {
-    chipMes.className = 'chip ok';
-    chipMes.innerHTML = '<span class="dot"></span><span class="t">416MES 前端在线</span>';
-  }
-
-})();
-</script>
-
-<script>
-/* 首屏 loader 收起：window.load 后收起，且至少展示 4s；
-   最迟 10 秒兜底让开（防资源异常时永久遮罩）；点击罩层可立即跳过。 */
-(function () {
-  var el = document.getElementById('appLoader');
-  if (!el) return;
-  var MIN = 4000, t0 = performance.now();   // 用户指定：延长到 4s，罩住资源加载
-  var hideTimer = null, removed = false;
-  function hide(immediate) {
-    if (removed) return;
-    /* 用可取消的定时器：点击（immediate=true）时把"等最短展示"的 pending 定时器清掉，
-       立刻淡出 —— 否则点了也没用（实测抓到过这个）。 */
-    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
-    var wait = immediate === true ? 0 : Math.max(0, MIN - (performance.now() - t0));
-    hideTimer = setTimeout(function () {
-      hideTimer = null;
-      el.classList.add('mes-load--hide');
-      setTimeout(function () { removed = true; if (el.parentNode) el.parentNode.removeChild(el); }, 350);
-    }, wait);
-  }
-  window.addEventListener('load', function () { hide(false); });
-  el.addEventListener('click', function () { hide(true); });   // 点击 = 立即跳过
-  setTimeout(function () { hide(false); }, 10000);   // 兜底：无论如何 10 秒内必须让开
-})();
-</script>
+    <section class="section more-section" aria-labelledby="moreTitle">
+      <div class="section-head"><div><span class="section-kicker">MORE</span><h2 id="moreTitle">其他功能</h2></div></div>
+      <nav class="more-links" aria-label="其他功能">
+        <a href="index.html#member">成员名录 <span aria-hidden="true">↗</span></a>
+        <a href="index.html#nec">NEC 任务 <span aria-hidden="true">↗</span></a>
+        <a href="index.html#res">资源档案 <span aria-hidden="true">↗</span></a>
+        <a href="index.html#design">排版工具 <span aria-hidden="true">↗</span></a>
+        <a href="index.html#ledger">历史 MAT 台账 <span aria-hidden="true">↗</span></a>
+        <a href="join.html">历史招募归档 <span aria-hidden="true">↗</span></a>
+      </nav>
+    </section>
+  </main>
+  <footer class="site-footer"><div class="container footer-inner"><span>© 常州工 NEC · 416MES</span><span>作业受控 · 数据可追溯 · 云端同步须独立验证</span></div></footer>
 </body>
 </html>

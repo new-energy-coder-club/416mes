@@ -1,6 +1,6 @@
 # 416MES ITM 运行时与恢复契约
 
-> 当前基线：v3.13.41 / 2026-10-08
+> 当前基线：v3.13.42 / 2026-10-08
 > 本文说明当前真实运行模式、持久化、同步、身份与失败恢复边界。
 
 ## 1. 推荐运行方式
@@ -204,6 +204,6 @@ locations.parentContainer = CTN
 - `verifyLegacy` 只保留为历史兼容/replay 分支，已从新建作业 UI 下线；v3.13.41 同时补齐新子位模型的 replay 兼容，正常新业务统一走 `receive`。
 - 默认 `feishu-trial` 在未配置 token 时仍不是强身份认证；多人生产化应另行推进 OAuth/session/RBAC。
 - GitHub Actions 已在 Vercel build/deploy 前执行 `npm test` 和 Chromium browser 回归；测试红灯会阻断生产部署。
-- Browser 回归当前 7/7 全绿；源码卫生测试还锁住 Git 冲突标记、门户死链和同步表数硬编码。
+- v3.13.42 Browser 回归当前 11/11 全绿；增加根入口/门户/只读搜索深链测试；源码卫生测试锁住 Git 冲突标记、门户死链和同步表数硬编码。
 
 v3.13.41 的当前结论与完整验证状态见 `CURRENT_STATUS.md`。

@@ -6,7 +6,7 @@ const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
 const SOURCE_DIRS = ['lib', 'api', 'scripts'];
-const ROOT_SOURCE = ['index.html', 'home.html', 'join.html', 'mes-core.js', 'feishu-server.mjs', 'feishu-sync.mjs', 'feishu-import.mjs', 'nec-sync.mjs', 'xianyu-sync.mjs'];
+const ROOT_SOURCE = ['index.html', 'home.html', 'home.js', 'join.html', 'mes-core.js', 'feishu-server.mjs', 'feishu-sync.mjs', 'feishu-import.mjs', 'nec-sync.mjs', 'xianyu-sync.mjs'];
 const SOURCE_EXT = new Set(['.js', '.mjs', '.html']);
 
 function walk(dir, out = []) {
