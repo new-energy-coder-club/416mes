@@ -1013,6 +1013,38 @@ test('阶段0·seq 并发【核心】8 个并发写入的流水号必须互不�
   assert.deepEqual(seqs, [8, 9, 10, 11, 12, 13, 14, 15], '必须接在 #000007 之后连续分配');
 });
 
+test('阶段0·seq 并发【独立物料】不同客户端修改不同物料，也不能共享同一个流水号', async (t) => {
+  const mock = await startStockMock({ qty: 15 });
+  mock.tables.tblMAT.rows.push({ '物料码': 'B-1', '名称': '测量尺', '库存数量': 20 });
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  const rs = await Promise.all([
+    lib.writeStock({ matCode: 'A-1', delta: -2, opId: 'independent-A' }),
+    lib.writeStock({ matCode: 'B-1', delta: -3, opId: 'independent-B' })
+  ]);
+  assert.ok(rs.every(r => r.ok), JSON.stringify(rs));
+  assert.deepEqual(mock.tables.tblTXN.rows.map(r => r['流水号']).sort(), ['#000001', '#000002']);
+  assert.equal(mock.tables.tblMAT.rows.find(r => r['物料码'] === 'A-1')['库存数量'], 13);
+  assert.equal(mock.tables.tblMAT.rows.find(r => r['物料码'] === 'B-1')['库存数量'], 17);
+});
+
+test('阶段0·seq 锁异常恢复：首条创建失败后必须释放队列，下一条可成功', async (t) => {
+  const mock = await startStockMock();
+  t.after(() => { mock.server.close(); cleanupEnv(); });
+  const lib = loadLib(mock.port);
+  mock.calls.denyOn = 'batch_create';
+  const failed = await lib.writeStock({ matCode: 'A-1', delta: -1, opId: 'seq-fail' });
+  assert.equal(failed.ok, false);
+  mock.calls.denyOn = null;
+  const passed = await Promise.race([
+    lib.writeStock({ matCode: 'A-1', delta: -2, opId: 'seq-after-fail' }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('流水号队列死锁')), 3500))
+  ]);
+  assert.equal(passed.ok, true, JSON.stringify(passed));
+  assert.deepEqual(mock.tables.tblTXN.rows.map(r => r['流水号']), ['#000001']);
+  assert.equal(mock.tables.tblMAT.rows[0]['库存数量'], 8);
+});
+
 test('阶段0·mock 自检：延迟注入确实能造出读写交错（否则并发测试全是假的）', async (t) => {
   const slow = await startStockMock({ delayOpts: { delay: (r) => (r.action === 'batch_create' ? 30 : 0) } });
   t.after(() => { slow.server.close(); cleanupEnv(); });
