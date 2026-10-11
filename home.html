@@ -125,9 +125,23 @@
         var chip = document.getElementById("feishuUser");
         if (chip) {
           chip.hidden = false;
-          chip.innerHTML = (user.avatar_url ? '<img src="' + user.avatar_url + '" alt="" referrerpolicy="no-referrer">' : "")
-            + "<span>" + user.name + "</span>";
-          chip.title = "飞书已登录：" + user.name;
+          chip.textContent = "";
+          var name = user && user.name != null ? String(user.name) : "";
+          if (user && user.avatar_url) {
+            var url = String(user.avatar_url);
+            // 仅允许 http(s) 链接，避免 javascript: 等危险协议
+            if (/^https?:\/\//i.test(url)) {
+              var img = document.createElement("img");
+              img.src = url;
+              img.alt = "";
+              img.referrerPolicy = "no-referrer";
+              chip.appendChild(img);
+            }
+          }
+          var span = document.createElement("span");
+          span.textContent = name;
+          chip.appendChild(span);
+          chip.title = "飞书已登录：" + name;
         }
       },
       onError(err) { console.warn("飞书免登失败（不影响本地功能）：", err && err.message); }
