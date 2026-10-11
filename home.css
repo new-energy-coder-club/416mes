@@ -176,3 +176,7 @@ button{cursor:pointer}
 @media(prefers-reduced-motion:reduce){
  *,*::before,*::after{scroll-behavior:auto!important;transition-duration:0s!important;animation-duration:0s!important}
 }
+
+/* 飞书免登用户徽章 */
+.header-user{display:inline-flex;align-items:center;gap:.4rem;font-size:.85rem;color:#fff;background:rgba(255,255,255,.14);padding:.25rem .65rem;border-radius:999px;white-space:nowrap}
+.header-user img{width:20px;height:20px;border-radius:50%;display:block}
