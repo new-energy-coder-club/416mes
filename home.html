@@ -8,7 +8,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/svg+xml" href="icon.svg">
   <link rel="apple-touch-icon" href="icon.svg">
-  <link rel="stylesheet" href="home.css?v=3.13.42">
+  <link rel="stylesheet" href="home.css?v=3.13.43">
   <script defer src="home.js?v=3.13.42"></script>
   <title>仓库工作台 · 416MES</title>
 </head>
@@ -23,6 +23,7 @@
       <nav class="header-links" aria-label="顶部导航">
         <a href="index.html#sync" class="header-sync"><span class="sync-dot" aria-hidden="true"></span><span>同步状态</span></a>
         <a href="index.html#items" class="header-enter">完整工作台 <span aria-hidden="true">↗</span></a>
+        <span class="header-user" id="feishuUser" hidden></span>
       </nav>
     </div>
   </header>
@@ -113,5 +114,24 @@
     </section>
   </main>
   <footer class="site-footer"><div class="container footer-inner"><span>© 常州工 NEC · 416MES</span><span>作业受控 · 数据可追溯 · 云端同步须独立验证</span></div></footer>
+  <script src="feishu-sso.js?v=3.13.43"></script>
+  <script>
+    // 飞书免登：飞书工作台内打开自动识别成员身份；浏览器打开不受影响
+    FeishuSSO.init({
+      appId: "cli_aa43618bfb7adbee",
+      authEndpoint: "https://hub.newenergycoder.club/auth/feishu",
+      onLogin(user) {
+        window.NEC_CURRENT_USER = user; // 供工单/出入库/审计记录取操作人
+        var chip = document.getElementById("feishuUser");
+        if (chip) {
+          chip.hidden = false;
+          chip.innerHTML = (user.avatar_url ? '<img src="' + user.avatar_url + '" alt="" referrerpolicy="no-referrer">' : "")
+            + "<span>" + user.name + "</span>";
+          chip.title = "飞书已登录：" + user.name;
+        }
+      },
+      onError(err) { console.warn("飞书免登失败（不影响本地功能）：", err && err.message); }
+    });
+  </script>
 </body>
 </html>
