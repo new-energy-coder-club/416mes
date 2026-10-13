@@ -145,9 +145,26 @@ body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:var(--bg)
 :focus-visible{outline:3px solid var(--cyan-ink);outline-offset:2px;}
 header{background:linear-gradient(100deg,#0E1A55 0%,#172A88 65%,#00B0F0 170%);color:#fff;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:3px solid #00B0F0;}
 header .nec-logo{height:26px;width:auto;}
+header .hdr-title{display:flex;flex-direction:column;gap:1px;min-width:0;}
 header h1{font-size:20px;letter-spacing:1px;}
-header .sub{font-size:12px;color:#9fb2cf;}
+header h1 span{font-weight:400;font-size:16px;opacity:.82;letter-spacing:2px;}
 header .slogan{font-size:11px;color:#00B0F0;letter-spacing:2px;font-weight:bold;}
+/* 头部标签体系：左组特性 tag（青底）回答「能做什么」，右组描边 tag 回答「怎么约束我」 */
+.hdr-tags{display:flex;align-items:center;gap:6px;flex:none;}
+.hdr-tag{font-size:11px;line-height:1;padding:4px 9px;border:1px solid rgba(255,255,255,.38);border-radius:999px;color:#EAF0FB;white-space:nowrap;}
+.hdr-tag--feat{background:rgba(0,176,240,.13);border-color:rgba(0,176,240,.42);color:#8FDCF8;}
+.hdr-tag--offline{border-style:dashed;color:#C3D2EA;}
+/* 飞书状态徽标：JS（fsStatusHint）只改文字与 sub--ok/sub--warn 状态类，状态圆点由 ::before 画 */
+header .sub{display:inline-flex;align-items:center;gap:6px;margin-left:auto;font-size:11px;line-height:1;
+  padding:5px 10px;border:1px solid rgba(255,255,255,.38);border-radius:999px;color:#C3D2EA;white-space:nowrap;flex:none;}
+header .sub::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex:none;}
+header .sub.sub--ok{color:#7be3a8;border-color:rgba(123,227,168,.55);}
+header .sub.sub--warn{color:#e8a87c;border-color:rgba(232,168,124,.55);}
+@media screen and (max-width:760px){
+  header{flex-wrap:wrap;row-gap:6px;}
+  .hdr-tags{display:none;}   /* 窄屏让位给标题与状态；特性/约束说明在流程图与各页 hint 里仍有 */
+  .hdr-operator{margin-left:auto;}
+}
 nav.tabs{display:flex;background:#fff;border-bottom:1px solid var(--line);padding:0 12px;overflow-x:auto;scrollbar-width:thin;}
 nav.tabs button{border:none;background:none;padding:12px 18px;font-size:14px;cursor:pointer;border-bottom:3px solid transparent;color:#555;white-space:nowrap;flex:none;}
 nav.tabs button.on{border-bottom-color:var(--blue);color:var(--blue);font-weight:bold;}
@@ -214,7 +231,7 @@ nav.tabs a.tab-link:hover{color:var(--blue);border-bottom-color:#bcd4f6;}
 main{padding:16px 20px;max-width:1280px;margin:0 auto;}
 section.tab{display:none;}
 section.tab.on{display:block;}
-.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-xl);
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);
   box-shadow:var(--shadow-1);padding:18px;margin-bottom:16px;}
 @media screen and (max-width:767px){ .panel{padding:14px;border-radius:var(--r-lg);} }
 /* 阶段15（§4.5）：h2 左侧青竖条，形成全站统一的「图纸分区」节奏。
@@ -285,6 +302,11 @@ section.tab.on{display:block;}
   .btn.danger:not(:disabled):hover{filter:brightness(1.07);transform:translateY(-1px);
     box-shadow:0 6px 16px rgba(169,35,35,.34),inset 0 1px 0 rgba(255,255,255,.20),inset 0 -2px 0 rgba(0,0,0,.25);}
 }
+/* 引导卡步骤跳转 = 文字链 + 滑动箭头（比 ghost 按钮再轻一档；全卡唯一主键是「开始用」） */
+.onboard-link{display:inline-flex;align-items:center;gap:3px;min-height:32px;padding:2px 0;background:none;border:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;color:var(--color-primary);}
+.onboard-link:hover{color:var(--primary-hover);}
+.onboard-link>svg{width:13px;height:13px;flex:none;transition:transform .15s var(--ease-out);}
+.onboard-link:hover>svg{transform:translateX(2px);}
 /* small：桌面 32px；手机由 06 RESPONSIVE 提到 44px（既有规则保留） */
 .btn.small{min-height:32px;padding:0 12px;font-size:13px;font-weight:600;border-radius:var(--r-sm);}
 /* 全宽工具类（新增，供手机主动作） */
@@ -428,11 +450,17 @@ table.grid input:focus{background:#fff8e6;}   /* 阶段3：移除 outline:none�
 .flow-map__body{padding:12px 14px;display:flex;flex-direction:column;gap:8px}
 .flow-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12.5px}
 .flow-row--aside{padding-top:6px;border-top:1px dashed var(--line)}
-.flow-node{display:inline-block;padding:2px 9px;border:1px solid var(--line);
-  border-radius:var(--r-sm);background:var(--surface);color:var(--ink-strong)}
+.flow-node{display:inline-block;padding:3px 10px;border:1px solid var(--line);
+  border-radius:var(--r-sm);background:var(--surface);color:var(--ink-strong);
+  transition:background .15s ease,border-color .15s ease,color .15s ease;}
+@media screen and (hover:hover){
+  .flow-node--jump:hover{border-color:var(--color-primary);color:var(--primary-hover);background:var(--primary-050);}
+}
 .flow-node--confirm{border-color:var(--doing-fg);background:var(--doing-bg);color:var(--doing-fg);font-weight:600}
-.flow-arrow{color:var(--text-muted)}
-.flow-label{color:var(--text-muted);font-size:12px}
+/* 箭头用内联 SVG 图标替代文本字符 →，间距/对齐由 flex 保证 */
+.flow-arrow{display:inline-flex;align-items:center;flex:none;color:var(--text-muted);}
+.flow-arrow>svg{width:13px;height:13px;display:block;}
+.flow-label{color:var(--text-muted);font-size:12px;flex:none;}
 /* ============================================================
    04 COMPONENTS（阶段10）：当前对象条 ctx-bar + 状态区 status-bar
    ctx-bar 承载「跨页上下文」：当前物料 / 当前工单 / 返回来源。
@@ -870,7 +898,7 @@ body.stocktake-on .stocktake-banner{display:block}
    一旦改成 inline-flex 会丢掉 list-item 的展开三角并把宽度塌掉 */
 .hint-line{cursor:pointer;font-size:13px;color:#445}
 .panel-flush{margin:0;padding:8px}
-.hdr-operator{margin-left:auto;font-size:13px}
+.hdr-operator{margin-left:10px;font-size:13px;flex:none;}
 .link-inline{color:var(--blue)}
 .text-danger{color:var(--danger-fg)}
 /* 阶段15（§4.5）：提示条 .notice —— 3px 左条 + 浅底 + 图标，四变体。
@@ -1341,6 +1369,7 @@ footer{padding:10px 20px;font-size:12px;color:var(--text-muted);text-align:cente
   .btn{min-height:46px;}
   .btn.small{min-height:44px;}   /* 手机触达面只升不降：46/44 拉开层级 */
   .btn.small{min-height:44px;}
+  .onboard-link{min-height:44px;}   /* 引导卡文字链同享 44px 触控面 */
   #btnExec,#btnPrint,#btnStocktakeEnd,#btnGenWip{min-height:48px;}
   /* 定位卡的动作按钮是主动作：必须压过上面的 .btn.small(34px)。
      同优先级下后定义者胜，这里用 .btn.small 再提一级到 (0,3,0) 以确保生效。 */
@@ -3017,18 +3046,20 @@ body:has(#tab-item-work.on) .itm-batch-sticky.batch-on{display:flex}
     <div class="mes-load__cap">416MES · 加载中</div>
   </div>
 </div>
-<header><img class="nec-logo" id="hdrLogo" alt="NEC"><div><div class="slogan">BUILT TO DAWN · KEEP BUILDING&#9608;</div><h1>416MES 仓储管理系统</h1></div><span class="sub">七类标签 · Excel 台账 · 扫码工作台（查询只读 / 执行需确认）（单机离线版）</span><span class="queue-chip visually-hidden" id="fsQueueChip" title="离线期间的库存变动，联网后自动冲刷到飞书"></span><span class="hdr-operator">操作人 <select class="field--xs" id="selOperator"></select></span></header>
+<header><img class="nec-logo" id="hdrLogo" alt="NEC"><div class="hdr-title"><div class="slogan">BUILT TO DAWN · KEEP BUILDING&#9608;</div><h1>416MES <span>仓储管理系统</span></h1></div><span class="hdr-tags"><span class="hdr-tag hdr-tag--feat">七类标签</span><span class="hdr-tag hdr-tag--feat">Excel 台账</span><span class="hdr-tag hdr-tag--feat">扫码工作台</span></span><span class="sub">正在连接飞书…</span><span class="hdr-tags"><span class="hdr-tag">查询只读</span><span class="hdr-tag">执行需确认</span><span class="hdr-tag hdr-tag--offline">单机离线版</span></span><span class="queue-chip visually-hidden" id="fsQueueChip" title="离线期间的库存变动，联网后自动冲刷到飞书"></span><span class="hdr-operator">操作人 <select class="field--xs" id="selOperator"></select></span></header>
 <nav class="tabs" id="mainTabs">
-  <div class="nav-group">现场作业</div>
-  <button data-tab="items" class="on" data-primary="1" data-label="库位/容器/物品查询" data-short="查询">库位/容器/物品查询</button><button data-tab="item-work" data-primary="1" data-label="ITM作业" data-short="作业">ITM作业</button><button data-tab="register" data-primary="1" data-label="建档管理" data-short="建档">建档管理</button>
-  <button data-tab="scan" data-primary="1" data-label="扫码工作台" data-short="扫码">扫码工作台</button>
-  <button data-tab="wip" data-primary="1" data-label="库存工单（WIP）" data-short="工单">库存工单（WIP）</button>
-  <button data-tab="oplog" data-label="操作记录" data-short="记录">操作记录</button>
-  <div class="nav-group">台账与建档</div>
-  <button data-tab="ledger" data-label="物料台账·历史" data-short="台账">物料台账·历史</button>
-  <button data-tab="txn" data-label="库存流水" data-short="流水">库存流水</button>
+  <div class="nav-group">基础台账</div>
+  <button data-tab="register" data-primary="1" data-label="建档管理" data-short="建档">建档管理</button>
   <button data-tab="res" data-label="资源档案" data-short="档案">资源档案</button>
   <button data-tab="member">成员名录</button>
+  <div class="nav-group">现场作业</div>
+  <button data-tab="scan" data-primary="1" data-label="扫码工作台" data-short="扫码">扫码工作台</button>
+  <button data-tab="items" class="on" data-primary="1" data-label="库位/容器/物品查询" data-short="查询">库位/容器/物品查询</button><button data-tab="item-work" data-primary="1" data-label="ITM作业" data-short="作业">ITM作业</button>
+  <button data-tab="wip" data-primary="1" data-label="库存工单（WIP）" data-short="工单">库存工单（WIP）</button>
+  <div class="nav-group">数据与流水</div>
+  <button data-tab="txn" data-label="库存流水" data-short="流水">库存流水</button>
+  <button data-tab="ledger" data-label="物料台账·历史" data-short="台账">物料台账·历史</button>
+  <button data-tab="oplog" data-label="操作记录" data-short="记录">操作记录</button>
   <div class="nav-group">标签与制作</div>
   <button data-tab="label" data-label="标签打印" data-short="标签">标签打印</button>
   <button data-tab="design">排版工具</button>
@@ -3858,7 +3889,7 @@ parse_Primary(n.content)}catch(l){}a="/EncryptionInfo";n=Qe.find(e,a);if(!n||!n.
 'use strict';
 
 /* 应用版本：改到用户看得见的行为时手动 +1，页脚会显示，方便确认线上跑的是哪一版 */
-const APP_VERSION = '3.13.45';   // 业务按钮专项审查：手动草稿独立快照
+const APP_VERSION = '3.13.47';   // UI 打磨二轮：标题分层/特性tag/飞书状态徽标、导航三段式重组、引导卡文字链
 
 /* ---------- 标签类型配置 ---------- */
 const TYPES = {
@@ -5015,7 +5046,7 @@ function renderFlowMap() {
     const div = document.createElement('div'); div.className = 'flow-row';
     const lab = document.createElement('span'); lab.className = 'flow-label'; lab.textContent = row.label + '：'; div.appendChild(lab);
     row.nodes.forEach((n, i) => {
-      if (i) { const ar = document.createElement('span'); ar.className = 'flow-arrow'; ar.textContent = '→'; div.appendChild(ar); }
+      if (i) { const ar = document.createElement('span'); ar.className = 'flow-arrow'; ar.setAttribute('aria-hidden', 'true'); ar.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8h10M9.5 4.5 13 8l-3.5 3.5"/></svg>'; div.appendChild(ar); }
       const sp = document.createElement('span'); sp.className = 'flow-node'; sp.textContent = n.t;
       const isHere = n.tab && n.tab === cur;
       if (isHere) sp.classList.add('flow-node--here');
@@ -10122,8 +10153,7 @@ function refreshStatusHint() {
 }
 function fsStatusHint(msg, ok) {
   const el = document.querySelector('header .sub');
-  if (el) el.textContent = el.textContent.replace(/（.*）/, '') + '（' + (ok ? '🟢 ' : '⚪ ') + msg + '）';
-  if (el) el.style.color = ok ? '#7be3a8' : '#e8a87c';
+  if (el) { el.textContent = msg; el.classList.toggle('sub--ok', !!ok); el.classList.toggle('sub--warn', !ok); }
   fsQueueChip();   // 顶部离线队列入口：有待冲刷记录时常驻显示条数
   renderStatusDockSum();
   renderSettleBox();
@@ -13684,15 +13714,16 @@ function showOnboarding() {
   const box = document.createElement('div');
   box.className = 'panel';
   box.style.cssText = 'border-left:5px solid var(--color-primary,#1658d6);background:var(--surface-2,#f4f7fd);margin:12px 20px 0';
+  /* 步骤跳转键 = 文字链（最轻量级），唯一主键留给「知道了，开始用」——单一主要动作 */
   box.innerHTML = '<b>👋 第一次使用？按这个顺序走一遍</b>' +
     '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 4px">' +
     steps.map(s => '<div style="flex:1 1 200px;min-width:190px;padding:10px 12px;border:1px solid var(--line,#dde3ec);border-radius:8px;background:var(--surface,#fff)">' +
       '<div style="font-size:18px;font-weight:700">' + s.n + ' ' + s.t + '</div>' +
       '<p class="hint" style="margin:4px 0 8px">' + s.d + '</p>' +
-      '<button class="btn small" data-onboard-go="' + s.go + '">去「' + s.t + '」</button></div>').join('') +
+      '<button class="onboard-link" data-onboard-go="' + s.go + '">去「' + s.t + '」<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5 10.5 8 6 12.5"/></svg></button></div>').join('') +
     '</div>' +
     '<p class="hint" style="margin:4px 0">随时想找东西：去「查询」页直接输<b>名称</b>（如「内六角」）就能查，结果卡上会直接告诉你在哪个容器/库位。不知道码也能查。</p>' +
-    '<div class="toolbar"><button class="btn small ghost" id="btnOnboardClose">知道了，开始用</button></div>';
+    '<div class="toolbar"><button class="btn small" id="btnOnboardClose">知道了，开始用</button></div>';
   const main = document.querySelector('main');
   if (!main || !main.firstChild) return;
   main.insertBefore(box, main.firstChild);
