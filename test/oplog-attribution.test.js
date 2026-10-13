@@ -90,14 +90,15 @@ test('A6 device 不进域层判定（补它是安全的）', () => {
 
 /* ============ 三、操作记录页 ============ */
 
-test('P1 导航里有「操作记录」页签，且在现场作业组内', () => {
+test('P1 导航里有「操作记录」页签，且在数据与流水组内', () => {
   assert.match(HTML, /<button data-tab="oplog"[^>]*>操作记录<\/button>/, '必须有 oplog 页签');
   const nav = HTML.slice(HTML.indexOf('<nav class="tabs"'), HTML.indexOf('</nav>'));
-  const iField = nav.indexOf('现场作业');
+  const iGroup = nav.indexOf('数据与流水');
   const iOplog = nav.indexOf('data-tab="oplog"');
-  const iNextGroup = nav.indexOf('nav-group', iField + 4);
-  assert.ok(iOplog > iField, 'oplog 必须在「现场作业」组标签之后');
-  assert.ok(iNextGroup < 0 || iOplog < iNextGroup, 'oplog 必须在下一个分组之前（即属于现场作业组）');
+  const iNextGroup = nav.indexOf('nav-group', iGroup + 4);
+  assert.ok(iGroup >= 0, '必须有「数据与流水」分组（v3.13.47 导航 IA 重组）');
+  assert.ok(iOplog > iGroup, 'oplog 必须在「数据与流水」组标签之后');
+  assert.ok(iNextGroup < 0 || iOplog < iNextGroup, 'oplog 必须在下一个分组之前（即属于数据与流水组）');
 });
 
 test('P2 页面有用途行 + 库存影响徽标（与其余 10 页签一致）', () => {
