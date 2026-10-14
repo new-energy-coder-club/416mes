@@ -11,6 +11,16 @@
   <link rel="stylesheet" href="home.css?v=3.13.43">
   <script defer src="home.js?v=3.13.42"></script>
   <title>仓库工作台 · 416MES</title>
+  <script>
+  /* 门户页不支持工作台页签 hash：把 #label/#scan 等深链转发到主应用（index.html），保留查询参数。
+     锚点 #main（无障碍跳转）与 #top 除外；不影响门户自身功能。 */
+  (function () {
+    var h = location.hash;
+    if (h && h.length > 1 && h !== '#main' && h !== '#top') {
+      location.replace('index.html' + h + location.search);
+    }
+  })();
+  </script>
 </head>
 <body>
   <a class="skip-link" href="#main">跳到主要内容</a>
