@@ -17,7 +17,9 @@ for (const src of localScripts) {
   const file = src.split('?v=')[0];
   const p = path.join(ROOT, file);
   if (!fs.existsSync(p)) { console.error('✗ script 指向不存在的文件：' + src); process.exit(1); }
-  hashes[src] = crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+  /* 归一化换行再哈希：Windows 检出 CRLF、CI 检出 LF，两者必须算出一致的基线 */
+  const norm = fs.readFileSync(p).toString('utf8').replace(/\r/g, '');
+  hashes[src] = crypto.createHash('sha256').update(norm).digest('hex');
 }
 const out = { APP_VERSION: ver, generatedAt: new Date().toISOString(), hashes };
 const target = path.join(ROOT, 'test', 'fixtures', 'lib-hash-manifest.json');

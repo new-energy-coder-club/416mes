@@ -11,7 +11,11 @@ function appVersionOf(html) { const m = html.match(/const APP_VERSION = '([^']+)
 function localScriptsOf(html) {
   return [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map(m => m[1]).filter(src => !/^(https?:)?\/\//.test(src));
 }
-function sha256Of(relFile) { return crypto.createHash('sha256').update(fs.readFileSync(path.join(REPO, relFile))).digest('hex'); }
+function sha256Of(relFile) {
+  /* 与 scripts/lib-hash-manifest.mjs 同一口径：换行归一化后哈希（Windows CRLF / CI LF 一致） */
+  const s = fs.readFileSync(path.join(REPO, relFile)).toString('utf8').replace(/\r/g, '');
+  return crypto.createHash('sha256').update(s).digest('hex');
+}
 
 test('缓存守卫 R1+R2：基线清单存在，且与当前 APP_VERSION 同版', () => {
   assert.ok(fs.existsSync(MANIFEST_PATH),
